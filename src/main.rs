@@ -1,6 +1,9 @@
 use anyhow::Result;
 
+mod app;
 mod tui;
+
+use app::App;
 
 fn install_panic_hook() {
     let default_hook = std::panic::take_hook();
@@ -19,8 +22,9 @@ async fn main() -> Result<()> {
     install_panic_hook();
 
     let mut terminal = tui::init()?;
-    terminal.clear()?;
+    let result = App::new().run(&mut terminal).await;
 
     tui::restore()?;
-    Ok(())
+
+    result
 }
