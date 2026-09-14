@@ -6,6 +6,8 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScree
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
+pub mod input;
+
 pub type Backend = CrosstermBackend<Stdout>;
 
 pub fn init() -> Result<Terminal<Backend>> {
