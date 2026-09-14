@@ -15,14 +15,15 @@ use tokio::sync::{mpsc, oneshot};
 use crate::connection::client::TermConnectHandler;
 use crate::connection::{self, ConnectionEntry};
 use crate::filesystem::{self, Entry};
+use crate::terminal;
 use crate::transfer::{self, Direction, JobStatus, TransferOutcome, TransferQueue};
 use crate::tui::input::{self, Action};
 use crate::tui::panels::{self, ActivePanel, PanelState};
 use crate::tui::widgets::connections_list;
 use crate::tui::widgets::dialog::{ConfirmDialog, Dialog, DialogOutcome, TextInputDialog};
-use crate::tui::{Backend, layout};
+use crate::tui::{self, Backend, layout};
 
-const HINT_TEXT: &str = "\u{2191}\u{2193} Navigate  Enter Open  Tab Switch  Space Select  F2 Rename  F5 Copy  F7 Mkdir  F8 Delete  Ctrl+R Refresh  Ctrl+C Cancel  F9 Connections  F10 Quit";
+const HINT_TEXT: &str = "\u{2191}\u{2193} Navigate  Enter Open  Tab Switch  Space Select  F2 Rename  F4 Terminal  F5 Copy  F7 Mkdir  F8 Delete  Ctrl+R Refresh  Ctrl+C Cancel  F9 Connections  F10 Quit";
 
 /// The file operation a dialog is currently collecting input/confirmation for.
 enum PendingAction {
@@ -52,7 +53,7 @@ enum ConnectionStatus {
 /// TUI never blocks on network I/O.
 enum ConnectEvent {
     Connected {
-        name: String,
+        entry: ConnectionEntry,
         handle: russh::client::Handle<TermConnectHandler>,
         sftp: SftpSession,
     },
@@ -95,6 +96,7 @@ pub struct App {
     connections_cursor: usize,
     connection_status: ConnectionStatus,
     connection_handle: Option<russh::client::Handle<TermConnectHandler>>,
+    active_connection: Option<ConnectionEntry>,
     sftp: Option<Arc<SftpSession>>,
     connect_tx: mpsc::UnboundedSender<ConnectEvent>,
     connect_rx: mpsc::UnboundedReceiver<ConnectEvent>,
@@ -130,6 +132,7 @@ impl App {
             connections_cursor: 0,
             connection_status: ConnectionStatus::Disconnected,
             connection_handle: None,
+            active_connection: None,
             sftp: None,
             connect_tx,
             connect_rx,
@@ -157,7 +160,17 @@ impl App {
                         if self.dialog.is_some() {
                             self.apply_dialog_key(key);
                         } else {
-                            self.apply_action(input::map_key(key));
+                            let action = input::map_key(key);
+                            if action == Action::OpenTerminal {
+                                self.launch_ssh_terminal(terminal).await?;
+                                // The alternate screen and raw mode were
+                                // left and re-entered around `ssh`; a
+                                // fresh EventStream avoids relying on the
+                                // old one's internal state surviving that.
+                                events = EventStream::new();
+                            } else {
+                                self.apply_action(action);
+                            }
                         }
                     }
                 }
@@ -304,6 +317,9 @@ impl App {
             Action::Up | Action::Down | Action::ToggleSelect | Action::Open | Action::Refresh => {
                 self.apply_screen_action(action);
             }
+            // Handled specially in `run`, which has the `&mut Terminal`
+            // this needs to suspend/resume the TUI around `ssh`.
+            Action::OpenTerminal => {}
             Action::Noop => {}
         }
     }
@@ -386,6 +402,48 @@ impl App {
         }
     }
 
+    /// Hands the terminal over to the system `ssh` client, per the
+    /// roadmap's Terminal Lifecycle: leave the alternate screen, let `ssh`
+    /// take stdin/stdout/stderr, wait for it to exit, then reinitialize the
+    /// TUI. Nothing else in the event loop runs while `ssh` has the
+    /// terminal, by design — that's the whole point of the handover.
+    async fn launch_ssh_terminal(
+        &mut self,
+        terminal: &mut ratatui::Terminal<Backend>,
+    ) -> Result<()> {
+        let Some(entry) = self.active_connection.clone() else {
+            self.status = Some("Connect to a server first".to_string());
+            return Ok(());
+        };
+
+        tui::restore()?;
+
+        let ssh_result = tokio::task::spawn_blocking(move || terminal::ssh::run(&entry)).await;
+
+        // `tui::init` builds a brand-new `Terminal` with an empty internal
+        // buffer, so the next `draw` repaints everything on its own —
+        // deliberately not calling `.clear()` here, since it queries the
+        // cursor position via a DSR escape sequence that some terminals
+        // (or terminals mid-handover right after `ssh` exits) may not
+        // answer in time, which would turn a cosmetic no-op into a crash.
+        *terminal = tui::init()?;
+
+        match ssh_result {
+            Ok(Ok(status)) if !status.success() => {
+                self.status = Some(format!("ssh exited with status {status}"));
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(io_err)) => {
+                self.status = Some(format!("Failed to launch ssh: {io_err}"));
+            }
+            Err(join_err) => {
+                self.status = Some(format!("ssh task failed: {join_err}"));
+            }
+        }
+
+        Ok(())
+    }
+
     fn open_connections_screen(&mut self) {
         self.screen = Screen::Connections;
 
@@ -411,6 +469,7 @@ impl App {
             self.connection_handle = None;
             self.sftp = None;
             self.remote = None;
+            self.active_connection = None;
             self.connection_status = ConnectionStatus::Disconnected;
             return;
         }
@@ -422,10 +481,15 @@ impl App {
 
     fn apply_connect_event(&mut self, event: ConnectEvent) {
         match event {
-            ConnectEvent::Connected { name, handle, sftp } => {
+            ConnectEvent::Connected {
+                entry,
+                handle,
+                sftp,
+            } => {
                 self.connection_handle = Some(handle);
                 self.sftp = Some(Arc::new(sftp));
-                self.connection_status = ConnectionStatus::Connected(name);
+                self.connection_status = ConnectionStatus::Connected(entry.name.clone());
+                self.active_connection = Some(entry);
                 self.status = None;
                 self.spawn_initial_remote_listing();
             }
@@ -888,7 +952,7 @@ async fn run_connect(entry: ConnectionEntry, tx: mpsc::UnboundedSender<ConnectEv
 
     match connection::client::authenticate_non_interactive(&mut handle, &entry).await {
         Ok(true) => {
-            finish_connect(entry.name, handle, &tx).await;
+            finish_connect(entry, handle, &tx).await;
             return;
         }
         Ok(false) => {}
@@ -918,7 +982,7 @@ async fn run_connect(entry: ConnectionEntry, tx: mpsc::UnboundedSender<ConnectEv
     };
 
     match connection::client::authenticate_password(&mut handle, &entry.username, &password).await {
-        Ok(true) => finish_connect(entry.name, handle, &tx).await,
+        Ok(true) => finish_connect(entry, handle, &tx).await,
         Ok(false) => {
             let _ = tx.send(ConnectEvent::Failed {
                 message: format!("Authentication failed for {}", entry.name),
@@ -935,13 +999,17 @@ async fn run_connect(entry: ConnectionEntry, tx: mpsc::UnboundedSender<ConnectEv
 /// Opens the SFTP subsystem on a freshly-authenticated session and reports
 /// the finished connection, or a failure if SFTP itself couldn't start.
 async fn finish_connect(
-    name: String,
+    entry: ConnectionEntry,
     handle: russh::client::Handle<TermConnectHandler>,
     tx: &mpsc::UnboundedSender<ConnectEvent>,
 ) {
     match connection::client::open_sftp(&handle).await {
         Ok(sftp) => {
-            let _ = tx.send(ConnectEvent::Connected { name, handle, sftp });
+            let _ = tx.send(ConnectEvent::Connected {
+                entry,
+                handle,
+                sftp,
+            });
         }
         Err(err) => {
             let _ = tx.send(ConnectEvent::Failed {

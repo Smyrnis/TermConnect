@@ -3,6 +3,7 @@ use anyhow::Result;
 mod app;
 mod connection;
 mod filesystem;
+mod terminal;
 mod transfer;
 mod tui;
 

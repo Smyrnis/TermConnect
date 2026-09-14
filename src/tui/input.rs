@@ -15,6 +15,7 @@ pub enum Action {
     Copy,
     CancelTransfer,
     OpenConnections,
+    OpenTerminal,
     Back,
     Noop,
 }
@@ -28,6 +29,7 @@ pub fn map_key(key: KeyEvent) -> Action {
         KeyCode::Enter => Action::Open,
         KeyCode::Char(' ') => Action::ToggleSelect,
         KeyCode::F(2) => Action::Rename,
+        KeyCode::F(4) => Action::OpenTerminal,
         KeyCode::F(5) => Action::Copy,
         KeyCode::F(7) => Action::Mkdir,
         KeyCode::F(8) => Action::Delete,
@@ -95,6 +97,11 @@ mod tests {
     #[test]
     fn f5_maps_to_copy() {
         assert_eq!(map_key(key(KeyCode::F(5))), Action::Copy);
+    }
+
+    #[test]
+    fn f4_maps_to_open_terminal() {
+        assert_eq!(map_key(key(KeyCode::F(4))), Action::OpenTerminal);
     }
 
     #[test]
