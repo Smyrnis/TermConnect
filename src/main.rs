@@ -1,6 +1,7 @@
 use anyhow::Result;
 
 mod app;
+mod filesystem;
 mod tui;
 
 use app::App;
@@ -22,7 +23,11 @@ async fn main() -> Result<()> {
     install_panic_hook();
 
     let mut terminal = tui::init()?;
-    let result = App::new().run(&mut terminal).await;
+
+    let result = match App::new() {
+        Ok(mut app) => app.run(&mut terminal).await,
+        Err(err) => Err(err),
+    };
 
     tui::restore()?;
 
