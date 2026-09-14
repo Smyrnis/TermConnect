@@ -1,5 +1,5 @@
-use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders};
 
@@ -36,8 +36,8 @@ pub fn render_panel(frame: &mut Frame, area: Rect, title: &str, is_active: bool)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
     #[test]
     fn toggle_switches_between_local_and_remote() {
