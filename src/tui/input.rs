@@ -12,6 +12,8 @@ pub enum Action {
     Mkdir,
     Delete,
     Refresh,
+    Copy,
+    CancelTransfer,
     OpenConnections,
     Back,
     Noop,
@@ -26,11 +28,15 @@ pub fn map_key(key: KeyEvent) -> Action {
         KeyCode::Enter => Action::Open,
         KeyCode::Char(' ') => Action::ToggleSelect,
         KeyCode::F(2) => Action::Rename,
+        KeyCode::F(5) => Action::Copy,
         KeyCode::F(7) => Action::Mkdir,
         KeyCode::F(8) => Action::Delete,
         KeyCode::F(9) => Action::OpenConnections,
         KeyCode::Esc => Action::Back,
         KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => Action::Refresh,
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            Action::CancelTransfer
+        }
         _ => Action::Noop,
     }
 }
@@ -84,6 +90,22 @@ mod tests {
         assert_eq!(map_key(key(KeyCode::F(2))), Action::Rename);
         assert_eq!(map_key(key(KeyCode::F(7))), Action::Mkdir);
         assert_eq!(map_key(key(KeyCode::F(8))), Action::Delete);
+    }
+
+    #[test]
+    fn f5_maps_to_copy() {
+        assert_eq!(map_key(key(KeyCode::F(5))), Action::Copy);
+    }
+
+    #[test]
+    fn ctrl_c_maps_to_cancel_transfer() {
+        assert_eq!(
+            map_key(key_with_modifiers(
+                KeyCode::Char('c'),
+                KeyModifiers::CONTROL
+            )),
+            Action::CancelTransfer
+        );
     }
 
     #[test]

@@ -166,6 +166,26 @@ impl PanelState {
         }
     }
 
+    /// Like `targets`, but returns the full entries (name, size, is_dir)
+    /// rather than just their paths — what a transfer needs to know.
+    pub fn target_entries(&self) -> Vec<Entry> {
+        if !self.selected.is_empty() {
+            return self
+                .rows
+                .iter()
+                .filter_map(|row| match row {
+                    Row::Entry(entry) if self.selected.contains(&entry.path) => Some(entry.clone()),
+                    _ => None,
+                })
+                .collect();
+        }
+
+        match self.rows.get(self.cursor) {
+            Some(Row::Entry(entry)) => vec![entry.clone()],
+            _ => Vec::new(),
+        }
+    }
+
     pub fn create_directory(&mut self, name: &str) -> Result<()> {
         local::create_directory(&self.path.join(name))?;
         self.refresh()
@@ -353,6 +373,40 @@ mod tests {
 
         panel.toggle_selection();
         assert_eq!(panel.selected.len(), 0);
+    }
+
+    #[test]
+    fn target_entries_returns_the_cursor_entry_without_a_selection() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("only.txt"), b"content").unwrap();
+        let mut panel = PanelState::new(dir.path().to_path_buf()).unwrap();
+        panel.cursor = panel.rows().len() - 1;
+
+        let entries = panel.target_entries();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "only.txt");
+    }
+
+    #[test]
+    fn target_entries_returns_all_selected_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("a.txt"), b"content").unwrap();
+        fs::write(dir.path().join("b.txt"), b"content").unwrap();
+        let mut panel = PanelState::new(dir.path().to_path_buf()).unwrap();
+        panel.cursor = 1;
+        panel.toggle_selection();
+        panel.cursor = 2;
+        panel.toggle_selection();
+
+        let mut names: Vec<String> = panel
+            .target_entries()
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect();
+        names.sort();
+
+        assert_eq!(names, vec!["a.txt".to_string(), "b.txt".to_string()]);
     }
 
     #[test]

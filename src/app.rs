@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyEvent, KeyEventKind};
@@ -14,13 +15,14 @@ use tokio::sync::{mpsc, oneshot};
 use crate::connection::client::TermConnectHandler;
 use crate::connection::{self, ConnectionEntry};
 use crate::filesystem::{self, Entry};
+use crate::transfer::{self, Direction, JobStatus, TransferOutcome, TransferQueue};
 use crate::tui::input::{self, Action};
 use crate::tui::panels::{self, ActivePanel, PanelState};
 use crate::tui::widgets::connections_list;
 use crate::tui::widgets::dialog::{ConfirmDialog, Dialog, DialogOutcome, TextInputDialog};
 use crate::tui::{Backend, layout};
 
-const HINT_TEXT: &str = "\u{2191}\u{2193} Navigate  Enter Open  Tab Switch  Space Select  F2 Rename  F7 Mkdir  F8 Delete  Ctrl+R Refresh  F9 Connections  F10 Quit";
+const HINT_TEXT: &str = "\u{2191}\u{2193} Navigate  Enter Open  Tab Switch  Space Select  F2 Rename  F5 Copy  F7 Mkdir  F8 Delete  Ctrl+R Refresh  Ctrl+C Cancel  F9 Connections  F10 Quit";
 
 /// The file operation a dialog is currently collecting input/confirmation for.
 enum PendingAction {
@@ -72,6 +74,13 @@ enum PanelEvent {
     Failed(String),
 }
 
+/// Progress reported by a running file transfer (see `run_transfer`).
+enum TransferEvent {
+    Progress { id: u64, transferred: u64 },
+    Finished { id: u64, outcome: TransferOutcome },
+    Failed { id: u64, message: String },
+}
+
 pub struct App {
     should_quit: bool,
     screen: Screen,
@@ -91,6 +100,10 @@ pub struct App {
     connect_rx: mpsc::UnboundedReceiver<ConnectEvent>,
     panel_tx: mpsc::UnboundedSender<PanelEvent>,
     panel_rx: mpsc::UnboundedReceiver<PanelEvent>,
+    transfers: TransferQueue,
+    active_transfer_cancel: Option<Arc<AtomicBool>>,
+    transfer_tx: mpsc::UnboundedSender<TransferEvent>,
+    transfer_rx: mpsc::UnboundedReceiver<TransferEvent>,
 }
 
 impl App {
@@ -101,6 +114,7 @@ impl App {
     fn at(path: PathBuf) -> Result<Self> {
         let (connect_tx, connect_rx) = mpsc::unbounded_channel();
         let (panel_tx, panel_rx) = mpsc::unbounded_channel();
+        let (transfer_tx, transfer_rx) = mpsc::unbounded_channel();
 
         Ok(Self {
             should_quit: false,
@@ -121,6 +135,10 @@ impl App {
             connect_rx,
             panel_tx,
             panel_rx,
+            transfers: TransferQueue::new(),
+            active_transfer_cancel: None,
+            transfer_tx,
+            transfer_rx,
         })
     }
 
@@ -148,6 +166,9 @@ impl App {
                 }
                 Some(panel_event) = self.panel_rx.recv() => {
                     self.apply_panel_event(panel_event);
+                }
+                Some(transfer_event) = self.transfer_rx.recv() => {
+                    self.apply_transfer_event(transfer_event);
                 }
             }
         }
@@ -241,11 +262,32 @@ impl App {
 
     fn render_status(&self, frame: &mut Frame, area: Rect) {
         let (text, style) = match &self.status {
-            Some(message) => (message.as_str(), Style::default().fg(Color::Red)),
-            None => (HINT_TEXT, Style::default()),
+            Some(message) => (message.clone(), Style::default().fg(Color::Red)),
+            None => match self.transfers.active() {
+                Some(job) => (self.transfer_status_text(job), Style::default()),
+                None => (HINT_TEXT.to_string(), Style::default()),
+            },
         };
 
         frame.render_widget(Paragraph::new(text).style(style), area);
+    }
+
+    fn transfer_status_text(&self, job: &transfer::TransferJob) -> String {
+        let verb = match job.direction {
+            Direction::Upload => "Uploading",
+            Direction::Download => "Downloading",
+        };
+        let queued = self.transfers.queued_count();
+        let suffix = if queued > 0 {
+            format!(" ({queued} queued)")
+        } else {
+            String::new()
+        };
+        format!(
+            "{verb} {}: {}%{suffix}",
+            job.display_name,
+            job.progress_percent()
+        )
     }
 
     fn apply_action(&mut self, action: Action) {
@@ -255,6 +297,8 @@ impl App {
             Action::Mkdir => self.open_mkdir_dialog(),
             Action::Rename => self.open_rename_dialog(),
             Action::Delete => self.open_delete_dialog(),
+            Action::Copy => self.start_copy(),
+            Action::CancelTransfer => self.cancel_active_transfer(),
             Action::OpenConnections => self.open_connections_screen(),
             Action::Back => self.screen = Screen::Files,
             Action::Up | Action::Down | Action::ToggleSelect | Action::Open | Action::Refresh => {
@@ -498,6 +542,181 @@ impl App {
             }
             relist(&sftp, dir_path, &tx).await;
         });
+    }
+
+    /// Copies the focused panel's selection (or the entry under the
+    /// cursor) to the other panel's current directory — upload if LOCAL is
+    /// focused, download if REMOTE is focused. Direction and source/target
+    /// panel follow the roadmap's rule: "determined by the active/source
+    /// panel."
+    fn start_copy(&mut self) {
+        if self.screen != Screen::Files {
+            return;
+        }
+
+        match self.active_panel {
+            ActivePanel::Local => self.enqueue_uploads(),
+            ActivePanel::Remote => self.enqueue_downloads(),
+        }
+
+        self.maybe_start_next_transfer();
+    }
+
+    fn enqueue_uploads(&mut self) {
+        let Some(remote) = &self.remote else {
+            self.status = Some("Connect to a remote server first".to_string());
+            return;
+        };
+        let remote_dir = remote.path().to_path_buf();
+        let entries = self.local.target_entries();
+        self.enqueue_transfers(Direction::Upload, entries, remote_dir);
+    }
+
+    fn enqueue_downloads(&mut self) {
+        let Some(remote) = &self.remote else {
+            return;
+        };
+        let local_dir = self.local.path().to_path_buf();
+        let entries = remote.target_entries();
+        self.enqueue_transfers(Direction::Download, entries, local_dir);
+    }
+
+    fn enqueue_transfers(&mut self, direction: Direction, entries: Vec<Entry>, dest_dir: PathBuf) {
+        if entries.is_empty() {
+            return;
+        }
+
+        let mut skipped_dirs = 0;
+        for entry in entries {
+            if entry.is_dir {
+                skipped_dirs += 1;
+                continue;
+            }
+
+            let (local_path, remote_path) = match direction {
+                Direction::Upload => (
+                    entry.path.clone(),
+                    path_to_remote_string(&dest_dir.join(&entry.name)),
+                ),
+                Direction::Download => (
+                    dest_dir.join(&entry.name),
+                    path_to_remote_string(&entry.path),
+                ),
+            };
+
+            self.transfers
+                .enqueue(direction, local_path, remote_path, entry.name, entry.size);
+        }
+
+        if skipped_dirs > 0 {
+            let plural = if skipped_dirs == 1 { "y" } else { "ies" };
+            self.status = Some(format!(
+                "Copying directories isn't supported yet \u{2014} skipped {skipped_dirs} director{plural}"
+            ));
+        }
+    }
+
+    fn maybe_start_next_transfer(&mut self) {
+        let Some(id) = self.transfers.next_to_run() else {
+            return;
+        };
+        let Some(sftp) = self.sftp.clone() else {
+            return;
+        };
+        let Some(job) = self.transfers.get_mut(id) else {
+            return;
+        };
+
+        job.status = JobStatus::InProgress;
+        job.attempts += 1;
+        let direction = job.direction;
+        let local_path = job.local_path.clone();
+        let remote_path = job.remote_path.clone();
+
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.active_transfer_cancel = Some(cancel.clone());
+
+        let tx = self.transfer_tx.clone();
+        tokio::spawn(async move {
+            let progress_tx = tx.clone();
+            let result = transfer::run(
+                direction,
+                &local_path,
+                &remote_path,
+                &sftp,
+                &cancel,
+                move |transferred| {
+                    let _ = progress_tx.send(TransferEvent::Progress { id, transferred });
+                },
+            )
+            .await;
+
+            let event = match result {
+                Ok(outcome) => TransferEvent::Finished { id, outcome },
+                Err(err) => TransferEvent::Failed {
+                    id,
+                    message: err.to_string(),
+                },
+            };
+            let _ = tx.send(event);
+        });
+    }
+
+    fn apply_transfer_event(&mut self, event: TransferEvent) {
+        match event {
+            TransferEvent::Progress { id, transferred } => {
+                if let Some(job) = self.transfers.get_mut(id) {
+                    job.transferred_bytes = transferred;
+                }
+            }
+            TransferEvent::Finished { id, outcome } => {
+                self.active_transfer_cancel = None;
+                if let Some(job) = self.transfers.get_mut(id) {
+                    job.status = match outcome {
+                        TransferOutcome::Completed => JobStatus::Completed,
+                        TransferOutcome::Cancelled => JobStatus::Cancelled,
+                    };
+                }
+                self.refresh_transfer_destination(id);
+                self.maybe_start_next_transfer();
+            }
+            TransferEvent::Failed { id, message } => {
+                self.active_transfer_cancel = None;
+                if let Some(job) = self.transfers.get_mut(id) {
+                    job.status = JobStatus::Failed(message.clone());
+                }
+                if !self.transfers.retry_or_give_up(id) {
+                    self.status = Some(format!("Transfer failed: {message}"));
+                }
+                self.maybe_start_next_transfer();
+            }
+        }
+    }
+
+    /// Refreshes whichever panel just received a file, so the new listing
+    /// is visible without a manual `Ctrl+R`.
+    fn refresh_transfer_destination(&mut self, id: u64) {
+        let Some(job) = self.transfers.get(id) else {
+            return;
+        };
+
+        match job.direction {
+            Direction::Upload => {
+                if let Some(remote) = &self.remote {
+                    let path = remote.path().to_path_buf();
+                    self.spawn_remote_list(path);
+                }
+            }
+            Direction::Download => {
+                let _ = self.local.refresh();
+            }
+        }
+    }
+
+    fn cancel_active_transfer(&mut self) {
+        if let Some(cancel) = &self.active_transfer_cancel {
+            cancel.store(true, Ordering::Relaxed);
+        }
     }
 
     fn open_mkdir_dialog(&mut self) {
