@@ -8,6 +8,7 @@ use ratatui::Terminal;
 
 pub mod input;
 pub mod layout;
+pub mod panels;
 
 pub type Backend = CrosstermBackend<Stdout>;
 
