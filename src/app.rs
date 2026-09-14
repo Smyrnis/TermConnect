@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyEvent, KeyEventKind};
@@ -7,10 +8,12 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::Paragraph;
+use russh_sftp::client::SftpSession;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::connection::client::TermConnectHandler;
 use crate::connection::{self, ConnectionEntry};
+use crate::filesystem::{self, Entry};
 use crate::tui::input::{self, Action};
 use crate::tui::panels::{self, ActivePanel, PanelState};
 use crate::tui::widgets::connections_list;
@@ -49,6 +52,7 @@ enum ConnectEvent {
     Connected {
         name: String,
         handle: russh::client::Handle<TermConnectHandler>,
+        sftp: SftpSession,
     },
     NeedsPassword {
         name: String,
@@ -60,11 +64,20 @@ enum ConnectEvent {
     },
 }
 
+/// The result of a background SFTP operation on the remote panel: every
+/// remote action (navigate, mkdir, rename, delete, refresh) ends the same
+/// way — either a fresh listing to show, or a failure message.
+enum PanelEvent {
+    Listed { path: PathBuf, entries: Vec<Entry> },
+    Failed(String),
+}
+
 pub struct App {
     should_quit: bool,
     screen: Screen,
     active_panel: ActivePanel,
     local: PanelState,
+    remote: Option<PanelState>,
     dialog: Option<Dialog>,
     pending_action: Option<PendingAction>,
     pending_password: Option<oneshot::Sender<String>>,
@@ -73,8 +86,11 @@ pub struct App {
     connections_cursor: usize,
     connection_status: ConnectionStatus,
     connection_handle: Option<russh::client::Handle<TermConnectHandler>>,
+    sftp: Option<Arc<SftpSession>>,
     connect_tx: mpsc::UnboundedSender<ConnectEvent>,
     connect_rx: mpsc::UnboundedReceiver<ConnectEvent>,
+    panel_tx: mpsc::UnboundedSender<PanelEvent>,
+    panel_rx: mpsc::UnboundedReceiver<PanelEvent>,
 }
 
 impl App {
@@ -84,12 +100,14 @@ impl App {
 
     fn at(path: PathBuf) -> Result<Self> {
         let (connect_tx, connect_rx) = mpsc::unbounded_channel();
+        let (panel_tx, panel_rx) = mpsc::unbounded_channel();
 
         Ok(Self {
             should_quit: false,
             screen: Screen::Files,
             active_panel: ActivePanel::Local,
             local: PanelState::new(path)?,
+            remote: None,
             dialog: None,
             pending_action: None,
             pending_password: None,
@@ -98,8 +116,11 @@ impl App {
             connections_cursor: 0,
             connection_status: ConnectionStatus::Disconnected,
             connection_handle: None,
+            sftp: None,
             connect_tx,
             connect_rx,
+            panel_tx,
+            panel_rx,
         })
     }
 
@@ -124,6 +145,9 @@ impl App {
                 }
                 Some(connect_event) = self.connect_rx.recv() => {
                     self.apply_connect_event(connect_event);
+                }
+                Some(panel_event) = self.panel_rx.recv() => {
+                    self.apply_panel_event(panel_event);
                 }
             }
         }
@@ -175,17 +199,30 @@ impl App {
             &self.local,
         );
 
-        let remote_title = match &self.connection_status {
-            ConnectionStatus::Connected(name) => format!("REMOTE {name}"),
-            ConnectionStatus::Connecting(name) => format!("REMOTE (connecting to {name}\u{2026})"),
-            _ => "REMOTE".to_string(),
-        };
-        panels::render_placeholder(
-            frame,
-            remote_area,
-            &remote_title,
-            self.active_panel == ActivePanel::Remote,
-        );
+        match &self.remote {
+            Some(remote) => panels::render_panel(
+                frame,
+                remote_area,
+                "REMOTE",
+                self.active_panel == ActivePanel::Remote,
+                remote,
+            ),
+            None => {
+                let remote_title = match &self.connection_status {
+                    ConnectionStatus::Connected(name) => format!("REMOTE {name}"),
+                    ConnectionStatus::Connecting(name) => {
+                        format!("REMOTE (connecting to {name}\u{2026})")
+                    }
+                    _ => "REMOTE".to_string(),
+                };
+                panels::render_placeholder(
+                    frame,
+                    remote_area,
+                    &remote_title,
+                    self.active_panel == ActivePanel::Remote,
+                );
+            }
+        }
     }
 
     fn render_connections(&self, frame: &mut Frame, area: Rect) {
@@ -234,13 +271,15 @@ impl App {
         }
     }
 
-    /// Actions that operate on whichever panel is focused. Only the local
-    /// panel has real state so far (the remote panel arrives in Phase 4).
+    /// Actions that operate on whichever panel is focused.
     fn apply_panel_action(&mut self, action: Action) {
-        if self.active_panel != ActivePanel::Local {
-            return;
+        match self.active_panel {
+            ActivePanel::Local => self.apply_local_panel_action(action),
+            ActivePanel::Remote => self.apply_remote_panel_action(action),
         }
+    }
 
+    fn apply_local_panel_action(&mut self, action: Action) {
         let result = match action {
             Action::Up => {
                 self.local.move_cursor(-1);
@@ -260,6 +299,32 @@ impl App {
         };
 
         self.set_status(result);
+    }
+
+    /// Remote navigation/selection is instant (pure state), but anything
+    /// that needs a fresh listing (`Open`, `Refresh`) has to go over the
+    /// network, so it's dispatched to a background task instead of run
+    /// inline — see `spawn_remote_list`.
+    fn apply_remote_panel_action(&mut self, action: Action) {
+        let Some(remote) = self.remote.as_mut() else {
+            return;
+        };
+
+        match action {
+            Action::Up => remote.move_cursor(-1),
+            Action::Down => remote.move_cursor(1),
+            Action::ToggleSelect => remote.toggle_selection(),
+            Action::Open => {
+                if let Some(target) = remote.target_path_for_open() {
+                    self.spawn_remote_list(target);
+                }
+            }
+            Action::Refresh => {
+                let path = remote.path().to_path_buf();
+                self.spawn_remote_list(path);
+            }
+            _ => {}
+        }
     }
 
     fn apply_connections_action(&mut self, action: Action) {
@@ -300,6 +365,8 @@ impl App {
         if matches!(&self.connection_status, ConnectionStatus::Connected(name) if *name == entry.name)
         {
             self.connection_handle = None;
+            self.sftp = None;
+            self.remote = None;
             self.connection_status = ConnectionStatus::Disconnected;
             return;
         }
@@ -311,10 +378,12 @@ impl App {
 
     fn apply_connect_event(&mut self, event: ConnectEvent) {
         match event {
-            ConnectEvent::Connected { name, handle } => {
+            ConnectEvent::Connected { name, handle, sftp } => {
                 self.connection_handle = Some(handle);
+                self.sftp = Some(Arc::new(sftp));
                 self.connection_status = ConnectionStatus::Connected(name);
                 self.status = None;
+                self.spawn_initial_remote_listing();
             }
             ConnectEvent::NeedsPassword {
                 name,
@@ -334,8 +403,108 @@ impl App {
         }
     }
 
+    fn apply_panel_event(&mut self, event: PanelEvent) {
+        match event {
+            PanelEvent::Listed { path, entries } => {
+                match self.remote.as_mut() {
+                    Some(remote) => remote.replace_listing(path, entries),
+                    None => self.remote = Some(PanelState::from_listing(path, entries)),
+                }
+                self.status = None;
+            }
+            PanelEvent::Failed(message) => self.status = Some(message),
+        }
+    }
+
+    fn spawn_initial_remote_listing(&mut self) {
+        let Some(sftp) = self.sftp.clone() else {
+            return;
+        };
+        let tx = self.panel_tx.clone();
+
+        tokio::spawn(async move {
+            let home = match sftp.canonicalize(".").await {
+                Ok(home) => home,
+                Err(err) => {
+                    let _ = tx.send(PanelEvent::Failed(err.to_string()));
+                    return;
+                }
+            };
+            relist(&sftp, PathBuf::from(home), &tx).await;
+        });
+    }
+
+    fn spawn_remote_list(&mut self, path: PathBuf) {
+        let Some(sftp) = self.sftp.clone() else {
+            return;
+        };
+        let tx = self.panel_tx.clone();
+        tokio::spawn(async move { relist(&sftp, path, &tx).await });
+    }
+
+    fn spawn_remote_mkdir(&mut self, name: String) {
+        let (Some(remote), Some(sftp)) = (self.remote.as_ref(), self.sftp.clone()) else {
+            return;
+        };
+        let dir_path = remote.path().to_path_buf();
+        let tx = self.panel_tx.clone();
+
+        tokio::spawn(async move {
+            let target = path_to_remote_string(&dir_path.join(&name));
+            if let Err(err) = filesystem::remote::create_directory(&sftp, &target).await {
+                let _ = tx.send(PanelEvent::Failed(err.to_string()));
+                return;
+            }
+            relist(&sftp, dir_path, &tx).await;
+        });
+    }
+
+    fn spawn_remote_rename(&mut self, new_name: String) {
+        let (Some(remote), Some(sftp)) = (self.remote.as_ref(), self.sftp.clone()) else {
+            return;
+        };
+        let Some(current_name) = remote.current_entry_name() else {
+            return;
+        };
+        let dir_path = remote.path().to_path_buf();
+        let from = path_to_remote_string(&dir_path.join(current_name));
+        let to = path_to_remote_string(&dir_path.join(&new_name));
+        let tx = self.panel_tx.clone();
+
+        tokio::spawn(async move {
+            if let Err(err) = filesystem::remote::rename(&sftp, &from, &to).await {
+                let _ = tx.send(PanelEvent::Failed(err.to_string()));
+                return;
+            }
+            relist(&sftp, dir_path, &tx).await;
+        });
+    }
+
+    fn spawn_remote_delete(&mut self) {
+        let (Some(remote), Some(sftp)) = (self.remote.as_ref(), self.sftp.clone()) else {
+            return;
+        };
+        let targets = remote.targets();
+        let dir_path = remote.path().to_path_buf();
+        let tx = self.panel_tx.clone();
+
+        tokio::spawn(async move {
+            for target in targets {
+                let target_str = path_to_remote_string(&target);
+                if let Err(err) = filesystem::remote::delete(&sftp, &target_str).await {
+                    let _ = tx.send(PanelEvent::Failed(err.to_string()));
+                    return;
+                }
+            }
+            relist(&sftp, dir_path, &tx).await;
+        });
+    }
+
     fn open_mkdir_dialog(&mut self) {
-        if self.screen != Screen::Files || self.active_panel != ActivePanel::Local {
+        if self.screen != Screen::Files {
+            return;
+        }
+        if self.active_panel == ActivePanel::Remote && self.remote.is_none() {
             return;
         }
 
@@ -347,11 +516,18 @@ impl App {
     }
 
     fn open_rename_dialog(&mut self) {
-        if self.screen != Screen::Files || self.active_panel != ActivePanel::Local {
+        if self.screen != Screen::Files {
             return;
         }
 
-        let Some(current_name) = self.local.current_entry_name() else {
+        let current_name = match self.active_panel {
+            ActivePanel::Local => self.local.current_entry_name(),
+            ActivePanel::Remote => self
+                .remote
+                .as_ref()
+                .and_then(PanelState::current_entry_name),
+        };
+        let Some(current_name) = current_name else {
             return;
         };
 
@@ -363,11 +539,17 @@ impl App {
     }
 
     fn open_delete_dialog(&mut self) {
-        if self.screen != Screen::Files || self.active_panel != ActivePanel::Local {
+        if self.screen != Screen::Files {
             return;
         }
 
-        let targets = self.local.targets();
+        let targets = match self.active_panel {
+            ActivePanel::Local => self.local.targets(),
+            ActivePanel::Remote => match &self.remote {
+                Some(remote) => remote.targets(),
+                None => return,
+            },
+        };
         if targets.is_empty() {
             return;
         }
@@ -405,21 +587,32 @@ impl App {
             DialogOutcome::Confirmed => {
                 self.dialog = None;
                 if let Some(PendingAction::Delete) = self.pending_action.take() {
-                    let result = self.local.delete_targets();
-                    self.set_status(result);
+                    match self.active_panel {
+                        ActivePanel::Local => {
+                            let result = self.local.delete_targets();
+                            self.set_status(result);
+                        }
+                        ActivePanel::Remote => self.spawn_remote_delete(),
+                    }
                 }
             }
             DialogOutcome::Submitted(value) => {
                 self.dialog = None;
                 match self.pending_action.take() {
-                    Some(PendingAction::Mkdir) => {
-                        let result = self.local.create_directory(&value);
-                        self.set_status(result);
-                    }
-                    Some(PendingAction::Rename) => {
-                        let result = self.local.rename_current(&value);
-                        self.set_status(result);
-                    }
+                    Some(PendingAction::Mkdir) => match self.active_panel {
+                        ActivePanel::Local => {
+                            let result = self.local.create_directory(&value);
+                            self.set_status(result);
+                        }
+                        ActivePanel::Remote => self.spawn_remote_mkdir(value),
+                    },
+                    Some(PendingAction::Rename) => match self.active_panel {
+                        ActivePanel::Local => {
+                            let result = self.local.rename_current(&value);
+                            self.set_status(result);
+                        }
+                        ActivePanel::Remote => self.spawn_remote_rename(value),
+                    },
                     Some(PendingAction::SubmitPassword) => {
                         if let Some(sender) = self.pending_password.take() {
                             let _ = sender.send(value);
@@ -436,11 +629,33 @@ impl App {
     }
 }
 
+/// Lists `path` over SFTP and reports the outcome — the tail end of every
+/// remote panel operation (navigate, mkdir, rename, delete all finish by
+/// refreshing the listing, just like their local counterparts do).
+async fn relist(sftp: &SftpSession, path: PathBuf, tx: &mpsc::UnboundedSender<PanelEvent>) {
+    let path_str = path_to_remote_string(&path);
+    match filesystem::remote::list(sftp, &path_str).await {
+        Ok(entries) => {
+            let _ = tx.send(PanelEvent::Listed { path, entries });
+        }
+        Err(err) => {
+            let _ = tx.send(PanelEvent::Failed(err.to_string()));
+        }
+    }
+}
+
+/// SFTP paths are always POSIX-style strings; since TermConnect targets
+/// Linux only, a `PathBuf`'s own `Display` already produces exactly that.
+fn path_to_remote_string(path: &std::path::Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
 /// Runs a full connection attempt in the background: dial, verify the host
-/// key, then authenticate in the roadmap's priority order (agent, key
-/// file, password), reporting progress back over `tx` so the UI never
-/// blocks on network I/O. A password prompt is requested via a one-shot
-/// round-trip embedded in [`ConnectEvent::NeedsPassword`].
+/// key, authenticate in the roadmap's priority order (agent, key file,
+/// password), then open the SFTP subsystem — reporting progress back over
+/// `tx` so the UI never blocks on network I/O. A password prompt is
+/// requested via a one-shot round-trip embedded in
+/// [`ConnectEvent::NeedsPassword`].
 async fn run_connect(entry: ConnectionEntry, tx: mpsc::UnboundedSender<ConnectEvent>) {
     let mut handle = match connection::client::connect(&entry.host, entry.port).await {
         Ok(handle) => handle,
@@ -454,10 +669,7 @@ async fn run_connect(entry: ConnectionEntry, tx: mpsc::UnboundedSender<ConnectEv
 
     match connection::client::authenticate_non_interactive(&mut handle, &entry).await {
         Ok(true) => {
-            let _ = tx.send(ConnectEvent::Connected {
-                name: entry.name.clone(),
-                handle,
-            });
+            finish_connect(entry.name, handle, &tx).await;
             return;
         }
         Ok(false) => {}
@@ -486,23 +698,38 @@ async fn run_connect(entry: ConnectionEntry, tx: mpsc::UnboundedSender<ConnectEv
         return;
     };
 
-    let event =
-        match connection::client::authenticate_password(&mut handle, &entry.username, &password)
-            .await
-        {
-            Ok(true) => ConnectEvent::Connected {
-                name: entry.name.clone(),
-                handle,
-            },
-            Ok(false) => ConnectEvent::Failed {
+    match connection::client::authenticate_password(&mut handle, &entry.username, &password).await {
+        Ok(true) => finish_connect(entry.name, handle, &tx).await,
+        Ok(false) => {
+            let _ = tx.send(ConnectEvent::Failed {
                 message: format!("Authentication failed for {}", entry.name),
-            },
-            Err(err) => ConnectEvent::Failed {
+            });
+        }
+        Err(err) => {
+            let _ = tx.send(ConnectEvent::Failed {
                 message: err.to_string(),
-            },
-        };
+            });
+        }
+    }
+}
 
-    let _ = tx.send(event);
+/// Opens the SFTP subsystem on a freshly-authenticated session and reports
+/// the finished connection, or a failure if SFTP itself couldn't start.
+async fn finish_connect(
+    name: String,
+    handle: russh::client::Handle<TermConnectHandler>,
+    tx: &mpsc::UnboundedSender<ConnectEvent>,
+) {
+    match connection::client::open_sftp(&handle).await {
+        Ok(sftp) => {
+            let _ = tx.send(ConnectEvent::Connected { name, handle, sftp });
+        }
+        Err(err) => {
+            let _ = tx.send(ConnectEvent::Failed {
+                message: format!("Connected but failed to start SFTP: {err}"),
+            });
+        }
+    }
 }
 
 #[cfg(test)]
@@ -550,7 +777,7 @@ mod tests {
     }
 
     #[test]
-    fn panel_actions_are_ignored_when_remote_panel_is_focused() {
+    fn panel_actions_are_ignored_when_remote_panel_has_no_listing_yet() {
         let (dir, mut app) = app_in_temp_dir();
         fs::create_dir(dir.path().join("child")).unwrap();
         app.apply_action(Action::SwitchPanel);
@@ -559,6 +786,25 @@ mod tests {
         app.apply_action(Action::Down);
 
         assert_eq!(app.local.cursor, cursor_before);
+    }
+
+    #[test]
+    fn remote_panel_navigation_works_once_a_listing_exists() {
+        let (_dir, mut app) = app_in_temp_dir();
+        app.remote = Some(PanelState::from_listing(
+            PathBuf::from("/home/user"),
+            vec![Entry {
+                name: "child".to_string(),
+                path: PathBuf::from("/home/user/child"),
+                is_dir: true,
+                size: 0,
+            }],
+        ));
+        app.active_panel = ActivePanel::Remote;
+
+        app.apply_action(Action::Down);
+
+        assert_eq!(app.remote.as_ref().unwrap().cursor, 1);
     }
 
     #[test]
@@ -718,5 +964,29 @@ mod tests {
             ConnectionStatus::Failed(_) => {}
             ref other => panic!("expected Failed, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn panel_event_listed_creates_the_remote_panel_if_absent() {
+        let (_dir, mut app) = app_in_temp_dir();
+        assert!(app.remote.is_none());
+
+        app.apply_panel_event(PanelEvent::Listed {
+            path: PathBuf::from("/home/user"),
+            entries: Vec::new(),
+        });
+
+        assert!(app.remote.is_some());
+        assert_eq!(
+            app.remote.as_ref().unwrap().path(),
+            std::path::Path::new("/home/user")
+        );
+    }
+
+    #[test]
+    fn panel_event_failed_sets_status() {
+        let (_dir, mut app) = app_in_temp_dir();
+        app.apply_panel_event(PanelEvent::Failed("boom".to_string()));
+        assert_eq!(app.status.as_deref(), Some("boom"));
     }
 }

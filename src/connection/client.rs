@@ -47,6 +47,16 @@ impl client::Handler for TermConnectHandler {
     }
 }
 
+/// Opens the SFTP subsystem on an already-authenticated SSH session.
+pub async fn open_sftp(
+    handle: &Handle<TermConnectHandler>,
+) -> Result<russh_sftp::client::SftpSession> {
+    let channel = handle.channel_open_session().await?;
+    channel.request_subsystem(true, "sftp").await?;
+    let sftp = russh_sftp::client::SftpSession::new(channel.into_stream()).await?;
+    Ok(sftp)
+}
+
 /// Opens a TCP connection and completes the SSH handshake, including host
 /// key verification against `~/.ssh/known_hosts`. Does not authenticate.
 pub async fn connect(host: &str, port: u16) -> Result<Handle<TermConnectHandler>> {

@@ -60,20 +60,40 @@ impl PanelState {
         &self.rows
     }
 
-    pub fn refresh(&mut self) -> Result<()> {
-        let entries = local::list(&self.path)?;
+    /// Builds a panel directly from an already-fetched listing, bypassing
+    /// `local::list` — used for the remote panel, whose listings come back
+    /// from an async SFTP call rather than a synchronous filesystem read.
+    pub fn from_listing(path: PathBuf, entries: Vec<Entry>) -> Self {
+        let mut panel = Self {
+            path: PathBuf::new(),
+            rows: Vec::new(),
+            cursor: 0,
+            selected: HashSet::new(),
+        };
+        panel.replace_listing(path, entries);
+        panel
+    }
+
+    /// Replaces the current listing with an already-fetched one, without
+    /// touching the filesystem — the async counterpart to `refresh`.
+    pub fn replace_listing(&mut self, path: PathBuf, entries: Vec<Entry>) {
         let mut rows: Vec<Row> = Vec::with_capacity(entries.len() + 1);
 
-        if self.path.parent().is_some() {
+        if path.parent().is_some() {
             rows.push(Row::Parent);
         }
 
         rows.extend(entries.into_iter().map(Row::Entry));
 
+        self.path = path;
         self.rows = rows;
         self.selected.clear();
         self.clamp_cursor();
+    }
 
+    pub fn refresh(&mut self) -> Result<()> {
+        let entries = local::list(&self.path)?;
+        self.replace_listing(self.path.clone(), entries);
         Ok(())
     }
 
@@ -87,23 +107,28 @@ impl PanelState {
         self.cursor = next as usize;
     }
 
-    /// Enters the directory at the cursor (or the parent, for `..`).
-    /// A no-op if the cursor is on a file.
-    pub fn open_selected(&mut self) -> Result<()> {
+    /// Where `Open` would navigate to: the parent directory for `..`, a
+    /// subdirectory's path for a directory entry, or `None` for a file (or
+    /// an empty listing). Pure — does not touch the filesystem or mutate
+    /// state, so both the synchronous local path and the async remote path
+    /// can use it to decide where to fetch next.
+    pub fn target_path_for_open(&self) -> Option<PathBuf> {
         match self.rows.get(self.cursor) {
-            Some(Row::Parent) => {
-                if let Some(parent) = self.path.parent() {
-                    self.path = parent.to_path_buf();
-                    self.cursor = 0;
-                    self.refresh()?;
-                }
-            }
-            Some(Row::Entry(entry)) if entry.is_dir => {
-                self.path = entry.path.clone();
-                self.cursor = 0;
-                self.refresh()?;
-            }
-            _ => {}
+            Some(Row::Parent) => self.path.parent().map(Path::to_path_buf),
+            Some(Row::Entry(entry)) if entry.is_dir => Some(entry.path.clone()),
+            _ => None,
+        }
+    }
+
+    /// Enters the directory at the cursor (or the parent, for `..`).
+    /// A no-op if the cursor is on a file. Local-panel only — the remote
+    /// panel navigates by fetching a new listing asynchronously instead
+    /// (see `target_path_for_open`).
+    pub fn open_selected(&mut self) -> Result<()> {
+        if let Some(target) = self.target_path_for_open() {
+            self.path = target;
+            self.cursor = 0;
+            self.refresh()?;
         }
 
         Ok(())
@@ -222,6 +247,48 @@ mod tests {
         assert_eq!(panel, ActivePanel::Remote);
         panel.toggle();
         assert_eq!(panel, ActivePanel::Local);
+    }
+
+    #[test]
+    fn from_listing_builds_rows_from_provided_entries() {
+        let entries = vec![Entry {
+            name: "remote_dir".to_string(),
+            path: PathBuf::from("/home/user/remote_dir"),
+            is_dir: true,
+            size: 0,
+        }];
+
+        let panel = PanelState::from_listing(PathBuf::from("/home/user"), entries);
+
+        assert_eq!(panel.path(), Path::new("/home/user"));
+        assert_eq!(panel.rows().len(), 2); // Parent + the one entry
+        assert_eq!(panel.rows()[0], Row::Parent);
+    }
+
+    #[test]
+    fn from_listing_at_root_has_no_parent_row() {
+        let panel = PanelState::from_listing(PathBuf::from("/"), Vec::new());
+
+        assert!(panel.rows().is_empty());
+    }
+
+    #[test]
+    fn target_path_for_open_resolves_parent_and_directory_targets() {
+        let entries = vec![Entry {
+            name: "child".to_string(),
+            path: PathBuf::from("/home/user/child"),
+            is_dir: true,
+            size: 0,
+        }];
+        let mut panel = PanelState::from_listing(PathBuf::from("/home/user"), entries);
+
+        assert_eq!(panel.target_path_for_open(), Some(PathBuf::from("/home")));
+
+        panel.cursor = 1;
+        assert_eq!(
+            panel.target_path_for_open(),
+            Some(PathBuf::from("/home/user/child"))
+        );
     }
 
     #[test]
