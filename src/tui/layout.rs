@@ -8,14 +8,18 @@ pub fn split_panels(area: Rect) -> (Rect, Rect) {
     (columns[0], columns[1])
 }
 
-/// Splits the whole frame into the main panel area and a one-line status
-/// bar along the bottom.
-pub fn split_frame(area: Rect) -> (Rect, Rect) {
+/// Splits the whole frame into a one-line title bar, the main content
+/// area, and a one-line status bar along the bottom.
+pub fn split_frame(area: Rect) -> (Rect, Rect, Rect) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
         .split(area);
-    (rows[0], rows[1])
+    (rows[0], rows[1], rows[2])
 }
 
 #[cfg(test)]
@@ -37,11 +41,16 @@ mod tests {
     }
 
     #[test]
-    fn split_frame_reserves_one_line_for_the_status_bar() {
+    fn split_frame_reserves_one_line_each_for_title_and_status_bars() {
         let area = Rect::new(0, 0, 100, 40);
-        let (main, status) = split_frame(area);
+        let (title, main, status) = split_frame(area);
 
-        assert_eq!(main.height, 39);
+        assert_eq!(title.height, 1);
+        assert_eq!(title.y, 0);
+
+        assert_eq!(main.height, 38);
+        assert_eq!(main.y, 1);
+
         assert_eq!(status.height, 1);
         assert_eq!(status.y, 39);
     }

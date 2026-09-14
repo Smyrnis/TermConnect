@@ -12,6 +12,8 @@ pub enum Action {
     Mkdir,
     Delete,
     Refresh,
+    OpenConnections,
+    Back,
     Noop,
 }
 
@@ -26,6 +28,8 @@ pub fn map_key(key: KeyEvent) -> Action {
         KeyCode::F(2) => Action::Rename,
         KeyCode::F(7) => Action::Mkdir,
         KeyCode::F(8) => Action::Delete,
+        KeyCode::F(9) => Action::OpenConnections,
+        KeyCode::Esc => Action::Back,
         KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => Action::Refresh,
         _ => Action::Noop,
     }
@@ -80,6 +84,16 @@ mod tests {
         assert_eq!(map_key(key(KeyCode::F(2))), Action::Rename);
         assert_eq!(map_key(key(KeyCode::F(7))), Action::Mkdir);
         assert_eq!(map_key(key(KeyCode::F(8))), Action::Delete);
+    }
+
+    #[test]
+    fn f9_maps_to_open_connections() {
+        assert_eq!(map_key(key(KeyCode::F(9))), Action::OpenConnections);
+    }
+
+    #[test]
+    fn esc_maps_to_back() {
+        assert_eq!(map_key(key(KeyCode::Esc)), Action::Back);
     }
 
     #[test]

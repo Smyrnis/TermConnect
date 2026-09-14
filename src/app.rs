@@ -7,28 +7,74 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::Paragraph;
+use tokio::sync::{mpsc, oneshot};
 
+use crate::connection::client::TermConnectHandler;
+use crate::connection::{self, ConnectionEntry};
 use crate::tui::input::{self, Action};
 use crate::tui::panels::{self, ActivePanel, PanelState};
+use crate::tui::widgets::connections_list;
 use crate::tui::widgets::dialog::{ConfirmDialog, Dialog, DialogOutcome, TextInputDialog};
 use crate::tui::{Backend, layout};
 
-const HINT_TEXT: &str = "\u{2191}\u{2193} Navigate  Enter Open  Tab Switch  Space Select  F2 Rename  F7 Mkdir  F8 Delete  Ctrl+R Refresh  F10 Quit";
+const HINT_TEXT: &str = "\u{2191}\u{2193} Navigate  Enter Open  Tab Switch  Space Select  F2 Rename  F7 Mkdir  F8 Delete  Ctrl+R Refresh  F9 Connections  F10 Quit";
 
 /// The file operation a dialog is currently collecting input/confirmation for.
 enum PendingAction {
     Mkdir,
     Rename,
     Delete,
+    SubmitPassword,
+}
+
+/// Which top-level screen is currently shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Screen {
+    Files,
+    Connections,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ConnectionStatus {
+    Disconnected,
+    Connecting(String),
+    Connected(String),
+    Failed(String),
+}
+
+/// Progress reported by a background connection attempt (see
+/// [`run_connect`]), delivered back to the event loop over a channel so the
+/// TUI never blocks on network I/O.
+enum ConnectEvent {
+    Connected {
+        name: String,
+        handle: russh::client::Handle<TermConnectHandler>,
+    },
+    NeedsPassword {
+        name: String,
+        username: String,
+        respond_to: oneshot::Sender<String>,
+    },
+    Failed {
+        message: String,
+    },
 }
 
 pub struct App {
     should_quit: bool,
+    screen: Screen,
     active_panel: ActivePanel,
     local: PanelState,
     dialog: Option<Dialog>,
     pending_action: Option<PendingAction>,
+    pending_password: Option<oneshot::Sender<String>>,
     status: Option<String>,
+    connections: Vec<ConnectionEntry>,
+    connections_cursor: usize,
+    connection_status: ConnectionStatus,
+    connection_handle: Option<russh::client::Handle<TermConnectHandler>>,
+    connect_tx: mpsc::UnboundedSender<ConnectEvent>,
+    connect_rx: mpsc::UnboundedReceiver<ConnectEvent>,
 }
 
 impl App {
@@ -37,13 +83,23 @@ impl App {
     }
 
     fn at(path: PathBuf) -> Result<Self> {
+        let (connect_tx, connect_rx) = mpsc::unbounded_channel();
+
         Ok(Self {
             should_quit: false,
+            screen: Screen::Files,
             active_panel: ActivePanel::Local,
             local: PanelState::new(path)?,
             dialog: None,
             pending_action: None,
+            pending_password: None,
             status: None,
+            connections: Vec::new(),
+            connections_cursor: 0,
+            connection_status: ConnectionStatus::Disconnected,
+            connection_handle: None,
+            connect_tx,
+            connect_rx,
         })
     }
 
@@ -53,14 +109,21 @@ impl App {
         while !self.should_quit {
             terminal.draw(|frame| self.render(frame))?;
 
-            if let Some(event) = events.next().await
-                && let Event::Key(key) = event?
-                && key.kind == KeyEventKind::Press
-            {
-                if self.dialog.is_some() {
-                    self.apply_dialog_key(key);
-                } else {
-                    self.apply_action(input::map_key(key));
+            tokio::select! {
+                event = events.next() => {
+                    if let Some(event) = event
+                        && let Event::Key(key) = event?
+                        && key.kind == KeyEventKind::Press
+                    {
+                        if self.dialog.is_some() {
+                            self.apply_dialog_key(key);
+                        } else {
+                            self.apply_action(input::map_key(key));
+                        }
+                    }
+                }
+                Some(connect_event) = self.connect_rx.recv() => {
+                    self.apply_connect_event(connect_event);
                 }
             }
         }
@@ -69,8 +132,40 @@ impl App {
     }
 
     fn render(&self, frame: &mut Frame) {
-        let (main_area, status_area) = layout::split_frame(frame.area());
-        let (local_area, remote_area) = layout::split_panels(main_area);
+        let (title_area, main_area, status_area) = layout::split_frame(frame.area());
+
+        self.render_title(frame, title_area);
+
+        match self.screen {
+            Screen::Files => self.render_files(frame, main_area),
+            Screen::Connections => self.render_connections(frame, main_area),
+        }
+
+        self.render_status(frame, status_area);
+
+        if let Some(dialog) = &self.dialog {
+            dialog.render(frame, frame.area());
+        }
+    }
+
+    fn render_title(&self, frame: &mut Frame, area: Rect) {
+        let status_text = match &self.connection_status {
+            ConnectionStatus::Disconnected => "Not connected".to_string(),
+            ConnectionStatus::Connecting(name) => format!("Connecting to {name}\u{2026}"),
+            ConnectionStatus::Connected(name) => format!("{name} \u{2014} SSH: Connected"),
+            ConnectionStatus::Failed(message) => format!("Connection failed: {message}"),
+        };
+
+        let text = format!(
+            "TermConnect{:>width$}",
+            status_text,
+            width = status_text.len() + 4
+        );
+        frame.render_widget(Paragraph::new(text), area);
+    }
+
+    fn render_files(&self, frame: &mut Frame, area: Rect) {
+        let (local_area, remote_area) = layout::split_panels(area);
 
         panels::render_panel(
             frame,
@@ -79,18 +174,32 @@ impl App {
             self.active_panel == ActivePanel::Local,
             &self.local,
         );
+
+        let remote_title = match &self.connection_status {
+            ConnectionStatus::Connected(name) => format!("REMOTE {name}"),
+            ConnectionStatus::Connecting(name) => format!("REMOTE (connecting to {name}\u{2026})"),
+            _ => "REMOTE".to_string(),
+        };
         panels::render_placeholder(
             frame,
             remote_area,
-            "REMOTE",
+            &remote_title,
             self.active_panel == ActivePanel::Remote,
         );
+    }
 
-        self.render_status(frame, status_area);
-
-        if let Some(dialog) = &self.dialog {
-            dialog.render(frame, frame.area());
-        }
+    fn render_connections(&self, frame: &mut Frame, area: Rect) {
+        let active_name = match &self.connection_status {
+            ConnectionStatus::Connected(name) => Some(name.as_str()),
+            _ => None,
+        };
+        connections_list::render_connections_list(
+            frame,
+            area,
+            &self.connections,
+            self.connections_cursor,
+            active_name,
+        );
     }
 
     fn render_status(&self, frame: &mut Frame, area: Rect) {
@@ -109,10 +218,19 @@ impl App {
             Action::Mkdir => self.open_mkdir_dialog(),
             Action::Rename => self.open_rename_dialog(),
             Action::Delete => self.open_delete_dialog(),
+            Action::OpenConnections => self.open_connections_screen(),
+            Action::Back => self.screen = Screen::Files,
             Action::Up | Action::Down | Action::ToggleSelect | Action::Open | Action::Refresh => {
-                self.apply_panel_action(action);
+                self.apply_screen_action(action);
             }
             Action::Noop => {}
+        }
+    }
+
+    fn apply_screen_action(&mut self, action: Action) {
+        match self.screen {
+            Screen::Files => self.apply_panel_action(action),
+            Screen::Connections => self.apply_connections_action(action),
         }
     }
 
@@ -144,8 +262,80 @@ impl App {
         self.set_status(result);
     }
 
+    fn apply_connections_action(&mut self, action: Action) {
+        match action {
+            Action::Up => {
+                self.connections_cursor = self.connections_cursor.saturating_sub(1);
+            }
+            Action::Down if self.connections_cursor + 1 < self.connections.len() => {
+                self.connections_cursor += 1;
+            }
+            Action::Down => {}
+            Action::Open => self.connect_to_selected(),
+            Action::Refresh => self.open_connections_screen(),
+            _ => {}
+        }
+    }
+
+    fn open_connections_screen(&mut self) {
+        self.screen = Screen::Connections;
+
+        match connection::list_all() {
+            Ok(entries) => {
+                self.connections = entries;
+                self.connections_cursor = self
+                    .connections_cursor
+                    .min(self.connections.len().saturating_sub(1));
+                self.status = None;
+            }
+            Err(err) => self.status = Some(err.to_string()),
+        }
+    }
+
+    fn connect_to_selected(&mut self) {
+        let Some(entry) = self.connections.get(self.connections_cursor).cloned() else {
+            return;
+        };
+
+        if matches!(&self.connection_status, ConnectionStatus::Connected(name) if *name == entry.name)
+        {
+            self.connection_handle = None;
+            self.connection_status = ConnectionStatus::Disconnected;
+            return;
+        }
+
+        self.connection_status = ConnectionStatus::Connecting(entry.name.clone());
+        let tx = self.connect_tx.clone();
+        tokio::spawn(run_connect(entry, tx));
+    }
+
+    fn apply_connect_event(&mut self, event: ConnectEvent) {
+        match event {
+            ConnectEvent::Connected { name, handle } => {
+                self.connection_handle = Some(handle);
+                self.connection_status = ConnectionStatus::Connected(name);
+                self.status = None;
+            }
+            ConnectEvent::NeedsPassword {
+                name,
+                username,
+                respond_to,
+            } => {
+                self.pending_password = Some(respond_to);
+                self.dialog = Some(Dialog::TextInput(TextInputDialog::new_masked(format!(
+                    "Password for {username}@{name}"
+                ))));
+                self.pending_action = Some(PendingAction::SubmitPassword);
+            }
+            ConnectEvent::Failed { message } => {
+                self.connection_status = ConnectionStatus::Failed(message.clone());
+                self.status = Some(message);
+            }
+        }
+    }
+
     fn open_mkdir_dialog(&mut self) {
-        if self.active_panel != ActivePanel::Local {
+        if self.screen != Screen::Files || self.active_panel != ActivePanel::Local {
             return;
         }
 
@@ -157,7 +347,7 @@ impl App {
     }
 
     fn open_rename_dialog(&mut self) {
-        if self.active_panel != ActivePanel::Local {
+        if self.screen != Screen::Files || self.active_panel != ActivePanel::Local {
             return;
         }
 
@@ -173,7 +363,7 @@ impl App {
     }
 
     fn open_delete_dialog(&mut self) {
-        if self.active_panel != ActivePanel::Local {
+        if self.screen != Screen::Files || self.active_panel != ActivePanel::Local {
             return;
         }
 
@@ -205,7 +395,12 @@ impl App {
             DialogOutcome::Pending => {}
             DialogOutcome::Cancelled => {
                 self.dialog = None;
-                self.pending_action = None;
+                if let Some(PendingAction::SubmitPassword) = self.pending_action.take() {
+                    // Dropping the sender signals cancellation to the
+                    // waiting connect task.
+                    self.pending_password = None;
+                    self.connection_status = ConnectionStatus::Disconnected;
+                }
             }
             DialogOutcome::Confirmed => {
                 self.dialog = None;
@@ -216,12 +411,22 @@ impl App {
             }
             DialogOutcome::Submitted(value) => {
                 self.dialog = None;
-                let result = match self.pending_action.take() {
-                    Some(PendingAction::Mkdir) => self.local.create_directory(&value),
-                    Some(PendingAction::Rename) => self.local.rename_current(&value),
-                    Some(PendingAction::Delete) | None => Ok(()),
-                };
-                self.set_status(result);
+                match self.pending_action.take() {
+                    Some(PendingAction::Mkdir) => {
+                        let result = self.local.create_directory(&value);
+                        self.set_status(result);
+                    }
+                    Some(PendingAction::Rename) => {
+                        let result = self.local.rename_current(&value);
+                        self.set_status(result);
+                    }
+                    Some(PendingAction::SubmitPassword) => {
+                        if let Some(sender) = self.pending_password.take() {
+                            let _ = sender.send(value);
+                        }
+                    }
+                    Some(PendingAction::Delete) | None => {}
+                }
             }
         }
     }
@@ -229,6 +434,75 @@ impl App {
     fn set_status(&mut self, result: Result<()>) {
         self.status = result.err().map(|err| err.to_string());
     }
+}
+
+/// Runs a full connection attempt in the background: dial, verify the host
+/// key, then authenticate in the roadmap's priority order (agent, key
+/// file, password), reporting progress back over `tx` so the UI never
+/// blocks on network I/O. A password prompt is requested via a one-shot
+/// round-trip embedded in [`ConnectEvent::NeedsPassword`].
+async fn run_connect(entry: ConnectionEntry, tx: mpsc::UnboundedSender<ConnectEvent>) {
+    let mut handle = match connection::client::connect(&entry.host, entry.port).await {
+        Ok(handle) => handle,
+        Err(err) => {
+            let _ = tx.send(ConnectEvent::Failed {
+                message: err.to_string(),
+            });
+            return;
+        }
+    };
+
+    match connection::client::authenticate_non_interactive(&mut handle, &entry).await {
+        Ok(true) => {
+            let _ = tx.send(ConnectEvent::Connected {
+                name: entry.name.clone(),
+                handle,
+            });
+            return;
+        }
+        Ok(false) => {}
+        Err(err) => {
+            let _ = tx.send(ConnectEvent::Failed {
+                message: err.to_string(),
+            });
+            return;
+        }
+    }
+
+    let (respond_to, password_rx) = oneshot::channel();
+    let request = ConnectEvent::NeedsPassword {
+        name: entry.name.clone(),
+        username: entry.username.clone(),
+        respond_to,
+    };
+    if tx.send(request).is_err() {
+        return;
+    }
+
+    let Ok(password) = password_rx.await else {
+        let _ = tx.send(ConnectEvent::Failed {
+            message: "Connection cancelled".to_string(),
+        });
+        return;
+    };
+
+    let event =
+        match connection::client::authenticate_password(&mut handle, &entry.username, &password)
+            .await
+        {
+            Ok(true) => ConnectEvent::Connected {
+                name: entry.name.clone(),
+                handle,
+            },
+            Ok(false) => ConnectEvent::Failed {
+                message: format!("Authentication failed for {}", entry.name),
+            },
+            Err(err) => ConnectEvent::Failed {
+                message: err.to_string(),
+            },
+        };
+
+    let _ = tx.send(event);
 }
 
 #[cfg(test)]
@@ -371,5 +645,78 @@ mod tests {
         app.apply_dialog_key(key(KeyCode::Enter));
 
         assert!(app.status.is_some());
+    }
+
+    #[test]
+    fn open_connections_switches_screen_and_loads_entries() {
+        let (_dir, mut app) = app_in_temp_dir();
+        app.apply_action(Action::OpenConnections);
+        assert_eq!(app.screen, Screen::Connections);
+    }
+
+    #[test]
+    fn back_action_returns_to_files_screen() {
+        let (_dir, mut app) = app_in_temp_dir();
+        app.apply_action(Action::OpenConnections);
+        app.apply_action(Action::Back);
+        assert_eq!(app.screen, Screen::Files);
+    }
+
+    #[test]
+    fn connections_cursor_moves_within_bounds() {
+        let (_dir, mut app) = app_in_temp_dir();
+        app.screen = Screen::Connections;
+        app.connections = vec![
+            ConnectionEntry {
+                name: "a".to_string(),
+                host: "a.example.com".to_string(),
+                port: 22,
+                username: "user".to_string(),
+                identity_file: None,
+            },
+            ConnectionEntry {
+                name: "b".to_string(),
+                host: "b.example.com".to_string(),
+                port: 22,
+                username: "user".to_string(),
+                identity_file: None,
+            },
+        ];
+
+        app.apply_action(Action::Up);
+        assert_eq!(app.connections_cursor, 0);
+
+        app.apply_action(Action::Down);
+        assert_eq!(app.connections_cursor, 1);
+
+        app.apply_action(Action::Down);
+        assert_eq!(app.connections_cursor, 1);
+    }
+
+    #[tokio::test]
+    async fn connecting_to_an_unreachable_host_reports_failure() {
+        let (_dir, mut app) = app_in_temp_dir();
+        app.screen = Screen::Connections;
+        app.connections = vec![ConnectionEntry {
+            name: "unreachable".to_string(),
+            host: "127.0.0.1".to_string(),
+            port: 1, // nothing listens on port 1
+            username: "user".to_string(),
+            identity_file: None,
+        }];
+
+        app.connect_to_selected();
+        assert_eq!(
+            app.connection_status,
+            ConnectionStatus::Connecting("unreachable".to_string())
+        );
+
+        let event = app.connect_rx.recv().await.unwrap();
+        app.apply_connect_event(event);
+
+        match app.connection_status {
+            ConnectionStatus::Failed(_) => {}
+            ref other => panic!("expected Failed, got {other:?}"),
+        }
     }
 }

@@ -8,6 +8,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 pub struct TextInputDialog {
     pub title: String,
     pub value: String,
+    pub masked: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,6 +23,15 @@ impl TextInputDialog {
         Self {
             title: title.into(),
             value: initial_value.into(),
+            masked: false,
+        }
+    }
+
+    pub fn new_masked(title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            value: String::new(),
+            masked: true,
         }
     }
 
@@ -50,7 +60,12 @@ pub fn render_text_input(frame: &mut Frame, area: Rect, dialog: &TextInputDialog
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow));
 
-    let text = Text::from(vec![Line::from(format!("{}\u{2588}", dialog.value))]);
+    let displayed_value = if dialog.masked {
+        "*".repeat(dialog.value.chars().count())
+    } else {
+        dialog.value.clone()
+    };
+    let text = Text::from(vec![Line::from(format!("{displayed_value}\u{2588}"))]);
 
     let paragraph = Paragraph::new(text).block(block);
 
@@ -109,5 +124,37 @@ mod tests {
         let mut dialog = TextInputDialog::new("New name", "final");
         let outcome = dialog.handle_key(key(KeyCode::Esc));
         assert_eq!(outcome, TextInputOutcome::Cancelled);
+    }
+
+    #[test]
+    fn new_masked_starts_empty_and_marks_masked() {
+        let dialog = TextInputDialog::new_masked("Password");
+        assert_eq!(dialog.value, "");
+        assert!(dialog.masked);
+    }
+
+    #[test]
+    fn masked_dialog_renders_asterisks_not_the_value() {
+        let mut dialog = TextInputDialog::new_masked("Password");
+        dialog.handle_key(key(KeyCode::Char('s')));
+        dialog.handle_key(key(KeyCode::Char('e')));
+        dialog.handle_key(key(KeyCode::Char('t')));
+
+        let backend = ratatui::backend::TestBackend::new(60, 6);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| render_text_input(frame, frame.area(), &dialog))
+            .unwrap();
+
+        let content: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+
+        assert!(content.contains("***"));
+        assert!(!content.contains("set"));
     }
 }
