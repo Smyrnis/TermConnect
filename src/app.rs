@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyEvent, KeyEventKind};
@@ -18,6 +19,7 @@ use crate::filesystem::{self, Entry};
 use crate::terminal;
 use crate::transfer::{self, Direction, JobStatus, TransferOutcome, TransferQueue};
 use crate::tui::input::{self, Action};
+use crate::tui::notifications::{Notifications, Severity};
 use crate::tui::panels::{self, ActivePanel, PanelState};
 use crate::tui::widgets::connections_list;
 use crate::tui::widgets::dialog::{ConfirmDialog, Dialog, DialogOutcome, TextInputDialog};
@@ -91,7 +93,7 @@ pub struct App {
     dialog: Option<Dialog>,
     pending_action: Option<PendingAction>,
     pending_password: Option<oneshot::Sender<String>>,
-    status: Option<String>,
+    notifications: Notifications,
     connections: Vec<ConnectionEntry>,
     connections_cursor: usize,
     connection_status: ConnectionStatus,
@@ -127,7 +129,7 @@ impl App {
             dialog: None,
             pending_action: None,
             pending_password: None,
-            status: None,
+            notifications: Notifications::default(),
             connections: Vec::new(),
             connections_cursor: 0,
             connection_status: ConnectionStatus::Disconnected,
@@ -182,6 +184,9 @@ impl App {
                 }
                 Some(transfer_event) = self.transfer_rx.recv() => {
                     self.apply_transfer_event(transfer_event);
+                }
+                _ = sleep_until_or_pending(self.notifications.next_wake()) => {
+                    self.notifications.expire(Instant::now());
                 }
             }
         }
@@ -274,8 +279,11 @@ impl App {
     }
 
     fn render_status(&self, frame: &mut Frame, area: Rect) {
-        let (text, style) = match &self.status {
-            Some(message) => (message.clone(), Style::default().fg(Color::Red)),
+        let (text, style) = match self.notifications.current() {
+            Some(notification) => (
+                notification.message.clone(),
+                notification_style(notification.severity),
+            ),
             None => match self.transfers.active() {
                 Some(job) => (self.transfer_status_text(job), Style::default()),
                 None => (HINT_TEXT.to_string(), Style::default()),
@@ -313,7 +321,7 @@ impl App {
             Action::Copy => self.start_copy(),
             Action::CancelTransfer => self.cancel_active_transfer(),
             Action::OpenConnections => self.open_connections_screen(),
-            Action::Back => self.screen = Screen::Files,
+            Action::Back => self.handle_back(),
             Action::Up
             | Action::Down
             | Action::ToggleSelect
@@ -327,6 +335,21 @@ impl App {
             // this needs to suspend/resume the TUI around `ssh`.
             Action::OpenTerminal => {}
             Action::Noop => {}
+        }
+    }
+
+    /// `Esc`: dismisses a persistent error notification first, if one is
+    /// showing; otherwise falls back to its usual meaning of closing the
+    /// dialog/returning to the Files screen.
+    fn handle_back(&mut self) {
+        let showing_error = matches!(
+            self.notifications.current().map(|n| n.severity),
+            Some(Severity::Error)
+        );
+        if showing_error {
+            self.notifications.dismiss_current();
+        } else {
+            self.screen = Screen::Files;
         }
     }
 
@@ -428,7 +451,8 @@ impl App {
         terminal: &mut ratatui::Terminal<Backend>,
     ) -> Result<()> {
         let Some(entry) = self.active_connection.clone() else {
-            self.status = Some("Connect to a server first".to_string());
+            self.notifications
+                .push(Severity::Warning, "Connect to a server first");
             return Ok(());
         };
 
@@ -446,14 +470,17 @@ impl App {
 
         match ssh_result {
             Ok(Ok(status)) if !status.success() => {
-                self.status = Some(format!("ssh exited with status {status}"));
+                self.notifications
+                    .push(Severity::Error, format!("ssh exited with status {status}"));
             }
             Ok(Ok(_)) => {}
             Ok(Err(io_err)) => {
-                self.status = Some(format!("Failed to launch ssh: {io_err}"));
+                self.notifications
+                    .push(Severity::Error, format!("Failed to launch ssh: {io_err}"));
             }
             Err(join_err) => {
-                self.status = Some(format!("ssh task failed: {join_err}"));
+                self.notifications
+                    .push(Severity::Error, format!("ssh task failed: {join_err}"));
             }
         }
 
@@ -469,9 +496,8 @@ impl App {
                 self.connections_cursor = self
                     .connections_cursor
                     .min(self.connections.len().saturating_sub(1));
-                self.status = None;
             }
-            Err(err) => self.status = Some(err.to_string()),
+            Err(err) => self.notifications.push(Severity::Error, err.to_string()),
         }
     }
 
@@ -506,7 +532,6 @@ impl App {
                 self.sftp = Some(Arc::new(sftp));
                 self.connection_status = ConnectionStatus::Connected(entry.name.clone());
                 self.active_connection = Some(entry);
-                self.status = None;
                 self.spawn_initial_remote_listing();
             }
             ConnectEvent::NeedsPassword {
@@ -522,21 +547,18 @@ impl App {
             }
             ConnectEvent::Failed { message } => {
                 self.connection_status = ConnectionStatus::Failed(message.clone());
-                self.status = Some(message);
+                self.notifications.push(Severity::Error, message);
             }
         }
     }
 
     fn apply_panel_event(&mut self, event: PanelEvent) {
         match event {
-            PanelEvent::Listed { path, entries } => {
-                match self.remote.as_mut() {
-                    Some(remote) => remote.replace_listing(path, entries),
-                    None => self.remote = Some(PanelState::from_listing(path, entries)),
-                }
-                self.status = None;
-            }
-            PanelEvent::Failed(message) => self.status = Some(message),
+            PanelEvent::Listed { path, entries } => match self.remote.as_mut() {
+                Some(remote) => remote.replace_listing(path, entries),
+                None => self.remote = Some(PanelState::from_listing(path, entries)),
+            },
+            PanelEvent::Failed(message) => self.notifications.push(Severity::Error, message),
         }
     }
 
@@ -644,7 +666,8 @@ impl App {
 
     fn enqueue_uploads(&mut self) {
         let Some(remote) = &self.remote else {
-            self.status = Some("Connect to a remote server first".to_string());
+            self.notifications
+                .push(Severity::Warning, "Connect to a remote server first");
             return;
         };
         let remote_dir = remote.path().to_path_buf();
@@ -690,9 +713,12 @@ impl App {
 
         if skipped_dirs > 0 {
             let plural = if skipped_dirs == 1 { "y" } else { "ies" };
-            self.status = Some(format!(
-                "Copying directories isn't supported yet \u{2014} skipped {skipped_dirs} director{plural}"
-            ));
+            self.notifications.push(
+                Severity::Warning,
+                format!(
+                    "Copying directories isn't supported yet \u{2014} skipped {skipped_dirs} director{plural}"
+                ),
+            );
         }
     }
 
@@ -766,7 +792,8 @@ impl App {
                     job.status = JobStatus::Failed(message.clone());
                 }
                 if !self.transfers.retry_or_give_up(id) {
-                    self.status = Some(format!("Transfer failed: {message}"));
+                    self.notifications
+                        .push(Severity::Error, format!("Transfer failed: {message}"));
                 }
                 self.maybe_start_next_transfer();
             }
@@ -923,8 +950,15 @@ impl App {
         }
     }
 
+    /// Reports the outcome of a synchronous local action. Success is a
+    /// no-op — it no longer clears whatever notification is currently
+    /// showing, since an `Error` notification must persist until the user
+    /// acknowledges it (`Esc`), not get silently overwritten by the next
+    /// unrelated success.
     fn set_status(&mut self, result: Result<()>) {
-        self.status = result.err().map(|err| err.to_string());
+        if let Err(err) = result {
+            self.notifications.push(Severity::Error, err.to_string());
+        }
     }
 }
 
@@ -947,6 +981,24 @@ async fn relist(sftp: &SftpSession, path: PathBuf, tx: &mpsc::UnboundedSender<Pa
 /// Linux only, a `PathBuf`'s own `Display` already produces exactly that.
 fn path_to_remote_string(path: &std::path::Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+fn notification_style(severity: Severity) -> Style {
+    match severity {
+        Severity::Info => Style::default(),
+        Severity::Warning => Style::default().fg(Color::Yellow),
+        Severity::Error => Style::default().fg(Color::Red),
+    }
+}
+
+/// Resolves at `deadline`, or never resolves if there's nothing to wait
+/// for — so a `tokio::select!` branch built from this doesn't wake the
+/// idle event loop on a timer it doesn't need.
+async fn sleep_until_or_pending(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await,
+        None => std::future::pending().await,
+    }
 }
 
 /// Runs a full connection attempt in the background: dial, verify the host
@@ -1194,7 +1246,7 @@ mod tests {
         }
         app.apply_dialog_key(key(KeyCode::Enter));
 
-        assert!(app.status.is_some());
+        assert!(app.notifications.current().is_some());
     }
 
     #[test]
@@ -1291,7 +1343,7 @@ mod tests {
     fn panel_event_failed_sets_status() {
         let (_dir, mut app) = app_in_temp_dir();
         app.apply_panel_event(PanelEvent::Failed("boom".to_string()));
-        assert_eq!(app.status.as_deref(), Some("boom"));
+        assert_eq!(app.notifications.current().unwrap().message, "boom");
     }
 
     #[test]
@@ -1314,5 +1366,47 @@ mod tests {
         app.apply_action(Action::CycleSort);
 
         assert_ne!(app.local.sort_spec(), before);
+    }
+
+    #[test]
+    fn set_status_pushes_an_error_notification_on_failure() {
+        let (_dir, mut app) = app_in_temp_dir();
+
+        app.set_status(Err(anyhow::anyhow!("boom")));
+
+        let current = app.notifications.current().unwrap();
+        assert_eq!(current.message, "boom");
+        assert_eq!(current.severity, Severity::Error);
+    }
+
+    #[test]
+    fn set_status_does_nothing_on_success() {
+        let (_dir, mut app) = app_in_temp_dir();
+
+        app.set_status(Ok(()));
+
+        assert!(app.notifications.current().is_none());
+    }
+
+    #[test]
+    fn back_action_dismisses_an_error_notification_before_changing_screens() {
+        let (_dir, mut app) = app_in_temp_dir();
+        app.screen = Screen::Connections;
+        app.notifications.push(Severity::Error, "oops");
+
+        app.apply_action(Action::Back);
+
+        assert!(app.notifications.current().is_none());
+        assert_eq!(app.screen, Screen::Connections);
+    }
+
+    #[test]
+    fn back_action_returns_to_files_screen_when_there_is_no_error() {
+        let (_dir, mut app) = app_in_temp_dir();
+        app.screen = Screen::Connections;
+
+        app.apply_action(Action::Back);
+
+        assert_eq!(app.screen, Screen::Files);
     }
 }
