@@ -8,7 +8,7 @@ use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders};
 
 use crate::filesystem::{Entry, local};
-use crate::tui::sort::{self, SortSpec};
+use crate::tui::sort::{self, SortKey, SortOrder, SortSpec};
 use crate::tui::widgets::file_list;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -281,13 +281,29 @@ pub fn render_panel(
     };
 
     let block = Block::default()
-        .title(format!("{title} {}", panel.path().display()))
+        .title(format!(
+            "{title} {} [{}]",
+            panel.path().display(),
+            sort_indicator(panel.sort_spec())
+        ))
         .borders(Borders::ALL)
         .border_style(border_style);
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
     file_list::render_file_list(frame, inner, panel, is_active);
+}
+
+fn sort_indicator(spec: SortSpec) -> String {
+    let key = match spec.key {
+        SortKey::Name => "Name",
+        SortKey::Size => "Size",
+    };
+    let arrow = match spec.order {
+        SortOrder::Ascending => '\u{25B2}',
+        SortOrder::Descending => '\u{25BC}',
+    };
+    format!("{key} {arrow}")
 }
 
 pub fn render_placeholder(frame: &mut Frame, area: Rect, title: &str, is_active: bool) {
