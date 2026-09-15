@@ -1,6 +1,7 @@
 use anyhow::Result;
 
 mod app;
+mod config;
 mod connection;
 mod filesystem;
 mod terminal;
