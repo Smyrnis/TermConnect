@@ -8,6 +8,7 @@ use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders};
 
 use crate::filesystem::{Entry, local};
+use crate::tui::sort::{self, SortSpec};
 use crate::tui::widgets::file_list;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,18 +36,24 @@ pub enum Row {
 
 pub struct PanelState {
     path: PathBuf,
+    all_entries: Vec<Entry>,
     rows: Vec<Row>,
     pub cursor: usize,
     pub selected: HashSet<PathBuf>,
+    sort_spec: SortSpec,
+    show_hidden: bool,
 }
 
 impl PanelState {
     pub fn new(path: PathBuf) -> Result<Self> {
         let mut panel = Self {
             path,
+            all_entries: Vec::new(),
             rows: Vec::new(),
             cursor: 0,
             selected: HashSet::new(),
+            sort_spec: SortSpec::default(),
+            show_hidden: false,
         };
         panel.refresh()?;
         Ok(panel)
@@ -66,9 +73,12 @@ impl PanelState {
     pub fn from_listing(path: PathBuf, entries: Vec<Entry>) -> Self {
         let mut panel = Self {
             path: PathBuf::new(),
+            all_entries: Vec::new(),
             rows: Vec::new(),
             cursor: 0,
             selected: HashSet::new(),
+            sort_spec: SortSpec::default(),
+            show_hidden: false,
         };
         panel.replace_listing(path, entries);
         panel
@@ -77,18 +87,60 @@ impl PanelState {
     /// Replaces the current listing with an already-fetched one, without
     /// touching the filesystem — the async counterpart to `refresh`.
     pub fn replace_listing(&mut self, path: PathBuf, entries: Vec<Entry>) {
-        let mut rows: Vec<Row> = Vec::with_capacity(entries.len() + 1);
+        self.path = path;
+        self.all_entries = entries;
+        self.selected.clear();
+        self.recompute_rows();
+    }
 
-        if path.parent().is_some() {
+    /// Rebuilds `rows` from `all_entries` by applying `show_hidden` and
+    /// `sort_spec` — pure state, touches neither the filesystem nor the
+    /// network, so toggling either is instant.
+    fn recompute_rows(&mut self) {
+        let mut visible: Vec<Entry> = self
+            .all_entries
+            .iter()
+            .filter(|entry| self.show_hidden || !entry.name.starts_with('.'))
+            .cloned()
+            .collect();
+        sort::sort_entries(&mut visible, self.sort_spec);
+
+        let mut rows = Vec::with_capacity(visible.len() + 1);
+        if self.path.parent().is_some() {
             rows.push(Row::Parent);
         }
+        rows.extend(visible.into_iter().map(Row::Entry));
 
-        rows.extend(entries.into_iter().map(Row::Entry));
-
-        self.path = path;
         self.rows = rows;
-        self.selected.clear();
         self.clamp_cursor();
+    }
+
+    pub fn toggle_hidden(&mut self) {
+        self.show_hidden = !self.show_hidden;
+        self.recompute_rows();
+    }
+
+    pub fn cycle_sort(&mut self) {
+        self.sort_spec = self.sort_spec.cycled();
+        self.recompute_rows();
+    }
+
+    pub fn set_sort_spec(&mut self, spec: SortSpec) {
+        self.sort_spec = spec;
+        self.recompute_rows();
+    }
+
+    pub fn set_show_hidden(&mut self, show_hidden: bool) {
+        self.show_hidden = show_hidden;
+        self.recompute_rows();
+    }
+
+    pub fn sort_spec(&self) -> SortSpec {
+        self.sort_spec
+    }
+
+    pub fn show_hidden(&self) -> bool {
+        self.show_hidden
     }
 
     pub fn refresh(&mut self) -> Result<()> {
@@ -491,5 +543,90 @@ mod tests {
             .collect();
 
         assert!(content.contains("LOCAL"));
+    }
+
+    #[test]
+    fn hidden_entries_are_excluded_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(".hidden"), b"x").unwrap();
+        fs::write(dir.path().join("visible.txt"), b"x").unwrap();
+
+        let panel = PanelState::new(dir.path().to_path_buf()).unwrap();
+
+        let names: Vec<String> = panel
+            .rows()
+            .iter()
+            .filter_map(|row| match row {
+                Row::Entry(e) => Some(e.name.clone()),
+                Row::Parent => None,
+            })
+            .collect();
+        assert_eq!(names, vec!["visible.txt".to_string()]);
+    }
+
+    #[test]
+    fn toggle_hidden_reveals_dotfiles_without_touching_the_filesystem() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(".hidden"), b"x").unwrap();
+        let mut panel = PanelState::new(dir.path().to_path_buf()).unwrap();
+
+        panel.toggle_hidden();
+
+        let names: Vec<String> = panel
+            .rows()
+            .iter()
+            .filter_map(|row| match row {
+                Row::Entry(e) => Some(e.name.clone()),
+                Row::Parent => None,
+            })
+            .collect();
+        assert_eq!(names, vec![".hidden".to_string()]);
+
+        panel.toggle_hidden();
+        assert_eq!(panel.rows().len(), 1); // back to just the Parent row
+    }
+
+    #[test]
+    fn cycle_sort_reorders_rows_by_size_when_advanced_twice() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("big.txt"), vec![0u8; 100]).unwrap();
+        fs::write(dir.path().join("small.txt"), vec![0u8; 1]).unwrap();
+        let mut panel = PanelState::new(dir.path().to_path_buf()).unwrap();
+
+        panel.cycle_sort(); // Name Ascending -> Name Descending
+        panel.cycle_sort(); // Name Descending -> Size Ascending
+
+        let names: Vec<String> = panel
+            .rows()
+            .iter()
+            .filter_map(|row| match row {
+                Row::Entry(e) => Some(e.name.clone()),
+                Row::Parent => None,
+            })
+            .collect();
+        assert_eq!(names, vec!["small.txt".to_string(), "big.txt".to_string()]);
+    }
+
+    #[test]
+    fn set_sort_spec_and_set_show_hidden_apply_immediately() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(".hidden"), b"x").unwrap();
+        let mut panel = PanelState::new(dir.path().to_path_buf()).unwrap();
+
+        panel.set_show_hidden(true);
+        assert!(panel.show_hidden());
+        assert_eq!(panel.rows().len(), 2); // Parent + .hidden
+
+        panel.set_sort_spec(crate::tui::sort::SortSpec {
+            key: crate::tui::sort::SortKey::Size,
+            order: crate::tui::sort::SortOrder::Descending,
+        });
+        assert_eq!(
+            panel.sort_spec(),
+            crate::tui::sort::SortSpec {
+                key: crate::tui::sort::SortKey::Size,
+                order: crate::tui::sort::SortOrder::Descending
+            }
+        );
     }
 }
