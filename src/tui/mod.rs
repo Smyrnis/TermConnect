@@ -12,6 +12,7 @@ use ratatui::backend::CrosstermBackend;
 pub mod input;
 pub mod layout;
 pub mod panels;
+pub mod sort;
 pub mod widgets;
 
 pub type Backend = CrosstermBackend<Stdout>;
