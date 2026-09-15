@@ -13,6 +13,7 @@ use ratatui::widgets::Paragraph;
 use russh_sftp::client::SftpSession;
 use tokio::sync::{mpsc, oneshot};
 
+use crate::config;
 use crate::connection::client::TermConnectHandler;
 use crate::connection::{self, ConnectionEntry};
 use crate::filesystem::{self, Entry};
@@ -21,11 +22,10 @@ use crate::transfer::{self, Direction, JobStatus, TransferOutcome, TransferQueue
 use crate::tui::input::{self, Action};
 use crate::tui::notifications::{Notifications, Severity};
 use crate::tui::panels::{self, ActivePanel, PanelState};
+use crate::tui::sort::{SortKey, SortOrder};
 use crate::tui::widgets::connections_list;
 use crate::tui::widgets::dialog::{ConfirmDialog, Dialog, DialogOutcome, TextInputDialog};
 use crate::tui::{self, Backend, layout};
-
-const HINT_TEXT: &str = "\u{2191}\u{2193} Navigate  Enter Open  Tab Switch  Space Select  F2 Rename  F4 Terminal  F5 Copy  F7 Mkdir  F8 Delete  Ctrl+R Refresh  Ctrl+C Cancel  F9 Connections  F10 Quit";
 
 /// The file operation a dialog is currently collecting input/confirmation for.
 enum PendingAction {
@@ -108,23 +108,52 @@ pub struct App {
     active_transfer_cancel: Option<Arc<AtomicBool>>,
     transfer_tx: mpsc::UnboundedSender<TransferEvent>,
     transfer_rx: mpsc::UnboundedReceiver<TransferEvent>,
+    key_bindings: input::KeyBindings,
 }
 
 impl App {
     pub fn new() -> Result<Self> {
-        Self::at(std::env::current_dir()?)
+        let (settings, config_warnings) = config::load()?;
+        let (key_bindings, key_warnings) = input::KeyBindings::from_overrides(&settings.keys);
+
+        let mut app = Self::at_with(std::env::current_dir()?, &settings.panel, key_bindings)?;
+
+        for warning in config_warnings {
+            app.notifications.push(Severity::Warning, warning.0);
+        }
+        for warning in key_warnings {
+            app.notifications.push(Severity::Warning, warning);
+        }
+
+        Ok(app)
     }
 
     fn at(path: PathBuf) -> Result<Self> {
+        Self::at_with(
+            path,
+            &config::settings::PanelSettings::default(),
+            input::KeyBindings::defaults(),
+        )
+    }
+
+    fn at_with(
+        path: PathBuf,
+        panel_settings: &config::settings::PanelSettings,
+        key_bindings: input::KeyBindings,
+    ) -> Result<Self> {
         let (connect_tx, connect_rx) = mpsc::unbounded_channel();
         let (panel_tx, panel_rx) = mpsc::unbounded_channel();
         let (transfer_tx, transfer_rx) = mpsc::unbounded_channel();
+
+        let mut local = PanelState::new(path)?;
+        local.set_show_hidden(panel_settings.show_hidden);
+        local.set_sort_spec(parse_sort_spec(panel_settings));
 
         Ok(Self {
             should_quit: false,
             screen: Screen::Files,
             active_panel: ActivePanel::Local,
-            local: PanelState::new(path)?,
+            local,
             remote: None,
             dialog: None,
             pending_action: None,
@@ -144,6 +173,7 @@ impl App {
             active_transfer_cancel: None,
             transfer_tx,
             transfer_rx,
+            key_bindings,
         })
     }
 
@@ -162,7 +192,7 @@ impl App {
                         if self.dialog.is_some() {
                             self.apply_dialog_key(key);
                         } else {
-                            let action = input::map_key(key);
+                            let action = self.key_bindings.map_key(key);
                             if action == Action::OpenTerminal {
                                 self.launch_ssh_terminal(terminal).await?;
                                 // The alternate screen and raw mode were
@@ -286,7 +316,7 @@ impl App {
             ),
             None => match self.transfers.active() {
                 Some(job) => (self.transfer_status_text(job), Style::default()),
-                None => (HINT_TEXT.to_string(), Style::default()),
+                None => (build_hint_text(&self.key_bindings), Style::default()),
             },
         };
 
@@ -991,6 +1021,50 @@ fn notification_style(severity: Severity) -> Style {
     }
 }
 
+/// Converts saved panel settings into a `SortSpec` — the one place allowed
+/// to know about both `config::settings::PanelSettings`'s strings and
+/// `tui::sort::SortSpec`'s enums.
+fn parse_sort_spec(panel: &config::settings::PanelSettings) -> crate::tui::sort::SortSpec {
+    let key = match panel.sort_key.as_str() {
+        "size" => SortKey::Size,
+        _ => SortKey::Name,
+    };
+    let order = match panel.sort_order.as_str() {
+        "descending" => SortOrder::Descending,
+        _ => SortOrder::Ascending,
+    };
+    crate::tui::sort::SortSpec { key, order }
+}
+
+/// Builds the key-hint line from the live bindings, so a remapped action
+/// shows its new key instead of a hardcoded default.
+fn build_hint_text(bindings: &input::KeyBindings) -> String {
+    let mut parts = vec!["\u{2191}\u{2193} Navigate".to_string()];
+
+    let entries = [
+        (Action::Open, "Open"),
+        (Action::SwitchPanel, "Switch"),
+        (Action::ToggleSelect, "Select"),
+        (Action::Rename, "Rename"),
+        (Action::OpenTerminal, "Terminal"),
+        (Action::Copy, "Copy"),
+        (Action::Mkdir, "Mkdir"),
+        (Action::Delete, "Delete"),
+        (Action::Refresh, "Refresh"),
+        (Action::CancelTransfer, "Cancel"),
+        (Action::OpenConnections, "Connections"),
+        (Action::Quit, "Quit"),
+    ];
+
+    for (action, label) in entries {
+        if let Some(spec) = bindings.key_for(action) {
+            parts.push(format!("{} {label}", input::format_key_spec(spec)));
+        }
+    }
+
+    parts.join("  ")
+}
+
 /// Resolves at `deadline`, or never resolves if there's nothing to wait
 /// for — so a `tokio::select!` branch built from this doesn't wake the
 /// idle event loop on a timer it doesn't need.
@@ -1106,6 +1180,44 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = App::at(dir.path().to_path_buf()).unwrap();
         (dir, app)
+    }
+
+    #[test]
+    fn at_with_applies_panel_settings_to_the_local_panel() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join(".hidden"), b"x").unwrap();
+        let settings = config::settings::PanelSettings {
+            show_hidden: true,
+            sort_key: "name".to_string(),
+            sort_order: "ascending".to_string(),
+        };
+
+        let app = App::at_with(
+            dir.path().to_path_buf(),
+            &settings,
+            input::KeyBindings::defaults(),
+        )
+        .unwrap();
+
+        assert!(app.local.show_hidden());
+    }
+
+    #[test]
+    fn key_bindings_from_config_are_used_for_key_mapping() {
+        let (_dir, mut app) = app_in_temp_dir();
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert("quit".to_string(), "ctrl+q".to_string());
+        let (bindings, _) = input::KeyBindings::from_overrides(&overrides);
+        app.key_bindings = bindings;
+
+        let event = KeyEvent {
+            code: KeyCode::Char('q'),
+            modifiers: KeyModifiers::CONTROL,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+
+        assert_eq!(app.key_bindings.map_key(event), Action::Quit);
     }
 
     #[test]

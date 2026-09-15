@@ -75,31 +75,6 @@ impl Action {
     }
 }
 
-pub fn map_key(key: KeyEvent) -> Action {
-    match key.code {
-        KeyCode::F(10) => Action::Quit,
-        KeyCode::Tab => Action::SwitchPanel,
-        KeyCode::Up => Action::Up,
-        KeyCode::Down => Action::Down,
-        KeyCode::Enter => Action::Open,
-        KeyCode::Char(' ') => Action::ToggleSelect,
-        KeyCode::F(2) => Action::Rename,
-        KeyCode::F(4) => Action::OpenTerminal,
-        KeyCode::F(5) => Action::Copy,
-        KeyCode::F(7) => Action::Mkdir,
-        KeyCode::F(8) => Action::Delete,
-        KeyCode::F(9) => Action::OpenConnections,
-        KeyCode::Esc => Action::Back,
-        KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => Action::Refresh,
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            Action::CancelTransfer
-        }
-        KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => Action::ToggleHidden,
-        KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => Action::CycleSort,
-        _ => Action::Noop,
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct KeySpec {
     pub code: KeyCode,
@@ -172,6 +147,42 @@ fn parse_key_code(s: &str) -> Result<KeyCode, ParseKeyError> {
             }
         }
     }
+}
+
+/// The inverse of `parse_key_spec`, for status-bar/help-overlay display —
+/// e.g. `"F10"`, `"Ctrl+R"`.
+pub fn format_key_spec(spec: KeySpec) -> String {
+    let mut parts = Vec::new();
+    if spec.modifiers.contains(KeyModifiers::CONTROL) {
+        parts.push("Ctrl".to_string());
+    }
+    if spec.modifiers.contains(KeyModifiers::ALT) {
+        parts.push("Alt".to_string());
+    }
+    if spec.modifiers.contains(KeyModifiers::SHIFT) {
+        parts.push("Shift".to_string());
+    }
+
+    let key_name = match spec.code {
+        KeyCode::F(n) => format!("F{n}"),
+        KeyCode::Tab => "Tab".to_string(),
+        KeyCode::Enter => "Enter".to_string(),
+        KeyCode::Esc => "Esc".to_string(),
+        KeyCode::Char(' ') => "Space".to_string(),
+        KeyCode::Up => "Up".to_string(),
+        KeyCode::Down => "Down".to_string(),
+        KeyCode::Left => "Left".to_string(),
+        KeyCode::Right => "Right".to_string(),
+        KeyCode::Home => "Home".to_string(),
+        KeyCode::End => "End".to_string(),
+        KeyCode::Backspace => "Backspace".to_string(),
+        KeyCode::Delete => "Delete".to_string(),
+        KeyCode::Char(c) => c.to_uppercase().to_string(),
+        other => format!("{other:?}"),
+    };
+    parts.push(key_name);
+
+    parts.join("+")
 }
 
 pub struct KeyBindings(HashMap<Action, KeySpec>);
@@ -293,110 +304,70 @@ mod tests {
     }
 
     #[test]
-    fn f10_maps_to_quit() {
-        assert_eq!(map_key(key(KeyCode::F(10))), Action::Quit);
-    }
-
-    #[test]
-    fn tab_maps_to_switch_panel() {
-        assert_eq!(map_key(key(KeyCode::Tab)), Action::SwitchPanel);
-    }
-
-    #[test]
-    fn arrow_keys_map_to_navigation() {
-        assert_eq!(map_key(key(KeyCode::Up)), Action::Up);
-        assert_eq!(map_key(key(KeyCode::Down)), Action::Down);
-    }
-
-    #[test]
-    fn enter_maps_to_open() {
-        assert_eq!(map_key(key(KeyCode::Enter)), Action::Open);
-    }
-
-    #[test]
-    fn space_maps_to_toggle_select() {
-        assert_eq!(map_key(key(KeyCode::Char(' '))), Action::ToggleSelect);
-    }
-
-    #[test]
-    fn function_keys_map_to_file_operations() {
-        assert_eq!(map_key(key(KeyCode::F(2))), Action::Rename);
-        assert_eq!(map_key(key(KeyCode::F(7))), Action::Mkdir);
-        assert_eq!(map_key(key(KeyCode::F(8))), Action::Delete);
-    }
-
-    #[test]
-    fn f5_maps_to_copy() {
-        assert_eq!(map_key(key(KeyCode::F(5))), Action::Copy);
-    }
-
-    #[test]
-    fn f4_maps_to_open_terminal() {
-        assert_eq!(map_key(key(KeyCode::F(4))), Action::OpenTerminal);
-    }
-
-    #[test]
-    fn ctrl_c_maps_to_cancel_transfer() {
+    fn format_key_spec_renders_a_plain_function_key() {
         assert_eq!(
-            map_key(key_with_modifiers(
-                KeyCode::Char('c'),
-                KeyModifiers::CONTROL
-            )),
-            Action::CancelTransfer
+            format_key_spec(KeySpec {
+                code: KeyCode::F(10),
+                modifiers: KeyModifiers::NONE
+            }),
+            "F10"
         );
     }
 
     #[test]
-    fn f9_maps_to_open_connections() {
-        assert_eq!(map_key(key(KeyCode::F(9))), Action::OpenConnections);
-    }
-
-    #[test]
-    fn esc_maps_to_back() {
-        assert_eq!(map_key(key(KeyCode::Esc)), Action::Back);
-    }
-
-    #[test]
-    fn ctrl_r_maps_to_refresh() {
+    fn format_key_spec_renders_a_control_modifier() {
         assert_eq!(
-            map_key(key_with_modifiers(
-                KeyCode::Char('r'),
-                KeyModifiers::CONTROL
-            )),
-            Action::Refresh
+            format_key_spec(KeySpec {
+                code: KeyCode::Char('r'),
+                modifiers: KeyModifiers::CONTROL
+            }),
+            "Ctrl+R"
         );
     }
 
     #[test]
-    fn plain_r_without_control_maps_to_noop() {
-        assert_eq!(map_key(key(KeyCode::Char('r'))), Action::Noop);
+    fn defaults_cover_every_bindable_action_with_the_original_hardcoded_keys() {
+        let bindings = KeyBindings::defaults();
+        let cases = [
+            (Action::Quit, key(KeyCode::F(10))),
+            (Action::SwitchPanel, key(KeyCode::Tab)),
+            (Action::Up, key(KeyCode::Up)),
+            (Action::Down, key(KeyCode::Down)),
+            (Action::Open, key(KeyCode::Enter)),
+            (Action::ToggleSelect, key(KeyCode::Char(' '))),
+            (Action::Rename, key(KeyCode::F(2))),
+            (Action::OpenTerminal, key(KeyCode::F(4))),
+            (Action::Copy, key(KeyCode::F(5))),
+            (Action::Mkdir, key(KeyCode::F(7))),
+            (Action::Delete, key(KeyCode::F(8))),
+            (Action::OpenConnections, key(KeyCode::F(9))),
+            (Action::Back, key(KeyCode::Esc)),
+            (
+                Action::Refresh,
+                key_with_modifiers(KeyCode::Char('r'), KeyModifiers::CONTROL),
+            ),
+            (
+                Action::CancelTransfer,
+                key_with_modifiers(KeyCode::Char('c'), KeyModifiers::CONTROL),
+            ),
+            (
+                Action::ToggleHidden,
+                key_with_modifiers(KeyCode::Char('h'), KeyModifiers::CONTROL),
+            ),
+            (
+                Action::CycleSort,
+                key_with_modifiers(KeyCode::Char('s'), KeyModifiers::CONTROL),
+            ),
+        ];
+        for (action, event) in cases {
+            assert_eq!(bindings.map_key(event), action);
+        }
     }
 
     #[test]
-    fn other_keys_map_to_noop() {
-        assert_eq!(map_key(key(KeyCode::Char('x'))), Action::Noop);
-    }
-
-    #[test]
-    fn ctrl_h_maps_to_toggle_hidden() {
-        assert_eq!(
-            map_key(key_with_modifiers(
-                KeyCode::Char('h'),
-                KeyModifiers::CONTROL
-            )),
-            Action::ToggleHidden
-        );
-    }
-
-    #[test]
-    fn ctrl_s_maps_to_cycle_sort() {
-        assert_eq!(
-            map_key(key_with_modifiers(
-                KeyCode::Char('s'),
-                KeyModifiers::CONTROL
-            )),
-            Action::CycleSort
-        );
+    fn an_unbound_key_maps_to_noop() {
+        let bindings = KeyBindings::defaults();
+        assert_eq!(bindings.map_key(key(KeyCode::Char('x'))), Action::Noop);
     }
 
     #[test]
