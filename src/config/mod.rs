@@ -1,3 +1,4 @@
+pub mod bookmarks;
 pub mod settings;
 
 use std::fs;
