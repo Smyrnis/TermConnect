@@ -16,6 +16,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::config;
 use crate::connection::client::TermConnectHandler;
 use crate::connection::{self, ConnectionEntry};
+use crate::errors;
 use crate::filesystem::{self, Entry};
 use crate::terminal;
 use crate::transfer::{self, Direction, JobStatus, TransferOutcome, TransferQueue};
@@ -602,7 +603,12 @@ impl App {
             let home = match sftp.canonicalize(".").await {
                 Ok(home) => home,
                 Err(err) => {
-                    let _ = tx.send(PanelEvent::Failed(err.to_string()));
+                    tracing::debug!("{err:?}");
+                    let err = anyhow::Error::from(err);
+                    let _ = tx.send(PanelEvent::Failed(errors::user_message(
+                        "Unable to list home directory",
+                        &err,
+                    )));
                     return;
                 }
             };
@@ -628,7 +634,11 @@ impl App {
         tokio::spawn(async move {
             let target = path_to_remote_string(&dir_path.join(&name));
             if let Err(err) = filesystem::remote::create_directory(&sftp, &target).await {
-                let _ = tx.send(PanelEvent::Failed(err.to_string()));
+                tracing::debug!("{err:?}");
+                let _ = tx.send(PanelEvent::Failed(errors::user_message(
+                    "Unable to create directory",
+                    &err,
+                )));
                 return;
             }
             relist(&sftp, dir_path, &tx).await;
@@ -649,7 +659,11 @@ impl App {
 
         tokio::spawn(async move {
             if let Err(err) = filesystem::remote::rename(&sftp, &from, &to).await {
-                let _ = tx.send(PanelEvent::Failed(err.to_string()));
+                tracing::debug!("{err:?}");
+                let _ = tx.send(PanelEvent::Failed(errors::user_message(
+                    "Unable to rename",
+                    &err,
+                )));
                 return;
             }
             relist(&sftp, dir_path, &tx).await;
@@ -668,7 +682,11 @@ impl App {
             for target in targets {
                 let target_str = path_to_remote_string(&target);
                 if let Err(err) = filesystem::remote::delete(&sftp, &target_str).await {
-                    let _ = tx.send(PanelEvent::Failed(err.to_string()));
+                    tracing::debug!("{err:?}");
+                    let _ = tx.send(PanelEvent::Failed(errors::user_message(
+                        "Unable to delete",
+                        &err,
+                    )));
                     return;
                 }
             }
@@ -768,6 +786,7 @@ impl App {
         let direction = job.direction;
         let local_path = job.local_path.clone();
         let remote_path = job.remote_path.clone();
+        let display_name = job.display_name.clone();
 
         let cancel = Arc::new(AtomicBool::new(false));
         self.active_transfer_cancel = Some(cancel.clone());
@@ -789,10 +808,16 @@ impl App {
 
             let event = match result {
                 Ok(outcome) => TransferEvent::Finished { id, outcome },
-                Err(err) => TransferEvent::Failed {
-                    id,
-                    message: err.to_string(),
-                },
+                Err(err) => {
+                    tracing::debug!("{err:?}");
+                    TransferEvent::Failed {
+                        id,
+                        message: errors::user_message(
+                            format!("Transfer failed: {display_name}"),
+                            &err,
+                        ),
+                    }
+                }
             };
             let _ = tx.send(event);
         });
@@ -822,8 +847,7 @@ impl App {
                     job.status = JobStatus::Failed(message.clone());
                 }
                 if !self.transfers.retry_or_give_up(id) {
-                    self.notifications
-                        .push(Severity::Error, format!("Transfer failed: {message}"));
+                    self.notifications.push(Severity::Error, message);
                 }
                 self.maybe_start_next_transfer();
             }
@@ -1005,7 +1029,11 @@ async fn relist(sftp: &SftpSession, path: PathBuf, tx: &mpsc::UnboundedSender<Pa
             let _ = tx.send(PanelEvent::Listed { path, entries });
         }
         Err(err) => {
-            let _ = tx.send(PanelEvent::Failed(err.to_string()));
+            tracing::debug!("{err:?}");
+            let _ = tx.send(PanelEvent::Failed(errors::user_message(
+                format!("Unable to list {}", path.display()),
+                &err,
+            )));
         }
     }
 }
@@ -1088,8 +1116,9 @@ async fn run_connect(entry: ConnectionEntry, tx: mpsc::UnboundedSender<ConnectEv
     let mut handle = match connection::client::connect(&entry.host, entry.port).await {
         Ok(handle) => handle,
         Err(err) => {
+            tracing::debug!("{err:?}");
             let _ = tx.send(ConnectEvent::Failed {
-                message: err.to_string(),
+                message: errors::user_message(format!("Unable to connect to {}", entry.name), &err),
             });
             return;
         }
@@ -1102,8 +1131,12 @@ async fn run_connect(entry: ConnectionEntry, tx: mpsc::UnboundedSender<ConnectEv
         }
         Ok(false) => {}
         Err(err) => {
+            tracing::debug!("{err:?}");
             let _ = tx.send(ConnectEvent::Failed {
-                message: err.to_string(),
+                message: errors::user_message(
+                    format!("Authentication error for {}", entry.name),
+                    &err,
+                ),
             });
             return;
         }
@@ -1134,8 +1167,12 @@ async fn run_connect(entry: ConnectionEntry, tx: mpsc::UnboundedSender<ConnectEv
             });
         }
         Err(err) => {
+            tracing::debug!("{err:?}");
             let _ = tx.send(ConnectEvent::Failed {
-                message: err.to_string(),
+                message: errors::user_message(
+                    format!("Authentication error for {}", entry.name),
+                    &err,
+                ),
             });
         }
     }
@@ -1157,8 +1194,12 @@ async fn finish_connect(
             });
         }
         Err(err) => {
+            tracing::debug!("{err:?}");
             let _ = tx.send(ConnectEvent::Failed {
-                message: format!("Connected but failed to start SFTP: {err}"),
+                message: errors::user_message(
+                    format!("Connected to {} but failed to start SFTP", entry.name),
+                    &err,
+                ),
             });
         }
     }
