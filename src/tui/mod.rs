@@ -11,6 +11,7 @@ use ratatui::backend::CrosstermBackend;
 
 pub mod input;
 pub mod layout;
+pub mod notifications;
 pub mod panels;
 pub mod sort;
 pub mod widgets;
