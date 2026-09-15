@@ -977,6 +977,9 @@ impl App {
                     Some(PendingAction::Delete) | None => {}
                 }
             }
+            DialogOutcome::Selected(_) | DialogOutcome::Removed(_) => {
+                // Handled by specific dialog types (Task 17+)
+            }
         }
     }
 

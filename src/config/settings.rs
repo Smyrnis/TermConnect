@@ -53,7 +53,9 @@ pub(crate) fn settings_from_file(file: SettingsFile) -> (Settings, Vec<String>) 
     let sort_key = match file.panel.sort_key {
         Some(value) if value == "name" || value == "size" => value,
         Some(other) => {
-            warnings.push(format!("unknown panel.sort_key \"{other}\", using \"name\""));
+            warnings.push(format!(
+                "unknown panel.sort_key \"{other}\", using \"name\""
+            ));
             defaults.sort_key.clone()
         }
         None => defaults.sort_key.clone(),
@@ -71,7 +73,14 @@ pub(crate) fn settings_from_file(file: SettingsFile) -> (Settings, Vec<String>) 
     };
 
     (
-        Settings { panel: PanelSettings { show_hidden, sort_key, sort_order }, keys: file.keys },
+        Settings {
+            panel: PanelSettings {
+                show_hidden,
+                sort_key,
+                sort_order,
+            },
+            keys: file.keys,
+        },
         warnings,
     )
 }
@@ -131,7 +140,10 @@ mod tests {
     fn settings_from_file_passes_keys_through_unvalidated() {
         let mut keys = HashMap::new();
         keys.insert("quit".to_string(), "ctrl+q".to_string());
-        let file = SettingsFile { panel: PanelSettingsFile::default(), keys: keys.clone() };
+        let file = SettingsFile {
+            panel: PanelSettingsFile::default(),
+            keys: keys.clone(),
+        };
 
         let (settings, _) = settings_from_file(file);
 

@@ -1,4 +1,5 @@
 pub mod confirm;
+pub mod list;
 pub mod text_input;
 
 use crossterm::event::KeyEvent;
@@ -6,6 +7,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 
 pub use confirm::ConfirmDialog;
+pub use list::ListDialog;
 pub use text_input::TextInputDialog;
 
 /// Popup width sized to fit the longest line, clamped so a short confirm
@@ -23,6 +25,7 @@ fn content_width(lines: &[&str]) -> u16 {
 pub enum Dialog {
     Confirm(ConfirmDialog),
     TextInput(TextInputDialog),
+    List(ListDialog),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +34,8 @@ pub enum DialogOutcome {
     Confirmed,
     Cancelled,
     Submitted(String),
+    Selected(usize),
+    Removed(usize),
 }
 
 impl Dialog {
@@ -46,6 +51,12 @@ impl Dialog {
                 text_input::TextInputOutcome::Submitted(value) => DialogOutcome::Submitted(value),
                 text_input::TextInputOutcome::Cancelled => DialogOutcome::Cancelled,
             },
+            Dialog::List(dialog) => match dialog.handle_key(key) {
+                list::ListOutcome::Pending => DialogOutcome::Pending,
+                list::ListOutcome::Selected(index) => DialogOutcome::Selected(index),
+                list::ListOutcome::Removed(index) => DialogOutcome::Removed(index),
+                list::ListOutcome::Cancelled => DialogOutcome::Cancelled,
+            },
         }
     }
 
@@ -53,6 +64,7 @@ impl Dialog {
         match self {
             Dialog::Confirm(dialog) => confirm::render_confirm(frame, area, dialog),
             Dialog::TextInput(dialog) => text_input::render_text_input(frame, area, dialog),
+            Dialog::List(dialog) => list::render_list(frame, area, dialog),
         }
     }
 }
