@@ -20,6 +20,7 @@ pub enum Action {
     OpenTerminal,
     ToggleHidden,
     CycleSort,
+    Help,
     Back,
     Noop,
 }
@@ -43,6 +44,7 @@ impl Action {
             Action::OpenTerminal => "open_terminal",
             Action::ToggleHidden => "toggle_hidden",
             Action::CycleSort => "cycle_sort",
+            Action::Help => "help",
             Action::Back => "back",
             Action::Noop => "noop",
         }
@@ -69,6 +71,7 @@ impl Action {
             "open_terminal" => Action::OpenTerminal,
             "toggle_hidden" => Action::ToggleHidden,
             "cycle_sort" => Action::CycleSort,
+            "help" => Action::Help,
             "back" => Action::Back,
             _ => return None,
         })
@@ -219,6 +222,7 @@ impl KeyBindings {
             KeyModifiers::CONTROL,
         );
         bind(Action::CycleSort, KeyCode::Char('s'), KeyModifiers::CONTROL);
+        bind(Action::Help, KeyCode::F(1), KeyModifiers::NONE);
 
         Self(map)
     }
@@ -285,6 +289,29 @@ impl KeyBindings {
     }
 }
 
+/// Every bindable action, in the order the `F1` help overlay lists them.
+/// Excludes `Noop` — the "nothing matched" sentinel isn't bindable.
+pub const ALL_ACTIONS: &[Action] = &[
+    Action::Quit,
+    Action::SwitchPanel,
+    Action::Up,
+    Action::Down,
+    Action::Open,
+    Action::ToggleSelect,
+    Action::Rename,
+    Action::Mkdir,
+    Action::Delete,
+    Action::Refresh,
+    Action::Copy,
+    Action::CancelTransfer,
+    Action::OpenConnections,
+    Action::OpenTerminal,
+    Action::ToggleHidden,
+    Action::CycleSort,
+    Action::Help,
+    Action::Back,
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,6 +328,10 @@ mod tests {
             kind: KeyEventKind::Press,
             state: KeyEventState::NONE,
         }
+    }
+
+    fn map_key_via_defaults(code: KeyCode) -> Action {
+        KeyBindings::defaults().map_key(key(code))
     }
 
     #[test]
@@ -476,5 +507,15 @@ mod tests {
     #[test]
     fn from_name_rejects_noop() {
         assert_eq!(Action::from_name("noop"), None);
+    }
+
+    #[test]
+    fn f1_maps_to_help() {
+        assert_eq!(map_key_via_defaults(KeyCode::F(1)), Action::Help);
+    }
+
+    #[test]
+    fn all_actions_excludes_noop() {
+        assert!(!ALL_ACTIONS.contains(&Action::Noop));
     }
 }

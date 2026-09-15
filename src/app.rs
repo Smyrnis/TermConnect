@@ -26,6 +26,7 @@ use crate::tui::panels::{self, ActivePanel, PanelState};
 use crate::tui::sort::{SortKey, SortOrder};
 use crate::tui::widgets::connections_list;
 use crate::tui::widgets::dialog::{ConfirmDialog, Dialog, DialogOutcome, TextInputDialog};
+use crate::tui::widgets::help;
 use crate::tui::{self, Backend, layout};
 
 /// The file operation a dialog is currently collecting input/confirmation for.
@@ -92,6 +93,7 @@ pub struct App {
     local: PanelState,
     remote: Option<PanelState>,
     dialog: Option<Dialog>,
+    help_visible: bool,
     pending_action: Option<PendingAction>,
     pending_password: Option<oneshot::Sender<String>>,
     notifications: Notifications,
@@ -157,6 +159,7 @@ impl App {
             local,
             remote: None,
             dialog: None,
+            help_visible: false,
             pending_action: None,
             pending_password: None,
             notifications: Notifications::default(),
@@ -190,7 +193,9 @@ impl App {
                         && let Event::Key(key) = event?
                         && key.kind == KeyEventKind::Press
                     {
-                        if self.dialog.is_some() {
+                        if self.help_visible {
+                            self.help_visible = false;
+                        } else if self.dialog.is_some() {
                             self.apply_dialog_key(key);
                         } else {
                             let action = self.key_bindings.map_key(key);
@@ -239,6 +244,10 @@ impl App {
 
         if let Some(dialog) = &self.dialog {
             dialog.render(frame, frame.area());
+        }
+
+        if self.help_visible {
+            help::render_help(frame, frame.area(), &self.key_bindings);
         }
     }
 
@@ -352,6 +361,7 @@ impl App {
             Action::Copy => self.start_copy(),
             Action::CancelTransfer => self.cancel_active_transfer(),
             Action::OpenConnections => self.open_connections_screen(),
+            Action::Help => self.help_visible = true,
             Action::Back => self.handle_back(),
             Action::Up
             | Action::Down
@@ -1070,30 +1080,21 @@ fn parse_sort_spec(panel: &config::settings::PanelSettings) -> crate::tui::sort:
 /// Builds the key-hint line from the live bindings, so a remapped action
 /// shows its new key instead of a hardcoded default.
 fn build_hint_text(bindings: &input::KeyBindings) -> String {
-    let mut parts = vec!["\u{2191}\u{2193} Navigate".to_string()];
-
     let entries = [
-        (Action::Open, "Open"),
-        (Action::SwitchPanel, "Switch"),
-        (Action::ToggleSelect, "Select"),
-        (Action::Rename, "Rename"),
-        (Action::OpenTerminal, "Terminal"),
-        (Action::Copy, "Copy"),
-        (Action::Mkdir, "Mkdir"),
-        (Action::Delete, "Delete"),
-        (Action::Refresh, "Refresh"),
-        (Action::CancelTransfer, "Cancel"),
+        (Action::Help, "Help"),
         (Action::OpenConnections, "Connections"),
         (Action::Quit, "Quit"),
     ];
 
-    for (action, label) in entries {
-        if let Some(spec) = bindings.key_for(action) {
-            parts.push(format!("{} {label}", input::format_key_spec(spec)));
-        }
-    }
-
-    parts.join("  ")
+    entries
+        .into_iter()
+        .filter_map(|(action, label)| {
+            bindings
+                .key_for(action)
+                .map(|spec| format!("{} {label}", input::format_key_spec(spec)))
+        })
+        .collect::<Vec<_>>()
+        .join("  ")
 }
 
 /// Resolves at `deadline`, or never resolves if there's nothing to wait
@@ -1269,6 +1270,13 @@ mod tests {
         let (_dir, mut app) = app_in_temp_dir();
         app.apply_action(Action::Quit);
         assert!(app.should_quit);
+    }
+
+    #[test]
+    fn help_action_shows_the_overlay() {
+        let (_dir, mut app) = app_in_temp_dir();
+        app.apply_action(Action::Help);
+        assert!(app.help_visible);
     }
 
     #[test]
