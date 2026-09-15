@@ -276,6 +276,7 @@ mod tests {
             path: PathBuf::from("/home/user/remote_dir"),
             is_dir: true,
             size: 0,
+            permissions: None,
         }];
 
         let panel = PanelState::from_listing(PathBuf::from("/home/user"), entries);
@@ -299,6 +300,7 @@ mod tests {
             path: PathBuf::from("/home/user/child"),
             is_dir: true,
             size: 0,
+            permissions: None,
         }];
         let mut panel = PanelState::from_listing(PathBuf::from("/home/user"), entries);
 

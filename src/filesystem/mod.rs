@@ -9,4 +9,5 @@ pub struct Entry {
     pub path: PathBuf,
     pub is_dir: bool,
     pub size: u64,
+    pub permissions: Option<u32>,
 }

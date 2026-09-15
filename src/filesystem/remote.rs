@@ -18,14 +18,9 @@ pub async fn list(sftp: &SftpSession, path: &str) -> Result<Vec<Entry>> {
             name,
             is_dir: metadata.is_dir(),
             size: metadata.len(),
+            permissions: metadata.permissions,
         });
     }
-
-    entries.sort_by(|a, b| {
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
 
     Ok(entries)
 }

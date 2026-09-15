@@ -1085,6 +1085,7 @@ mod tests {
                 path: PathBuf::from("/home/user/child"),
                 is_dir: true,
                 size: 0,
+                permissions: None,
             }],
         ));
         app.active_panel = ActivePanel::Remote;

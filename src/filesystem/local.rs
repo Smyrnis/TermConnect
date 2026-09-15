@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use anyhow::Result;
+use std::os::unix::fs::PermissionsExt;
 
 use super::Entry;
 
@@ -18,14 +19,9 @@ pub fn list(path: &Path) -> Result<Vec<Entry>> {
             path: dir_entry.path(),
             is_dir: metadata.is_dir(),
             size: metadata.len(),
+            permissions: Some(metadata.permissions().mode()),
         });
     }
-
-    entries.sort_by(|a, b| {
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
 
     Ok(entries)
 }
@@ -58,18 +54,31 @@ mod tests {
     use std::fs::File;
 
     #[test]
-    fn list_returns_directories_before_files_alphabetically() {
+    fn list_returns_every_entry_in_the_directory() {
         let dir = tempfile::tempdir().unwrap();
         File::create(dir.path().join("b_file.txt")).unwrap();
         File::create(dir.path().join("a_file.txt")).unwrap();
         fs::create_dir(dir.path().join("z_dir")).unwrap();
 
         let entries = list(dir.path()).unwrap();
-        let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        let mut names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+        names.sort();
 
-        assert_eq!(names, vec!["z_dir", "a_file.txt", "b_file.txt"]);
-        assert!(entries[0].is_dir);
-        assert!(!entries[1].is_dir);
+        assert_eq!(names, vec!["a_file.txt", "b_file.txt", "z_dir"]);
+    }
+
+    #[test]
+    fn list_reports_unix_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("data.txt");
+        fs::write(&path, b"hello").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+
+        let entries = list(dir.path()).unwrap();
+
+        assert_eq!(entries[0].permissions.unwrap() & 0o777, 0o640);
     }
 
     #[test]
