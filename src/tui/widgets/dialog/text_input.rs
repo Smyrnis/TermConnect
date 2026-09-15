@@ -1,14 +1,15 @@
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
-use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Text};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 
 pub struct TextInputDialog {
     pub title: String,
     pub value: String,
     pub masked: bool,
+    pub cursor: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,10 +21,13 @@ pub enum TextInputOutcome {
 
 impl TextInputDialog {
     pub fn new(title: impl Into<String>, initial_value: impl Into<String>) -> Self {
+        let value = initial_value.into();
+        let cursor = value.chars().count();
         Self {
             title: title.into(),
-            value: initial_value.into(),
+            value,
             masked: false,
+            cursor,
         }
     }
 
@@ -32,6 +36,7 @@ impl TextInputDialog {
             title: title.into(),
             value: String::new(),
             masked: true,
+            cursor: 0,
         }
     }
 
@@ -39,16 +44,60 @@ impl TextInputDialog {
         match key.code {
             KeyCode::Enter => TextInputOutcome::Submitted(self.value.clone()),
             KeyCode::Esc => TextInputOutcome::Cancelled,
+            KeyCode::Left => {
+                self.cursor = self.cursor.saturating_sub(1);
+                TextInputOutcome::Pending
+            }
+            KeyCode::Right => {
+                self.cursor = (self.cursor + 1).min(self.value.chars().count());
+                TextInputOutcome::Pending
+            }
+            KeyCode::Home => {
+                self.cursor = 0;
+                TextInputOutcome::Pending
+            }
+            KeyCode::End => {
+                self.cursor = self.value.chars().count();
+                TextInputOutcome::Pending
+            }
             KeyCode::Backspace => {
-                self.value.pop();
+                if self.cursor > 0 {
+                    self.remove_char_at(self.cursor - 1);
+                    self.cursor -= 1;
+                }
+                TextInputOutcome::Pending
+            }
+            KeyCode::Delete => {
+                if self.cursor < self.value.chars().count() {
+                    self.remove_char_at(self.cursor);
+                }
                 TextInputOutcome::Pending
             }
             KeyCode::Char(c) => {
-                self.value.push(c);
+                self.insert_char_at(self.cursor, c);
+                self.cursor += 1;
                 TextInputOutcome::Pending
             }
             _ => TextInputOutcome::Pending,
         }
+    }
+
+    fn insert_char_at(&mut self, index: usize, ch: char) {
+        let byte_index = self.byte_index_for(index);
+        self.value.insert(byte_index, ch);
+    }
+
+    fn remove_char_at(&mut self, index: usize) {
+        let byte_index = self.byte_index_for(index);
+        self.value.remove(byte_index);
+    }
+
+    fn byte_index_for(&self, char_index: usize) -> usize {
+        self.value
+            .char_indices()
+            .nth(char_index)
+            .map(|(byte, _)| byte)
+            .unwrap_or(self.value.len())
     }
 }
 
@@ -65,9 +114,28 @@ pub fn render_text_input(frame: &mut Frame, area: Rect, dialog: &TextInputDialog
     } else {
         dialog.value.clone()
     };
-    let text = Text::from(vec![Line::from(format!("{displayed_value}\u{2588}"))]);
 
-    let paragraph = Paragraph::new(text).block(block);
+    let chars: Vec<char> = displayed_value.chars().collect();
+    let mut spans: Vec<Span> = chars
+        .iter()
+        .enumerate()
+        .map(|(i, ch)| {
+            let style = if i == dialog.cursor {
+                Style::default().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default()
+            };
+            Span::styled(ch.to_string(), style)
+        })
+        .collect();
+    if dialog.cursor >= chars.len() {
+        spans.push(Span::styled(
+            " ",
+            Style::default().add_modifier(Modifier::REVERSED),
+        ));
+    }
+
+    let paragraph = Paragraph::new(Line::from(spans)).block(block);
 
     frame.render_widget(Clear, popup);
     frame.render_widget(paragraph, popup);
@@ -156,5 +224,64 @@ mod tests {
 
         assert!(content.contains("***"));
         assert!(!content.contains("set"));
+    }
+
+    #[test]
+    fn left_and_right_move_the_cursor_without_changing_the_value() {
+        let mut dialog = TextInputDialog::new("Name", "abc");
+        assert_eq!(dialog.cursor, 3);
+
+        dialog.handle_key(key(KeyCode::Left));
+        dialog.handle_key(key(KeyCode::Left));
+        assert_eq!(dialog.cursor, 1);
+
+        dialog.handle_key(key(KeyCode::Right));
+        assert_eq!(dialog.cursor, 2);
+        assert_eq!(dialog.value, "abc");
+    }
+
+    #[test]
+    fn home_and_end_jump_to_the_boundaries() {
+        let mut dialog = TextInputDialog::new("Name", "abc");
+        dialog.handle_key(key(KeyCode::Home));
+        assert_eq!(dialog.cursor, 0);
+        dialog.handle_key(key(KeyCode::End));
+        assert_eq!(dialog.cursor, 3);
+    }
+
+    #[test]
+    fn typing_inserts_at_the_cursor_not_only_at_the_end() {
+        let mut dialog = TextInputDialog::new("Name", "ac");
+        dialog.cursor = 1;
+        dialog.handle_key(key(KeyCode::Char('b')));
+        assert_eq!(dialog.value, "abc");
+        assert_eq!(dialog.cursor, 2);
+    }
+
+    #[test]
+    fn delete_removes_the_character_at_the_cursor() {
+        let mut dialog = TextInputDialog::new("Name", "abc");
+        dialog.cursor = 0;
+        dialog.handle_key(key(KeyCode::Delete));
+        assert_eq!(dialog.value, "bc");
+        assert_eq!(dialog.cursor, 0);
+    }
+
+    #[test]
+    fn backspace_at_the_start_does_nothing() {
+        let mut dialog = TextInputDialog::new("Name", "abc");
+        dialog.cursor = 0;
+        dialog.handle_key(key(KeyCode::Backspace));
+        assert_eq!(dialog.value, "abc");
+        assert_eq!(dialog.cursor, 0);
+    }
+
+    #[test]
+    fn cursor_stays_within_bounds_on_an_empty_value() {
+        let mut dialog = TextInputDialog::new("Name", "");
+        dialog.handle_key(key(KeyCode::Left));
+        assert_eq!(dialog.cursor, 0);
+        dialog.handle_key(key(KeyCode::Right));
+        assert_eq!(dialog.cursor, 0);
     }
 }
