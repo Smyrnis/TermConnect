@@ -16,6 +16,8 @@ pub enum Action {
     CancelTransfer,
     OpenConnections,
     OpenTerminal,
+    ToggleHidden,
+    CycleSort,
     Back,
     Noop,
 }
@@ -39,6 +41,8 @@ pub fn map_key(key: KeyEvent) -> Action {
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             Action::CancelTransfer
         }
+        KeyCode::Char('h') if key.modifiers.contains(KeyModifiers::CONTROL) => Action::ToggleHidden,
+        KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => Action::CycleSort,
         _ => Action::Noop,
     }
 }
@@ -144,5 +148,27 @@ mod tests {
     #[test]
     fn other_keys_map_to_noop() {
         assert_eq!(map_key(key(KeyCode::Char('x'))), Action::Noop);
+    }
+
+    #[test]
+    fn ctrl_h_maps_to_toggle_hidden() {
+        assert_eq!(
+            map_key(key_with_modifiers(
+                KeyCode::Char('h'),
+                KeyModifiers::CONTROL
+            )),
+            Action::ToggleHidden
+        );
+    }
+
+    #[test]
+    fn ctrl_s_maps_to_cycle_sort() {
+        assert_eq!(
+            map_key(key_with_modifiers(
+                KeyCode::Char('s'),
+                KeyModifiers::CONTROL
+            )),
+            Action::CycleSort
+        );
     }
 }

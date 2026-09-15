@@ -314,7 +314,13 @@ impl App {
             Action::CancelTransfer => self.cancel_active_transfer(),
             Action::OpenConnections => self.open_connections_screen(),
             Action::Back => self.screen = Screen::Files,
-            Action::Up | Action::Down | Action::ToggleSelect | Action::Open | Action::Refresh => {
+            Action::Up
+            | Action::Down
+            | Action::ToggleSelect
+            | Action::Open
+            | Action::Refresh
+            | Action::ToggleHidden
+            | Action::CycleSort => {
                 self.apply_screen_action(action);
             }
             // Handled specially in `run`, which has the `&mut Terminal`
@@ -355,6 +361,14 @@ impl App {
             }
             Action::Open => self.local.open_selected(),
             Action::Refresh => self.local.refresh(),
+            Action::ToggleHidden => {
+                self.local.toggle_hidden();
+                Ok(())
+            }
+            Action::CycleSort => {
+                self.local.cycle_sort();
+                Ok(())
+            }
             _ => Ok(()),
         };
 
@@ -383,6 +397,8 @@ impl App {
                 let path = remote.path().to_path_buf();
                 self.spawn_remote_list(path);
             }
+            Action::ToggleHidden => remote.toggle_hidden(),
+            Action::CycleSort => remote.cycle_sort(),
             _ => {}
         }
     }
@@ -1276,5 +1292,27 @@ mod tests {
         let (_dir, mut app) = app_in_temp_dir();
         app.apply_panel_event(PanelEvent::Failed("boom".to_string()));
         assert_eq!(app.status.as_deref(), Some("boom"));
+    }
+
+    #[test]
+    fn toggle_hidden_action_reveals_dotfiles_in_the_local_panel() {
+        let (dir, mut app) = app_in_temp_dir();
+        fs::write(dir.path().join(".secret"), b"x").unwrap();
+        app.local.refresh().unwrap();
+        let before = app.local.rows().len();
+
+        app.apply_action(Action::ToggleHidden);
+
+        assert_eq!(app.local.rows().len(), before + 1);
+    }
+
+    #[test]
+    fn cycle_sort_action_changes_the_local_panel_sort_spec() {
+        let (_dir, mut app) = app_in_temp_dir();
+        let before = app.local.sort_spec();
+
+        app.apply_action(Action::CycleSort);
+
+        assert_ne!(app.local.sort_spec(), before);
     }
 }
