@@ -8,6 +8,18 @@ use ratatui::layout::Rect;
 pub use confirm::ConfirmDialog;
 pub use text_input::TextInputDialog;
 
+/// Popup width sized to fit the longest line, clamped so a short confirm
+/// message doesn't get a needlessly wide box and a long one doesn't
+/// overflow a narrow terminal.
+fn content_width(lines: &[&str]) -> u16 {
+    let longest = lines
+        .iter()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0);
+    (longest as u16 + 4).clamp(20, 76)
+}
+
 pub enum Dialog {
     Confirm(ConfirmDialog),
     TextInput(TextInputDialog),
@@ -42,5 +54,17 @@ impl Dialog {
             Dialog::Confirm(dialog) => confirm::render_confirm(frame, area, dialog),
             Dialog::TextInput(dialog) => text_input::render_text_input(frame, area, dialog),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_width_grows_with_the_longest_line_but_stays_clamped() {
+        assert_eq!(content_width(&["short"]), 20); // 5 + 4 = 9, clamped up to the minimum
+        assert_eq!(content_width(&[&"x".repeat(37)]), 41); // 37 + 4, within range
+        assert_eq!(content_width(&[&"x".repeat(200)]), 76); // clamped to the maximum
     }
 }
