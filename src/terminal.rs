@@ -28,5 +28,5 @@ pub fn run(entry: &ConnectionEntry) -> std::io::Result<ExitStatus> {
 }
 
 #[cfg(test)]
-#[path = "terminal_tests.rs"]
+#[path = "../tests/root/terminal_test.rs"]
 mod tests;
