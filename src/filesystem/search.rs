@@ -2,7 +2,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use russh::ChannelMsg;
+use russh::client::Handle;
+use russh_sftp::client::SftpSession;
 use tokio::sync::mpsc;
+
+use crate::connection::client::TermConnectHandler;
+use crate::filesystem::remote::join;
 
 use super::Entry;
 
@@ -131,6 +137,189 @@ async fn search_local_with_limits(
     let _ = tx.send(SearchEvent::Done { truncated });
 }
 
+/// Wraps `value` in single quotes for a POSIX shell command line, escaping
+/// any embedded `'` — the standard way to pass an arbitrary string as one
+/// shell argument without it being interpreted.
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', r"'\''"))
+}
+
+pub async fn search_remote(
+    handle: &Handle<TermConnectHandler>,
+    sftp: &SftpSession,
+    root: String,
+    pattern: String,
+    tx: mpsc::UnboundedSender<SearchEvent>,
+    cancel: Arc<AtomicBool>,
+) {
+    search_remote_with_limits(
+        handle,
+        sftp,
+        root,
+        pattern,
+        tx,
+        cancel,
+        MAX_DEPTH,
+        MAX_RESULTS,
+    )
+    .await;
+}
+
+async fn search_remote_with_limits(
+    handle: &Handle<TermConnectHandler>,
+    sftp: &SftpSession,
+    root: String,
+    pattern: String,
+    tx: mpsc::UnboundedSender<SearchEvent>,
+    cancel: Arc<AtomicBool>,
+    max_depth: usize,
+    max_results: usize,
+) {
+    match run_find(handle, &root, &pattern, max_depth).await {
+        Some(paths) => {
+            let mut found = 0usize;
+            let mut truncated = false;
+
+            for path in paths {
+                if cancel.load(Ordering::Relaxed) {
+                    return;
+                }
+                if found >= max_results {
+                    truncated = true;
+                    break;
+                }
+
+                if let Ok(metadata) = sftp.metadata(&path).await {
+                    let name = path.rsplit('/').next().unwrap_or(&path).to_string();
+                    let _ = tx.send(SearchEvent::Found(Entry {
+                        name,
+                        path: PathBuf::from(&path),
+                        is_dir: metadata.is_dir(),
+                        size: metadata.len(),
+                        permissions: metadata.permissions,
+                    }));
+                    found += 1;
+                }
+            }
+
+            let _ = tx.send(SearchEvent::Done { truncated });
+        }
+        None => {
+            search_remote_walk(sftp, root, pattern, tx, cancel, max_depth, max_results).await;
+        }
+    }
+}
+
+/// Runs `find <root> -maxdepth <max_depth> -iname <pattern>` over an SSH
+/// exec channel — the only remote command execution in TermConnect, and it
+/// only ever runs on an explicit search. Returns `None` (triggering the
+/// SFTP-walk fallback) if the channel can't be opened, `exec` fails, or the
+/// command exits non-zero.
+async fn run_find(
+    handle: &Handle<TermConnectHandler>,
+    root: &str,
+    pattern: &str,
+    max_depth: usize,
+) -> Option<Vec<String>> {
+    let mut channel = handle.channel_open_session().await.ok()?;
+    let command = format!(
+        "find {} -maxdepth {max_depth} -iname {}",
+        shell_quote(root),
+        shell_quote(pattern)
+    );
+    channel.exec(true, command.into_bytes()).await.ok()?;
+
+    let mut output = Vec::new();
+    let mut exit_ok = false;
+
+    while let Some(msg) = channel.wait().await {
+        match msg {
+            ChannelMsg::Data { data } => output.extend_from_slice(&data),
+            ChannelMsg::ExitStatus { exit_status } => exit_ok = exit_status == 0,
+            ChannelMsg::Eof | ChannelMsg::Close => break,
+            _ => {}
+        }
+    }
+
+    if !exit_ok {
+        return None;
+    }
+
+    let text = String::from_utf8_lossy(&output);
+    Some(
+        text.lines()
+            .filter(|line| !line.is_empty())
+            .map(str::to_string)
+            .collect(),
+    )
+}
+
+/// Depth-limited, cancellable, capped SFTP `read_dir` walk — the fallback
+/// when `find` isn't available, mirroring `search_local`'s shape.
+async fn search_remote_walk(
+    sftp: &SftpSession,
+    root: String,
+    pattern: String,
+    tx: mpsc::UnboundedSender<SearchEvent>,
+    cancel: Arc<AtomicBool>,
+    max_depth: usize,
+    max_results: usize,
+) {
+    let mut found = 0usize;
+    let mut truncated = false;
+    let mut stack: Vec<(String, usize)> = vec![(root, 0)];
+
+    while let Some((dir, depth)) = stack.pop() {
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        if depth > max_depth {
+            continue;
+        }
+
+        let entries = match sftp.read_dir(&dir).await {
+            Ok(read_dir) => read_dir.collect::<Vec<_>>(),
+            Err(_) => continue,
+        };
+
+        for dir_entry in entries {
+            if cancel.load(Ordering::Relaxed) {
+                return;
+            }
+            if found >= max_results {
+                truncated = true;
+                break;
+            }
+
+            let name = dir_entry.file_name();
+            let metadata = dir_entry.metadata();
+            let path = join(&dir, &name);
+
+            if glob_match(&pattern, &name) {
+                let _ = tx.send(SearchEvent::Found(Entry {
+                    name: name.clone(),
+                    path: PathBuf::from(&path),
+                    is_dir: metadata.is_dir(),
+                    size: metadata.len(),
+                    permissions: metadata.permissions,
+                }));
+                found += 1;
+            }
+
+            if metadata.is_dir() {
+                stack.push((path, depth + 1));
+            }
+        }
+
+        if found >= max_results {
+            truncated = true;
+            break;
+        }
+    }
+
+    let _ = tx.send(SearchEvent::Done { truncated });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -236,6 +425,23 @@ mod tests {
         let (found, truncated) = drain(rx).await;
         assert_eq!(found.len(), 3);
         assert!(truncated);
+    }
+
+    #[test]
+    fn shell_quote_wraps_plain_text_in_single_quotes() {
+        assert_eq!(shell_quote("simple"), "'simple'");
+    }
+
+    #[test]
+    fn shell_quote_escapes_embedded_single_quotes() {
+        assert_eq!(shell_quote("it's here"), "'it'\\''s here'");
+    }
+
+    #[test]
+    fn shell_quote_preserves_other_shell_metacharacters_literally_inside_quotes() {
+        // Dangerous outside quotes, inert once wrapped — quoting the whole
+        // argument is the defense, not denying individual characters.
+        assert_eq!(shell_quote("$(rm -rf /)"), "'$(rm -rf /)'");
     }
 
     #[tokio::test]
