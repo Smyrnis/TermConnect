@@ -22,6 +22,7 @@ pub enum Action {
     CycleSort,
     BookmarkHere,
     OpenBookmarks,
+    OpenSearch,
     Help,
     Back,
     Noop,
@@ -48,6 +49,7 @@ impl Action {
             Action::CycleSort => "cycle_sort",
             Action::BookmarkHere => "bookmark_here",
             Action::OpenBookmarks => "open_bookmarks",
+            Action::OpenSearch => "open_search",
             Action::Help => "help",
             Action::Back => "back",
             Action::Noop => "noop",
@@ -77,6 +79,7 @@ impl Action {
             "cycle_sort" => Action::CycleSort,
             "bookmark_here" => Action::BookmarkHere,
             "open_bookmarks" => Action::OpenBookmarks,
+            "open_search" => Action::OpenSearch,
             "help" => Action::Help,
             "back" => Action::Back,
             _ => return None,
@@ -238,6 +241,11 @@ impl KeyBindings {
             KeyCode::Char('b'),
             KeyModifiers::CONTROL,
         );
+        bind(
+            Action::OpenSearch,
+            KeyCode::Char('f'),
+            KeyModifiers::CONTROL,
+        );
         bind(Action::Help, KeyCode::F(1), KeyModifiers::NONE);
 
         Self(map)
@@ -326,6 +334,7 @@ pub const ALL_ACTIONS: &[Action] = &[
     Action::CycleSort,
     Action::BookmarkHere,
     Action::OpenBookmarks,
+    Action::OpenSearch,
     Action::Help,
     Action::Back,
 ];
@@ -549,6 +558,14 @@ mod tests {
         assert_eq!(
             map_key_via_defaults_with_modifiers(KeyCode::Char('b'), KeyModifiers::CONTROL),
             Action::OpenBookmarks
+        );
+    }
+
+    #[test]
+    fn ctrl_f_maps_to_open_search() {
+        assert_eq!(
+            map_key_via_defaults_with_modifiers(KeyCode::Char('f'), KeyModifiers::CONTROL),
+            Action::OpenSearch
         );
     }
 

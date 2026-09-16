@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use anyhow::Result;
-use crossterm::event::{Event, EventStream, KeyEvent, KeyEventKind};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures_util::StreamExt;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -17,6 +17,7 @@ use crate::config;
 use crate::connection::client::TermConnectHandler;
 use crate::connection::{self, ConnectionEntry};
 use crate::errors;
+use crate::filesystem::search::{self, SearchEvent};
 use crate::filesystem::{self, Entry};
 use crate::terminal;
 use crate::transfer::{self, Direction, JobStatus, TransferOutcome, TransferQueue};
@@ -29,6 +30,8 @@ use crate::tui::widgets::dialog::{
     ConfirmDialog, Dialog, DialogOutcome, ListDialog, TextInputDialog,
 };
 use crate::tui::widgets::help;
+use crate::tui::widgets::search_view;
+use crate::tui::widgets::search_view::{SearchOutcome, SearchView};
 use crate::tui::{self, Backend, layout};
 
 /// The file operation a dialog is currently collecting input/confirmation for.
@@ -45,6 +48,7 @@ enum PendingAction {
 enum Screen {
     Files,
     Connections,
+    Search,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,6 +57,18 @@ enum ConnectionStatus {
     Connecting(String),
     Connected(String),
     Failed(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SearchTarget {
+    Local,
+    Remote,
+}
+
+struct SearchSession {
+    view: SearchView,
+    target: SearchTarget,
+    cancel: Arc<AtomicBool>,
 }
 
 /// Progress reported by a background connection attempt (see
@@ -103,9 +119,12 @@ pub struct App {
     connections: Vec<ConnectionEntry>,
     connections_cursor: usize,
     connection_status: ConnectionStatus,
-    connection_handle: Option<russh::client::Handle<TermConnectHandler>>,
+    connection_handle: Option<Arc<russh::client::Handle<TermConnectHandler>>>,
     active_connection: Option<ConnectionEntry>,
     sftp: Option<Arc<SftpSession>>,
+    search: Option<SearchSession>,
+    search_tx: mpsc::UnboundedSender<SearchEvent>,
+    search_rx: mpsc::UnboundedReceiver<SearchEvent>,
     connect_tx: mpsc::UnboundedSender<ConnectEvent>,
     connect_rx: mpsc::UnboundedReceiver<ConnectEvent>,
     panel_tx: mpsc::UnboundedSender<PanelEvent>,
@@ -167,6 +186,7 @@ impl App {
         let (connect_tx, connect_rx) = mpsc::unbounded_channel();
         let (panel_tx, panel_rx) = mpsc::unbounded_channel();
         let (transfer_tx, transfer_rx) = mpsc::unbounded_channel();
+        let (search_tx, search_rx) = mpsc::unbounded_channel();
 
         let mut local = PanelState::new(path)?;
         local.set_show_hidden(panel_settings.show_hidden);
@@ -189,6 +209,9 @@ impl App {
             connection_handle: None,
             active_connection: None,
             sftp: None,
+            search: None,
+            search_tx,
+            search_rx,
             connect_tx,
             connect_rx,
             panel_tx,
@@ -219,6 +242,8 @@ impl App {
                             self.help_visible = false;
                         } else if self.dialog.is_some() {
                             self.apply_dialog_key(key);
+                        } else if self.screen == Screen::Search {
+                            self.apply_search_key(key);
                         } else {
                             let action = self.key_bindings.map_key(key);
                             if action == Action::OpenTerminal {
@@ -243,6 +268,9 @@ impl App {
                 Some(transfer_event) = self.transfer_rx.recv() => {
                     self.apply_transfer_event(transfer_event);
                 }
+                Some(search_event) = self.search_rx.recv() => {
+                    self.apply_search_event(search_event);
+                }
                 _ = sleep_until_or_pending(self.notifications.next_wake()) => {
                     self.notifications.expire(Instant::now());
                 }
@@ -260,6 +288,7 @@ impl App {
         match self.screen {
             Screen::Files => self.render_files(frame, main_area),
             Screen::Connections => self.render_connections(frame, main_area),
+            Screen::Search => self.render_search(frame, main_area),
         }
 
         self.render_status(frame, status_area);
@@ -340,6 +369,12 @@ impl App {
         );
     }
 
+    fn render_search(&self, frame: &mut Frame, area: Rect) {
+        if let Some(session) = &self.search {
+            search_view::render_search(frame, area, &session.view);
+        }
+    }
+
     fn render_status(&self, frame: &mut Frame, area: Rect) {
         let (text, style) = match self.notifications.current() {
             Some(notification) => (
@@ -385,6 +420,7 @@ impl App {
             Action::OpenConnections => self.open_connections_screen(),
             Action::BookmarkHere => self.open_bookmark_add_dialog(),
             Action::OpenBookmarks => self.open_bookmarks_dialog(),
+            Action::OpenSearch => self.open_search_screen(),
             Action::Help => self.help_visible = true,
             Action::Back => self.handle_back(),
             Action::Up
@@ -422,6 +458,7 @@ impl App {
         match self.screen {
             Screen::Files => self.apply_panel_action(action),
             Screen::Connections => self.apply_connections_action(action),
+            Screen::Search => {}
         }
     }
 
@@ -566,6 +603,151 @@ impl App {
         }
     }
 
+    fn open_search_screen(&mut self) {
+        if self.screen != Screen::Files {
+            return;
+        }
+
+        let target = match self.active_panel {
+            ActivePanel::Local => SearchTarget::Local,
+            ActivePanel::Remote => {
+                if self.remote.is_none() {
+                    self.notifications
+                        .push(Severity::Warning, "Connect to a remote server first");
+                    return;
+                }
+                SearchTarget::Remote
+            }
+        };
+
+        self.search = Some(SearchSession {
+            view: SearchView::new(),
+            target,
+            cancel: Arc::new(AtomicBool::new(false)),
+        });
+        self.screen = Screen::Search;
+    }
+
+    fn apply_search_key(&mut self, key: KeyEvent) {
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            if let Some(session) = &self.search {
+                session.cancel.store(true, Ordering::Relaxed);
+            }
+            return;
+        }
+
+        let Some(session) = self.search.as_mut() else {
+            return;
+        };
+
+        match session.view.handle_key(key) {
+            SearchOutcome::Cancel => {
+                if let Some(session) = self.search.take() {
+                    session.cancel.store(true, Ordering::Relaxed);
+                }
+                self.screen = Screen::Files;
+            }
+            SearchOutcome::PatternChanged => self.restart_search(),
+            SearchOutcome::Open => self.open_selected_search_result(),
+            SearchOutcome::Pending => {}
+        }
+    }
+
+    /// Cancels any in-flight search and starts a new one for the current
+    /// pattern — called on every keystroke that changes the pattern, so
+    /// results filter live as the user types.
+    fn restart_search(&mut self) {
+        let Some(session) = self.search.as_mut() else {
+            return;
+        };
+        session.cancel.store(true, Ordering::Relaxed);
+        let cancel = Arc::new(AtomicBool::new(false));
+        session.cancel = cancel.clone();
+        session.view.start();
+
+        let pattern = session.view.pattern.clone();
+        if pattern.is_empty() {
+            return;
+        }
+        // The search box is a plain substring filter, not a glob editor —
+        // wrap the typed text so `glob_match`'s anchored matching (see
+        // `filesystem::search`) behaves like "contains" instead of
+        // requiring an exact filename match.
+        let glob_pattern = format!("*{pattern}*");
+
+        let tx = self.search_tx.clone();
+        match session.target {
+            SearchTarget::Local => {
+                let root = self.local.path().to_path_buf();
+                tokio::spawn(search::search_local(root, glob_pattern, tx, cancel));
+            }
+            SearchTarget::Remote => {
+                let (Some(sftp), Some(handle)) =
+                    (self.sftp.clone(), self.connection_handle.clone())
+                else {
+                    return;
+                };
+                let root = self
+                    .remote
+                    .as_ref()
+                    .map(|remote| remote.path().to_path_buf())
+                    .unwrap_or_default();
+                let root_str = path_to_remote_string(&root);
+                tokio::spawn(async move {
+                    search::search_remote(&handle, &sftp, root_str, glob_pattern, tx, cancel).await;
+                });
+            }
+        }
+    }
+
+    fn apply_search_event(&mut self, event: SearchEvent) {
+        let Some(session) = self.search.as_mut() else {
+            return;
+        };
+        match event {
+            SearchEvent::Found(entry) => session.view.push_result(entry),
+            SearchEvent::Done { truncated } => session.view.finish(truncated),
+            SearchEvent::Failed(message) => {
+                session.view.finish(false);
+                self.notifications.push(Severity::Error, message);
+            }
+        }
+    }
+
+    /// Closes the search screen and navigates the target panel to the
+    /// selected result's parent directory.
+    fn open_selected_search_result(&mut self) {
+        let Some(session) = self.search.as_ref() else {
+            return;
+        };
+        let Some(entry) = session.view.selected_entry().cloned() else {
+            return;
+        };
+        let target_panel = match session.target {
+            SearchTarget::Local => ActivePanel::Local,
+            SearchTarget::Remote => ActivePanel::Remote,
+        };
+        let parent = entry
+            .path
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| entry.path.clone());
+
+        if let Some(session) = self.search.take() {
+            session.cancel.store(true, Ordering::Relaxed);
+        }
+        self.screen = Screen::Files;
+        self.active_panel = target_panel;
+
+        match target_panel {
+            ActivePanel::Local => {
+                let result = self.local.navigate_to(parent);
+                self.set_status(result);
+            }
+            ActivePanel::Remote => self.spawn_remote_list(parent),
+        }
+    }
+
     fn connect_to_selected(&mut self) {
         let Some(entry) = self.connections.get(self.connections_cursor).cloned() else {
             return;
@@ -593,7 +775,7 @@ impl App {
                 handle,
                 sftp,
             } => {
-                self.connection_handle = Some(handle);
+                self.connection_handle = Some(Arc::new(handle));
                 self.sftp = Some(Arc::new(sftp));
                 self.connection_status = ConnectionStatus::Connected(entry.name.clone());
                 self.active_connection = Some(entry);
@@ -1822,5 +2004,60 @@ mod tests {
         app.apply_dialog_key(key(KeyCode::F(8)));
 
         assert!(app.bookmarks.is_empty());
+    }
+
+    #[test]
+    fn open_search_action_switches_to_the_search_screen_for_the_local_panel() {
+        let (_dir, mut app) = app_in_temp_dir();
+        app.apply_action(Action::OpenSearch);
+        assert_eq!(app.screen, Screen::Search);
+    }
+
+    #[test]
+    fn open_search_action_warns_when_remote_is_focused_without_a_connection() {
+        let (_dir, mut app) = app_in_temp_dir();
+        app.active_panel = ActivePanel::Remote;
+
+        app.apply_action(Action::OpenSearch);
+
+        assert_eq!(app.screen, Screen::Files);
+        assert!(app.notifications.current().is_some());
+    }
+
+    #[test]
+    fn esc_in_search_closes_the_screen() {
+        let (_dir, mut app) = app_in_temp_dir();
+        app.apply_action(Action::OpenSearch);
+
+        app.apply_search_key(key(KeyCode::Esc));
+
+        assert_eq!(app.screen, Screen::Files);
+        assert!(app.search.is_none());
+    }
+
+    #[tokio::test]
+    async fn typing_a_pattern_streams_matching_results_back_into_the_search_view() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("target.log"), b"x").unwrap();
+        let mut app = App::at(dir.path().to_path_buf()).unwrap();
+
+        app.apply_action(Action::OpenSearch);
+        for c in "target".chars() {
+            app.apply_search_key(key(KeyCode::Char(c)));
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        while let Ok(event) = app.search_rx.try_recv() {
+            app.apply_search_event(event);
+        }
+
+        assert!(
+            app.search
+                .unwrap()
+                .view
+                .results
+                .iter()
+                .any(|entry| entry.name == "target.log")
+        );
     }
 }
