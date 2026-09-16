@@ -1,4 +1,5 @@
 /target
 .worktrees/
-docs/superpowers/
+docs/
 .superpowers/
+Roadmap.md
