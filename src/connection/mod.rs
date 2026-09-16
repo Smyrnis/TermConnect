@@ -1,5 +1,6 @@
 pub mod client;
 pub mod profile;
+pub mod session;
 pub mod ssh_config;
 pub mod store;
 
