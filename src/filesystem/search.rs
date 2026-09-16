@@ -22,11 +22,14 @@ pub enum SearchEvent {
 }
 
 /// Matches `*` (any run of characters) and `?` (exactly one character)
-/// against `name`, case-sensitively — not a general glob implementation,
-/// just the two wildcards file-name searching needs.
+/// against `name`, case-insensitively (matching remote `find -iname`'s
+/// behavior, so local search, the `find`-based remote search, and the
+/// SFTP-walk remote fallback all agree on the same typed pattern) — not a
+/// general glob implementation, just the two wildcards file-name searching
+/// needs.
 pub fn glob_match(pattern: &str, name: &str) -> bool {
-    let pattern: Vec<char> = pattern.chars().collect();
-    let name: Vec<char> = name.chars().collect();
+    let pattern: Vec<char> = pattern.to_lowercase().chars().collect();
+    let name: Vec<char> = name.to_lowercase().chars().collect();
     match_from(&pattern, &name)
 }
 
@@ -175,7 +178,7 @@ async fn search_remote_with_limits(
     max_depth: usize,
     max_results: usize,
 ) {
-    match run_find(handle, &root, &pattern, max_depth).await {
+    match run_find(handle, &root, &pattern, max_depth, &cancel).await {
         Some(paths) => {
             let mut found = 0usize;
             let mut truncated = false;
@@ -220,6 +223,7 @@ async fn run_find(
     root: &str,
     pattern: &str,
     max_depth: usize,
+    cancel: &Arc<AtomicBool>,
 ) -> Option<Vec<String>> {
     let mut channel = handle.channel_open_session().await.ok()?;
     let command = format!(
@@ -232,12 +236,28 @@ async fn run_find(
     let mut output = Vec::new();
     let mut exit_ok = false;
 
-    while let Some(msg) = channel.wait().await {
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            // Dropping `channel` closes the SSH exec channel, ending the
+            // remote `find` process rather than letting it run to
+            // completion after the caller has stopped listening.
+            return None;
+        }
+
+        // Race the next channel message against a short poll interval so a
+        // cancellation flag flip is noticed promptly even while `find` is
+        // silently still running remotely (no data arriving to wake us).
+        let msg = tokio::select! {
+            msg = channel.wait() => msg,
+            () = tokio::time::sleep(std::time::Duration::from_millis(100)) => continue,
+        };
+
         match msg {
-            ChannelMsg::Data { data } => output.extend_from_slice(&data),
-            ChannelMsg::ExitStatus { exit_status } => exit_ok = exit_status == 0,
-            ChannelMsg::Eof | ChannelMsg::Close => break,
-            _ => {}
+            Some(ChannelMsg::Data { data }) => output.extend_from_slice(&data),
+            Some(ChannelMsg::ExitStatus { exit_status }) => exit_ok = exit_status == 0,
+            Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) => break,
+            Some(_) => {}
+            None => break,
         }
     }
 
@@ -338,6 +358,14 @@ mod tests {
         assert!(!glob_match("exact.txt", "other.txt"));
         assert!(glob_match("", ""));
         assert!(!glob_match("", "nonempty"));
+    }
+
+    #[test]
+    fn glob_match_is_case_insensitive() {
+        assert!(glob_match("*.LOG", "error.log"));
+        assert!(glob_match("*.log", "ERROR.LOG"));
+        assert!(glob_match("File?.txt", "file1.TXT"));
+        assert!(glob_match("EXACT.txt", "exact.TXT"));
     }
 
     async fn drain(mut rx: mpsc::UnboundedReceiver<SearchEvent>) -> (Vec<Entry>, bool) {

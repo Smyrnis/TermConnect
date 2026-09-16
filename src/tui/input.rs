@@ -296,6 +296,13 @@ impl KeyBindings {
                 ));
             }
 
+            // Ensure at most one action ever maps to `spec`: drop any other
+            // action currently bound to the same key before inserting the
+            // override, so `map_key` can't land on a nondeterministic choice
+            // between two actions sharing an identical `KeySpec`.
+            bindings.0.retain(|existing_action, existing_spec| {
+                *existing_action == action || *existing_spec != spec
+            });
             bindings.0.insert(action, spec);
         }
 
@@ -530,6 +537,41 @@ mod tests {
 
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("F10"));
+    }
+
+    #[test]
+    fn from_overrides_resolves_a_colliding_binding_deterministically() {
+        let mut overrides = HashMap::new();
+        // F10 is Quit's default; overriding Refresh to F10 collides.
+        overrides.insert("refresh".to_string(), "F10".to_string());
+
+        let (bindings, warnings) = KeyBindings::from_overrides(&overrides);
+
+        assert_eq!(warnings.len(), 1);
+        // Only one action may map to F10 now — the override wins,
+        // deterministically (not dependent on HashMap iteration order).
+        assert_eq!(bindings.map_key(key(KeyCode::F(10))), Action::Refresh);
+        // The original action (Quit) no longer resolves to anything, since
+        // its only binding was reassigned to Refresh.
+        assert_eq!(bindings.key_for(Action::Quit), None);
+    }
+
+    #[test]
+    fn defaults_never_bind_two_actions_to_the_same_key() {
+        let bindings = KeyBindings::defaults();
+        let mut seen: Vec<KeySpec> = Vec::new();
+        for action in ALL_ACTIONS {
+            let spec = bindings
+                .key_for(*action)
+                .expect("every action in ALL_ACTIONS should have a default binding");
+            assert!(
+                !seen.contains(&spec),
+                "action {:?} shares a default KeySpec {:?} with another action",
+                action,
+                spec
+            );
+            seen.push(spec);
+        }
     }
 
     #[test]

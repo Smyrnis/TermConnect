@@ -86,6 +86,26 @@ impl TransferQueue {
             .map(|job| job.id)
     }
 
+    /// Marks every still-queued job belonging to `session_id` as `Failed`
+    /// with `reason`, in one pass. Used when a session disconnects: without
+    /// this, each queued job would only fail once `maybe_start_next_transfer`
+    /// got to it, pushing its own notification — this lets the caller fail
+    /// them all up front and report a single aggregated notification
+    /// instead. Deliberately leaves an `InProgress` job for that session
+    /// alone — the caller is expected to cancel it separately (see
+    /// `App::disconnect_selected`) and let it finish through the normal
+    /// transfer-event flow. Returns how many jobs were marked.
+    pub fn fail_queued_for_session(&mut self, session_id: u64, reason: &str) -> usize {
+        let mut count = 0;
+        for job in self.jobs.iter_mut() {
+            if job.session_id == session_id && job.status == JobStatus::Queued {
+                job.status = JobStatus::Failed(reason.to_string());
+                count += 1;
+            }
+        }
+        count
+    }
+
     /// Marks a failed job for retry if it hasn't exhausted its attempts.
     /// Returns `true` if it was re-queued, `false` if it's out of retries
     /// (and stays `Failed`).
@@ -168,5 +188,57 @@ mod tests {
         job.attempts = 3;
 
         assert!(!queue.retry_or_give_up(id));
+    }
+
+    #[test]
+    fn fail_queued_for_session_marks_only_that_sessions_queued_jobs() {
+        let mut queue = TransferQueue::new();
+        let a1 = queue.enqueue(
+            1,
+            Direction::Upload,
+            PathBuf::from("/local/a1.txt"),
+            "/remote/a1.txt".to_string(),
+            "a1.txt".to_string(),
+            10,
+        );
+        let a2 = queue.enqueue(
+            1,
+            Direction::Upload,
+            PathBuf::from("/local/a2.txt"),
+            "/remote/a2.txt".to_string(),
+            "a2.txt".to_string(),
+            10,
+        );
+        let other = queue_with_one_job(&mut queue); // session_id 1 too, but...
+        queue.get_mut(other).unwrap().session_id = 2;
+        let in_progress = queue.enqueue(
+            1,
+            Direction::Upload,
+            PathBuf::from("/local/a3.txt"),
+            "/remote/a3.txt".to_string(),
+            "a3.txt".to_string(),
+            10,
+        );
+        queue.get_mut(in_progress).unwrap().status = JobStatus::InProgress;
+
+        let count = queue.fail_queued_for_session(1, "session disconnected");
+
+        assert_eq!(count, 2);
+        assert_eq!(
+            queue.get(a1).unwrap().status,
+            JobStatus::Failed("session disconnected".to_string())
+        );
+        assert_eq!(
+            queue.get(a2).unwrap().status,
+            JobStatus::Failed("session disconnected".to_string())
+        );
+        // Session 2's job is untouched.
+        assert_eq!(queue.get(other).unwrap().status, JobStatus::Queued);
+        // The in-progress job for session 1 is left for the caller to
+        // cancel separately, not force-failed here.
+        assert_eq!(
+            queue.get(in_progress).unwrap().status,
+            JobStatus::InProgress
+        );
     }
 }

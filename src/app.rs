@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -69,6 +69,10 @@ struct SearchSession {
     view: SearchView,
     target: SearchTarget,
     cancel: Arc<AtomicBool>,
+    /// Bumped on every pattern change; a debounced search checks this after
+    /// its idle delay and bails out as a no-op if it's no longer current
+    /// (see `restart_search`).
+    generation: Arc<AtomicU64>,
 }
 
 /// Progress reported by a background connection attempt (see
@@ -405,6 +409,11 @@ impl App {
     }
 
     fn render_connections(&self, frame: &mut Frame, area: Rect) {
+        let connected_names: std::collections::HashSet<&str> = self
+            .sessions
+            .iter()
+            .map(|session| session.entry.name.as_str())
+            .collect();
         let active_name = self
             .sessions
             .active()
@@ -414,6 +423,7 @@ impl App {
             area,
             &self.connections,
             self.connections_cursor,
+            &connected_names,
             active_name,
         );
     }
@@ -694,6 +704,7 @@ impl App {
             view: SearchView::new(),
             target,
             cancel: Arc::new(AtomicBool::new(false)),
+            generation: Arc::new(AtomicU64::new(0)),
         });
         self.screen = Screen::Search;
     }
@@ -723,9 +734,12 @@ impl App {
         }
     }
 
-    /// Cancels any in-flight search and starts a new one for the current
-    /// pattern — called on every keystroke that changes the pattern, so
-    /// results filter live as the user types.
+    /// Cancels any in-flight (or still-debouncing) search and schedules a
+    /// new one for the current pattern — called on every keystroke that
+    /// changes the pattern. The actual search doesn't dispatch immediately:
+    /// it waits out `SEARCH_DEBOUNCE` first (see `wait_out_search_debounce`)
+    /// so a burst of keystrokes coalesces into one search per pause instead
+    /// of one remote `find`/local walk per keystroke.
     fn restart_search(&mut self) {
         let Some(session) = self.search.as_mut() else {
             return;
@@ -734,6 +748,9 @@ impl App {
         let cancel = Arc::new(AtomicBool::new(false));
         session.cancel = cancel.clone();
         session.view.start();
+
+        let generation = session.generation.fetch_add(1, Ordering::Relaxed) + 1;
+        let generation_state = session.generation.clone();
 
         let pattern = session.view.pattern.clone();
         if pattern.is_empty() {
@@ -749,7 +766,12 @@ impl App {
         match session.target {
             SearchTarget::Local => {
                 let root = self.local.path().to_path_buf();
-                tokio::spawn(search::search_local(root, glob_pattern, tx, cancel));
+                tokio::spawn(async move {
+                    if !wait_out_search_debounce(&cancel, &generation_state, generation).await {
+                        return;
+                    }
+                    search::search_local(root, glob_pattern, tx, cancel).await;
+                });
             }
             SearchTarget::Remote => {
                 let Some(session_id) = self.sessions.active_id() else {
@@ -767,6 +789,9 @@ impl App {
                     .unwrap_or_default();
                 let root_str = path_to_remote_string(&root);
                 tokio::spawn(async move {
+                    if !wait_out_search_debounce(&cancel, &generation_state, generation).await {
+                        return;
+                    }
                     search::search_remote(&handle, &sftp, root_str, glob_pattern, tx, cancel).await;
                 });
             }
@@ -842,12 +867,44 @@ impl App {
         let Some(entry) = self.connections.get(self.connections_cursor) else {
             return;
         };
-        let Some(id) = self.sessions.by_host(&entry.name).map(|session| session.id) else {
+        let name = entry.name.clone();
+        let Some(id) = self.sessions.by_host(&name).map(|session| session.id) else {
             return;
         };
 
         self.sessions.remove(id);
         self.session_resources.remove(&id);
+
+        // Clean up anything the disconnected session left behind in the
+        // transfer queue: an in-flight transfer would otherwise fail with a
+        // raw I/O error once its `Arc<SftpSession>` handle is dropped (and
+        // get retried up to 3 times, each retry its own error
+        // notification), and each still-queued job would otherwise trickle
+        // through `maybe_start_next_transfer`'s per-job
+        // "session disconnected" failure path one at a time, each pushing
+        // its own notification. Handle both here in one pass and report a
+        // single aggregated notification instead.
+        let mut affected = self
+            .transfers
+            .fail_queued_for_session(id, "session disconnected");
+        if self
+            .transfers
+            .active()
+            .is_some_and(|job| job.session_id == id)
+        {
+            self.cancel_active_transfer();
+            affected += 1;
+        }
+        if affected > 0 {
+            let plural = if affected == 1 { "" } else { "s" };
+            self.notifications.push(
+                Severity::Info,
+                format!("{affected} transfer{plural} cancelled \u{2014} session disconnected"),
+            );
+        }
+
+        self.notifications
+            .push(Severity::Info, format!("Disconnected from {name}"));
     }
 
     fn apply_connect_event(&mut self, event: ConnectEvent) {
@@ -1565,6 +1622,25 @@ fn path_to_remote_string(path: &std::path::Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+/// How long a search waits, idle, before actually dispatching — coalesces a
+/// burst of pattern-changing keystrokes into a single search per pause.
+const SEARCH_DEBOUNCE: Duration = Duration::from_millis(250);
+
+/// Waits out `SEARCH_DEBOUNCE`, then reports whether the search that
+/// scheduled this wait is still the one to run: `false` means either it was
+/// cancelled (e.g. the pattern changed again, or the search screen closed)
+/// or a newer pattern change superseded it (`generation` no longer matches
+/// `expected`), in which case the caller should skip dispatching the actual
+/// search entirely.
+async fn wait_out_search_debounce(
+    cancel: &Arc<AtomicBool>,
+    generation: &Arc<AtomicU64>,
+    expected: u64,
+) -> bool {
+    tokio::time::sleep(SEARCH_DEBOUNCE).await;
+    !cancel.load(Ordering::Relaxed) && generation.load(Ordering::Relaxed) == expected
+}
+
 fn notification_style(severity: Severity) -> Style {
     match severity {
         Severity::Info => Style::default(),
@@ -2145,6 +2221,112 @@ mod tests {
     }
 
     #[test]
+    fn disconnect_selected_reports_a_confirmation_notification() {
+        let (_dir, mut app) = app_in_temp_dir();
+        let entry = sample_connection_entry();
+        app.sessions.insert(
+            entry.clone(),
+            PanelState::from_listing(PathBuf::from("/"), Vec::new()),
+        );
+        app.connections = vec![entry];
+        app.connections_cursor = 0;
+        app.screen = Screen::Connections;
+
+        app.apply_action(Action::Delete);
+
+        let messages: Vec<String> = std::iter::from_fn(|| {
+            let message = app.notifications.current().map(|n| n.message.clone());
+            if message.is_some() {
+                app.notifications.dismiss_current();
+            }
+            message
+        })
+        .collect();
+
+        assert!(
+            messages.iter().any(|m| m.contains("Disconnected from")),
+            "expected a disconnect confirmation notification, got {messages:?}"
+        );
+    }
+
+    #[test]
+    fn disconnecting_a_session_fails_its_queued_jobs_with_one_aggregated_notification() {
+        let (_dir, mut app) = app_in_temp_dir();
+        let entry = sample_connection_entry();
+        let id = app.sessions.insert(
+            entry.clone(),
+            PanelState::from_listing(PathBuf::from("/"), Vec::new()),
+        );
+        app.connections = vec![entry];
+        app.connections_cursor = 0;
+        app.screen = Screen::Connections;
+
+        let job_a = app.transfers.enqueue(
+            id,
+            Direction::Upload,
+            PathBuf::from("/local/a.txt"),
+            "/remote/a.txt".to_string(),
+            "a.txt".to_string(),
+            10,
+        );
+        let job_b = app.transfers.enqueue(
+            id,
+            Direction::Upload,
+            PathBuf::from("/local/b.txt"),
+            "/remote/b.txt".to_string(),
+            "b.txt".to_string(),
+            10,
+        );
+        // A job for a different session should be untouched.
+        let other_session_job = app.transfers.enqueue(
+            999,
+            Direction::Upload,
+            PathBuf::from("/local/c.txt"),
+            "/remote/c.txt".to_string(),
+            "c.txt".to_string(),
+            10,
+        );
+
+        app.disconnect_selected();
+
+        assert!(matches!(
+            app.transfers.get(job_a).unwrap().status,
+            JobStatus::Failed(_)
+        ));
+        assert!(matches!(
+            app.transfers.get(job_b).unwrap().status,
+            JobStatus::Failed(_)
+        ));
+        assert_eq!(
+            app.transfers.get(other_session_job).unwrap().status,
+            JobStatus::Queued
+        );
+
+        // Collect every notification pushed, in order.
+        let messages: Vec<String> = std::iter::from_fn(|| {
+            let message = app.notifications.current().map(|n| n.message.clone());
+            if message.is_some() {
+                app.notifications.dismiss_current();
+            }
+            message
+        })
+        .collect();
+
+        // Exactly one message aggregates both cancelled/failed transfers —
+        // not one notification per job — plus the disconnect confirmation.
+        let transfer_messages: Vec<&String> = messages
+            .iter()
+            .filter(|m| m.contains("transfer") && m.contains("disconnected"))
+            .collect();
+        assert_eq!(
+            transfer_messages.len(),
+            1,
+            "expected exactly one aggregated transfer notification, got {messages:?}"
+        );
+        assert!(transfer_messages[0].contains("2"));
+    }
+
+    #[test]
     fn delete_on_the_files_screen_still_opens_the_delete_dialog() {
         let (dir, mut app) = app_in_temp_dir();
         fs::write(dir.path().join("doomed.txt"), b"content").unwrap();
@@ -2431,7 +2613,10 @@ mod tests {
             app.apply_search_key(key(KeyCode::Char(c)));
         }
 
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        // Longer than `SEARCH_DEBOUNCE`, so the debounced search past the
+        // last keystroke has actually dispatched and completed by the time
+        // we drain `search_rx` below.
+        tokio::time::sleep(SEARCH_DEBOUNCE + std::time::Duration::from_millis(200)).await;
         while let Ok(event) = app.search_rx.try_recv() {
             app.apply_search_event(event);
         }
@@ -2443,6 +2628,51 @@ mod tests {
                 .results
                 .iter()
                 .any(|entry| entry.name == "target.log")
+        );
+    }
+
+    #[tokio::test]
+    async fn rapid_pattern_changes_dispatch_only_one_search_for_the_final_pattern() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("aaa.log"), b"x").unwrap();
+        fs::write(dir.path().join("bbb.log"), b"x").unwrap();
+        let mut app = App::at(dir.path().to_path_buf()).unwrap();
+
+        app.apply_action(Action::OpenSearch);
+        // Simulate rapid typing: each keystroke calls `restart_search`
+        // (bumping the search generation and cancelling the previous
+        // debounce/search), all faster than `SEARCH_DEBOUNCE`, so only the
+        // last one should ever actually dispatch a search.
+        for c in "aaa".chars() {
+            app.apply_search_key(key(KeyCode::Char(c)));
+        }
+
+        tokio::time::sleep(SEARCH_DEBOUNCE + std::time::Duration::from_millis(200)).await;
+        let mut done_count = 0;
+        while let Ok(event) = app.search_rx.try_recv() {
+            if matches!(event, SearchEvent::Done { .. }) {
+                done_count += 1;
+            }
+            app.apply_search_event(event);
+        }
+
+        // Exactly one search actually ran (one `Done`), and it was for the
+        // final pattern "aaa" — not one per keystroke ("a", "aa", "aaa").
+        assert_eq!(done_count, 1, "expected exactly one dispatched search");
+        let session = app.search.unwrap();
+        assert!(
+            session
+                .view
+                .results
+                .iter()
+                .any(|entry| entry.name == "aaa.log")
+        );
+        assert!(
+            !session
+                .view
+                .results
+                .iter()
+                .any(|entry| entry.name == "bbb.log")
         );
     }
 }
