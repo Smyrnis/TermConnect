@@ -9,10 +9,14 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
+pub mod connections_list;
+pub mod file_list;
+pub mod help;
 pub mod input;
 pub mod layout;
 pub mod notifications;
 pub mod panels;
+pub mod search_view;
 pub mod sort;
 pub mod widgets;
 

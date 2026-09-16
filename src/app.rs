@@ -22,17 +22,17 @@ use crate::filesystem::search::{self, SearchEvent};
 use crate::filesystem::{self, Entry};
 use crate::terminal;
 use crate::transfer::{self, Direction, JobStatus, TransferOutcome, TransferQueue};
+use crate::tui::connections_list;
+use crate::tui::help;
 use crate::tui::input::{self, Action};
 use crate::tui::notifications::{Notifications, Severity};
 use crate::tui::panels::{self, ActivePanel, PanelState};
+use crate::tui::search_view;
+use crate::tui::search_view::{SearchOutcome, SearchView};
 use crate::tui::sort::{SortKey, SortOrder};
-use crate::tui::widgets::connections_list;
 use crate::tui::widgets::dialog::{
     ConfirmDialog, Dialog, DialogOutcome, ListDialog, TextInputDialog,
 };
-use crate::tui::widgets::help;
-use crate::tui::widgets::search_view;
-use crate::tui::widgets::search_view::{SearchOutcome, SearchView};
 use crate::tui::{self, Backend, layout};
 
 /// The file operation a dialog is currently collecting input/confirmation for.

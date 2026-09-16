@@ -8,8 +8,8 @@ use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders};
 
 use crate::filesystem::{Entry, local};
+use crate::tui::file_list;
 use crate::tui::sort::{self, SortKey, SortOrder, SortSpec};
-use crate::tui::widgets::file_list;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivePanel {
