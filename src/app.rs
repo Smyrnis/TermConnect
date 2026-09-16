@@ -317,8 +317,10 @@ impl App {
     fn render_title(&self, frame: &mut Frame, area: Rect) {
         let status_text = match &self.connection_status {
             ConnectionStatus::Connecting(name) => format!("Connecting to {name}\u{2026}"),
-            ConnectionStatus::Failed(message) => format!("Connection failed: {message}"),
-            ConnectionStatus::Disconnected => match self.sessions.active() {
+            ConnectionStatus::Failed(message) if self.sessions.is_empty() => {
+                format!("Connection failed: {message}")
+            }
+            _ => match self.sessions.active() {
                 Some(session) => format!("{} \u{2014} SSH: Connected", session.entry.name),
                 None => "Not connected".to_string(),
             },
@@ -461,7 +463,10 @@ impl App {
             Action::SwitchPanel => self.active_panel.toggle(),
             Action::Mkdir => self.open_mkdir_dialog(),
             Action::Rename => self.open_rename_dialog(),
-            Action::Delete => self.open_delete_dialog(),
+            Action::Delete => match self.screen {
+                Screen::Connections => self.disconnect_selected(),
+                _ => self.open_delete_dialog(),
+            },
             Action::Copy => self.start_copy(),
             Action::CancelTransfer => self.cancel_active_transfer(),
             Action::OpenConnections => self.open_connections_screen(),
@@ -604,7 +609,6 @@ impl App {
             Action::Down => {}
             Action::Open => self.connect_to_selected(),
             Action::Refresh => self.open_connections_screen(),
-            Action::Delete => self.disconnect_selected(),
             _ => {}
         }
     }
@@ -1142,11 +1146,16 @@ impl App {
             return;
         };
         let session_id = job.session_id;
+        let display_name = job.display_name.clone();
 
         let Some(resources) = self.session_resources.get(&session_id) else {
             if let Some(job) = self.transfers.get_mut(id) {
                 job.status = JobStatus::Failed("session disconnected".to_string());
             }
+            self.notifications.push(
+                Severity::Error,
+                format!("Transfer failed: {display_name} \u{2014} session disconnected"),
+            );
             self.maybe_start_next_transfer();
             return;
         };
@@ -2105,6 +2114,123 @@ mod tests {
         // still exactly one session — no reconnect attempt was spawned
         assert_eq!(app.sessions.len(), 1);
         assert_eq!(app.connection_status, ConnectionStatus::Disconnected);
+    }
+
+    #[test]
+    fn delete_on_the_connections_screen_disconnects_the_selected_session() {
+        let (_dir, mut app) = app_in_temp_dir();
+        let entry = sample_connection_entry();
+        app.sessions.insert(
+            entry.clone(),
+            PanelState::from_listing(PathBuf::from("/"), Vec::new()),
+        );
+        app.connections = vec![entry];
+        app.connections_cursor = 0;
+        app.screen = Screen::Connections;
+
+        assert_eq!(app.sessions.len(), 1);
+
+        app.apply_action(Action::Delete);
+
+        // The session (and any resources held for it) are gone — this is
+        // the only way a connected session can ever be closed, since
+        // `Sessions`/`SessionResources` can't be constructed with a live
+        // handle in a unit test (see `SessionResources`'s doc comment), so
+        // `session_resources` itself starts and stays empty here; the bug
+        // this guards against is `Action::Delete` never reaching
+        // `disconnect_selected` at all (it was intercepted earlier by the
+        // mkdir/delete-dialog arm regardless of screen).
+        assert!(app.sessions.is_empty());
+        assert!(app.session_resources.is_empty());
+    }
+
+    #[test]
+    fn delete_on_the_files_screen_still_opens_the_delete_dialog() {
+        let (dir, mut app) = app_in_temp_dir();
+        fs::write(dir.path().join("doomed.txt"), b"content").unwrap();
+        app.local.refresh().unwrap();
+        app.local.cursor = app.local.rows().len() - 1;
+
+        app.apply_action(Action::Delete);
+
+        assert!(app.dialog.is_some());
+    }
+
+    #[test]
+    fn maybe_start_next_transfer_notifies_when_the_jobs_session_has_disconnected() {
+        let (_dir, mut app) = app_in_temp_dir();
+        // No session/session_resources entry for `999` exists — simulates a
+        // job whose session disconnected before its turn came up.
+        app.transfers.enqueue(
+            999,
+            Direction::Upload,
+            PathBuf::from("/local/file.txt"),
+            "/remote/file.txt".to_string(),
+            "file.txt".to_string(),
+            100,
+        );
+
+        app.maybe_start_next_transfer();
+
+        let notification = app.notifications.current().unwrap();
+        assert_eq!(notification.severity, Severity::Error);
+        assert!(notification.message.contains("file.txt"));
+        assert!(notification.message.contains("disconnected"));
+    }
+
+    #[test]
+    fn failed_status_does_not_clobber_the_title_when_a_session_is_active() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let (_dir, mut app) = app_in_temp_dir();
+        app.sessions.insert(
+            sample_connection_entry(),
+            PanelState::from_listing(PathBuf::from("/"), Vec::new()),
+        );
+        app.connection_status = ConnectionStatus::Failed("boom".to_string());
+
+        let backend = TestBackend::new(60, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| app.render_title(frame, frame.area()))
+            .unwrap();
+
+        let content: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+
+        assert!(content.contains("SSH: Connected"));
+        assert!(!content.contains("Connection failed"));
+    }
+
+    #[test]
+    fn failed_status_still_shows_when_there_is_no_active_session() {
+        use ratatui::Terminal;
+        use ratatui::backend::TestBackend;
+
+        let (_dir, mut app) = app_in_temp_dir();
+        app.connection_status = ConnectionStatus::Failed("boom".to_string());
+
+        let backend = TestBackend::new(60, 3);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| app.render_title(frame, frame.area()))
+            .unwrap();
+
+        let content: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+
+        assert!(content.contains("Connection failed"));
     }
 
     #[test]
