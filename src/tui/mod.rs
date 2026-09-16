@@ -10,6 +10,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 pub mod connections_list;
+pub mod dialog;
 pub mod file_list;
 pub mod help;
 pub mod input;
@@ -18,7 +19,6 @@ pub mod notifications;
 pub mod panels;
 pub mod search_view;
 pub mod sort;
-pub mod widgets;
 
 pub type Backend = CrosstermBackend<Stdout>;
 
