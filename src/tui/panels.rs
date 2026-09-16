@@ -172,17 +172,22 @@ impl PanelState {
         }
     }
 
+    /// Navigates directly to `path` (used by bookmarks). Sets the cursor
+    /// to the top and refreshes, same as opening a directory normally.
+    pub fn navigate_to(&mut self, path: PathBuf) -> Result<()> {
+        self.path = path;
+        self.cursor = 0;
+        self.refresh()
+    }
+
     /// Enters the directory at the cursor (or the parent, for `..`).
     /// A no-op if the cursor is on a file. Local-panel only — the remote
     /// panel navigates by fetching a new listing asynchronously instead
     /// (see `target_path_for_open`).
     pub fn open_selected(&mut self) -> Result<()> {
         if let Some(target) = self.target_path_for_open() {
-            self.path = target;
-            self.cursor = 0;
-            self.refresh()?;
+            self.navigate_to(target)?;
         }
-
         Ok(())
     }
 
@@ -404,6 +409,18 @@ mod tests {
 
         panel.move_cursor(5);
         assert_eq!(panel.cursor, panel.rows().len() - 1);
+    }
+
+    #[test]
+    fn navigate_to_changes_the_path_and_refreshes() {
+        let dir = tempfile::tempdir().unwrap();
+        let child = dir.path().join("child");
+        fs::create_dir(&child).unwrap();
+        let mut panel = PanelState::new(dir.path().to_path_buf()).unwrap();
+
+        panel.navigate_to(child.clone()).unwrap();
+
+        assert_eq!(panel.path(), child);
     }
 
     #[test]

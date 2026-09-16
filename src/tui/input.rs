@@ -20,6 +20,8 @@ pub enum Action {
     OpenTerminal,
     ToggleHidden,
     CycleSort,
+    BookmarkHere,
+    OpenBookmarks,
     Help,
     Back,
     Noop,
@@ -44,6 +46,8 @@ impl Action {
             Action::OpenTerminal => "open_terminal",
             Action::ToggleHidden => "toggle_hidden",
             Action::CycleSort => "cycle_sort",
+            Action::BookmarkHere => "bookmark_here",
+            Action::OpenBookmarks => "open_bookmarks",
             Action::Help => "help",
             Action::Back => "back",
             Action::Noop => "noop",
@@ -71,6 +75,8 @@ impl Action {
             "open_terminal" => Action::OpenTerminal,
             "toggle_hidden" => Action::ToggleHidden,
             "cycle_sort" => Action::CycleSort,
+            "bookmark_here" => Action::BookmarkHere,
+            "open_bookmarks" => Action::OpenBookmarks,
             "help" => Action::Help,
             "back" => Action::Back,
             _ => return None,
@@ -222,6 +228,16 @@ impl KeyBindings {
             KeyModifiers::CONTROL,
         );
         bind(Action::CycleSort, KeyCode::Char('s'), KeyModifiers::CONTROL);
+        bind(
+            Action::BookmarkHere,
+            KeyCode::Char('d'),
+            KeyModifiers::CONTROL,
+        );
+        bind(
+            Action::OpenBookmarks,
+            KeyCode::Char('b'),
+            KeyModifiers::CONTROL,
+        );
         bind(Action::Help, KeyCode::F(1), KeyModifiers::NONE);
 
         Self(map)
@@ -308,6 +324,8 @@ pub const ALL_ACTIONS: &[Action] = &[
     Action::OpenTerminal,
     Action::ToggleHidden,
     Action::CycleSort,
+    Action::BookmarkHere,
+    Action::OpenBookmarks,
     Action::Help,
     Action::Back,
 ];
@@ -332,6 +350,10 @@ mod tests {
 
     fn map_key_via_defaults(code: KeyCode) -> Action {
         KeyBindings::defaults().map_key(key(code))
+    }
+
+    fn map_key_via_defaults_with_modifiers(code: KeyCode, modifiers: KeyModifiers) -> Action {
+        KeyBindings::defaults().map_key(key_with_modifiers(code, modifiers))
     }
 
     #[test]
@@ -512,6 +534,22 @@ mod tests {
     #[test]
     fn f1_maps_to_help() {
         assert_eq!(map_key_via_defaults(KeyCode::F(1)), Action::Help);
+    }
+
+    #[test]
+    fn ctrl_d_maps_to_bookmark_here() {
+        assert_eq!(
+            map_key_via_defaults_with_modifiers(KeyCode::Char('d'), KeyModifiers::CONTROL),
+            Action::BookmarkHere
+        );
+    }
+
+    #[test]
+    fn ctrl_b_maps_to_open_bookmarks() {
+        assert_eq!(
+            map_key_via_defaults_with_modifiers(KeyCode::Char('b'), KeyModifiers::CONTROL),
+            Action::OpenBookmarks
+        );
     }
 
     #[test]

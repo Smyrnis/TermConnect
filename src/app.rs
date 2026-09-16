@@ -25,7 +25,9 @@ use crate::tui::notifications::{Notifications, Severity};
 use crate::tui::panels::{self, ActivePanel, PanelState};
 use crate::tui::sort::{SortKey, SortOrder};
 use crate::tui::widgets::connections_list;
-use crate::tui::widgets::dialog::{ConfirmDialog, Dialog, DialogOutcome, TextInputDialog};
+use crate::tui::widgets::dialog::{
+    ConfirmDialog, Dialog, DialogOutcome, ListDialog, TextInputDialog,
+};
 use crate::tui::widgets::help;
 use crate::tui::{self, Backend, layout};
 
@@ -34,6 +36,7 @@ enum PendingAction {
     Mkdir,
     Rename,
     Delete,
+    AddBookmark,
     SubmitPassword,
 }
 
@@ -112,20 +115,33 @@ pub struct App {
     transfer_tx: mpsc::UnboundedSender<TransferEvent>,
     transfer_rx: mpsc::UnboundedReceiver<TransferEvent>,
     key_bindings: input::KeyBindings,
+    bookmarks: config::bookmarks::Bookmarks,
+    bookmarks_path: Option<PathBuf>,
 }
 
 impl App {
     pub fn new() -> Result<Self> {
         let (settings, config_warnings) = config::load()?;
         let (key_bindings, key_warnings) = input::KeyBindings::from_overrides(&settings.keys);
+        let (bookmarks, bookmark_warnings) = config::bookmarks::load()?;
+        let bookmarks_path = config::bookmarks::bookmarks_path()?;
 
-        let mut app = Self::at_with(std::env::current_dir()?, &settings.panel, key_bindings)?;
+        let mut app = Self::at_with(
+            std::env::current_dir()?,
+            &settings.panel,
+            key_bindings,
+            bookmarks,
+            Some(bookmarks_path),
+        )?;
 
         for warning in config_warnings {
             app.notifications.push(Severity::Warning, warning.0);
         }
         for warning in key_warnings {
             app.notifications.push(Severity::Warning, warning);
+        }
+        for warning in bookmark_warnings {
+            app.notifications.push(Severity::Warning, warning.0);
         }
 
         Ok(app)
@@ -136,6 +152,8 @@ impl App {
             path,
             &config::settings::PanelSettings::default(),
             input::KeyBindings::defaults(),
+            config::bookmarks::Bookmarks::default(),
+            None,
         )
     }
 
@@ -143,6 +161,8 @@ impl App {
         path: PathBuf,
         panel_settings: &config::settings::PanelSettings,
         key_bindings: input::KeyBindings,
+        bookmarks: config::bookmarks::Bookmarks,
+        bookmarks_path: Option<PathBuf>,
     ) -> Result<Self> {
         let (connect_tx, connect_rx) = mpsc::unbounded_channel();
         let (panel_tx, panel_rx) = mpsc::unbounded_channel();
@@ -178,6 +198,8 @@ impl App {
             transfer_tx,
             transfer_rx,
             key_bindings,
+            bookmarks,
+            bookmarks_path,
         })
     }
 
@@ -361,6 +383,8 @@ impl App {
             Action::Copy => self.start_copy(),
             Action::CancelTransfer => self.cancel_active_transfer(),
             Action::OpenConnections => self.open_connections_screen(),
+            Action::BookmarkHere => self.open_bookmark_add_dialog(),
+            Action::OpenBookmarks => self.open_bookmarks_dialog(),
             Action::Help => self.help_visible = true,
             Action::Back => self.handle_back(),
             Action::Up
@@ -890,6 +914,119 @@ impl App {
         }
     }
 
+    fn open_bookmark_add_dialog(&mut self) {
+        if self.screen != Screen::Files {
+            return;
+        }
+
+        let default_label = self
+            .active_panel_path()
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("bookmark")
+            .to_string();
+
+        self.dialog = Some(Dialog::TextInput(TextInputDialog::new(
+            "Bookmark name",
+            default_label,
+        )));
+        self.pending_action = Some(PendingAction::AddBookmark);
+    }
+
+    fn active_panel_path(&self) -> PathBuf {
+        match self.active_panel {
+            ActivePanel::Local => self.local.path().to_path_buf(),
+            ActivePanel::Remote => self
+                .remote
+                .as_ref()
+                .map(|remote| remote.path().to_path_buf())
+                .unwrap_or_default(),
+        }
+    }
+
+    fn add_bookmark(&mut self, label: String) {
+        let host = match self.active_panel {
+            ActivePanel::Local => None,
+            ActivePanel::Remote => match &self.active_connection {
+                Some(entry) => Some(entry.name.clone()),
+                None => {
+                    self.notifications
+                        .push(Severity::Warning, "Connect to a remote server first");
+                    return;
+                }
+            },
+        };
+
+        let path = self.active_panel_path();
+        self.bookmarks
+            .add(config::bookmarks::Bookmark { label, path, host });
+        self.save_bookmarks();
+    }
+
+    fn open_bookmarks_dialog(&mut self) {
+        if self.screen != Screen::Files {
+            return;
+        }
+
+        let items: Vec<String> = self
+            .bookmarks
+            .iter()
+            .map(|bookmark| match &bookmark.host {
+                Some(host) => format!(
+                    "{} \u{2014} {} [{host}]",
+                    bookmark.label,
+                    bookmark.path.display()
+                ),
+                None => format!("{} \u{2014} {}", bookmark.label, bookmark.path.display()),
+            })
+            .collect();
+
+        self.dialog = Some(Dialog::List(
+            ListDialog::new("Bookmarks", items).removable(true),
+        ));
+    }
+
+    /// Navigates to a bookmark. A remote bookmark whose host has no active
+    /// session warns instead of navigating — the list itself doesn't grey
+    /// such entries out (`ListDialog` stays a plain string list), so this
+    /// check is the only guard.
+    fn navigate_to_bookmark(&mut self, index: usize) {
+        let Some(bookmark) = self.bookmarks.get(index).cloned() else {
+            return;
+        };
+
+        match bookmark.host {
+            None => {
+                self.active_panel = ActivePanel::Local;
+                let result = self.local.navigate_to(bookmark.path);
+                self.set_status(result);
+            }
+            Some(host) => {
+                let connected = matches!(
+                    &self.connection_status,
+                    ConnectionStatus::Connected(name) if *name == host
+                );
+                if !connected {
+                    self.notifications
+                        .push(Severity::Warning, format!("Connect to {host} first"));
+                    return;
+                }
+                self.active_panel = ActivePanel::Remote;
+                self.spawn_remote_list(bookmark.path);
+            }
+        }
+    }
+
+    /// Saves `self.bookmarks` to disk, or does nothing if there's no real
+    /// path to save to (`App::at`'s test construction) — mutations still
+    /// apply to the in-memory list either way.
+    fn save_bookmarks(&mut self) {
+        if let Some(path) = self.bookmarks_path.clone() {
+            let result = config::bookmarks::save_to(&path, &self.bookmarks);
+            self.set_status(result);
+        }
+    }
+
     fn open_mkdir_dialog(&mut self) {
         if self.screen != Screen::Files {
             return;
@@ -1008,11 +1145,28 @@ impl App {
                             let _ = sender.send(value);
                         }
                     }
+                    Some(PendingAction::AddBookmark) => self.add_bookmark(value),
                     Some(PendingAction::Delete) | None => {}
                 }
             }
-            DialogOutcome::Selected(_) | DialogOutcome::Removed(_) => {
-                // Handled by specific dialog types (Task 17+)
+            DialogOutcome::Selected(index) => {
+                self.dialog = None;
+                self.navigate_to_bookmark(index);
+            }
+            DialogOutcome::Removed(index) => {
+                if let Some(removed) = self.bookmarks.remove(index) {
+                    self.save_bookmarks();
+                    self.notifications.push(
+                        Severity::Info,
+                        format!("Removed bookmark \"{}\"", removed.label),
+                    );
+                }
+                if let Some(Dialog::List(list)) = self.dialog.as_mut() {
+                    list.items.remove(index);
+                    if list.cursor >= list.items.len() {
+                        list.cursor = list.items.len().saturating_sub(1);
+                    }
+                }
             }
         }
     }
@@ -1241,6 +1395,8 @@ mod tests {
             dir.path().to_path_buf(),
             &settings,
             input::KeyBindings::defaults(),
+            config::bookmarks::Bookmarks::default(),
+            None,
         )
         .unwrap();
 
@@ -1572,5 +1728,99 @@ mod tests {
         app.apply_action(Action::Back);
 
         assert_eq!(app.screen, Screen::Files);
+    }
+
+    #[test]
+    fn bookmark_here_action_opens_a_text_input_dialog_prefilled_with_the_directory_name() {
+        let (dir, mut app) = app_in_temp_dir();
+
+        app.apply_action(Action::BookmarkHere);
+
+        match app.dialog {
+            Some(Dialog::TextInput(ref d)) => {
+                assert_eq!(d.value, dir.path().file_name().unwrap().to_str().unwrap());
+            }
+            _ => panic!("expected a text input dialog"),
+        }
+    }
+
+    #[test]
+    fn submitting_the_bookmark_dialog_adds_a_local_bookmark() {
+        let (_dir, mut app) = app_in_temp_dir();
+        app.apply_action(Action::BookmarkHere);
+
+        app.apply_dialog_key(key(KeyCode::Char('x')));
+        app.apply_dialog_key(key(KeyCode::Enter));
+
+        assert_eq!(app.bookmarks.len(), 1);
+        assert_eq!(app.bookmarks.get(0).unwrap().host, None);
+    }
+
+    #[test]
+    fn open_bookmarks_action_lists_saved_bookmarks() {
+        let (dir, mut app) = app_in_temp_dir();
+        app.bookmarks.add(config::bookmarks::Bookmark {
+            label: "here".to_string(),
+            path: dir.path().to_path_buf(),
+            host: None,
+        });
+
+        app.apply_action(Action::OpenBookmarks);
+
+        match app.dialog {
+            Some(Dialog::List(ref d)) => assert_eq!(d.items.len(), 1),
+            _ => panic!("expected a list dialog"),
+        }
+    }
+
+    #[test]
+    fn selecting_a_local_bookmark_navigates_the_local_panel() {
+        let dir = tempfile::tempdir().unwrap();
+        let child = dir.path().join("child");
+        fs::create_dir(&child).unwrap();
+        let mut app = App::at(dir.path().to_path_buf()).unwrap();
+        app.bookmarks.add(config::bookmarks::Bookmark {
+            label: "child".to_string(),
+            path: child.clone(),
+            host: None,
+        });
+        app.apply_action(Action::OpenBookmarks);
+
+        app.apply_dialog_key(key(KeyCode::Enter));
+
+        assert_eq!(app.local.path(), child);
+    }
+
+    #[test]
+    fn selecting_a_remote_bookmark_without_a_connection_warns_instead_of_navigating() {
+        let (_dir, mut app) = app_in_temp_dir();
+        app.bookmarks.add(config::bookmarks::Bookmark {
+            label: "prod etc".to_string(),
+            path: PathBuf::from("/etc"),
+            host: Some("production".to_string()),
+        });
+        app.apply_action(Action::OpenBookmarks);
+
+        app.apply_dialog_key(key(KeyCode::Enter));
+
+        assert_eq!(
+            app.notifications.current().unwrap().message,
+            "Connect to production first"
+        );
+    }
+
+    #[test]
+    fn removing_a_bookmark_deletes_it_from_the_list() {
+        let (_dir, mut app) = app_in_temp_dir();
+        app.bookmarks.add(config::bookmarks::Bookmark {
+            label: "a".to_string(),
+            path: PathBuf::from("/a"),
+            host: None,
+        });
+        app.apply_action(Action::OpenBookmarks);
+
+        app.apply_dialog_key(key(KeyCode::F(8)));
+
+        assert!(app.bookmarks.is_empty());
     }
 }

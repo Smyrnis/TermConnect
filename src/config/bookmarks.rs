@@ -88,7 +88,7 @@ pub fn save(bookmarks: &Bookmarks) -> Result<()> {
     save_to(&bookmarks_path()?, bookmarks)
 }
 
-fn save_to(path: &Path, bookmarks: &Bookmarks) -> Result<()> {
+pub(crate) fn save_to(path: &Path, bookmarks: &Bookmarks) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
