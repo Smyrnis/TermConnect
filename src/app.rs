@@ -640,7 +640,7 @@ impl App {
 
         tui::restore()?;
 
-        let ssh_result = tokio::task::spawn_blocking(move || terminal::ssh::run(&entry)).await;
+        let ssh_result = tokio::task::spawn_blocking(move || terminal::run(&entry)).await;
 
         // `tui::init` builds a brand-new `Terminal` with an empty internal
         // buffer, so the next `draw` repaints everything on its own —
