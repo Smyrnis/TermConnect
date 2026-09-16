@@ -449,3 +449,7 @@ async fn finish_connect(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/app/connections_test.rs"]
+mod tests;

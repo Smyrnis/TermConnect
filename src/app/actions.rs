@@ -157,3 +157,7 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/app/actions_test.rs"]
+mod tests;

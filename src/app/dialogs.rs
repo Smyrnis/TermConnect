@@ -145,3 +145,7 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/app/dialogs_test.rs"]
+mod tests;

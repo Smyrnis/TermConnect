@@ -112,3 +112,7 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/app/bookmarks_test.rs"]
+mod tests;

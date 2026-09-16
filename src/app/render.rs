@@ -200,3 +200,7 @@ fn build_hint_text(bindings: &input::KeyBindings) -> String {
         .collect::<Vec<_>>()
         .join("  ")
 }
+
+#[cfg(test)]
+#[path = "../../tests/app/render_test.rs"]
+mod tests;

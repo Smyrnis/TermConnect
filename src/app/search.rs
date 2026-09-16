@@ -180,3 +180,7 @@ async fn wait_out_search_debounce(
     tokio::time::sleep(SEARCH_DEBOUNCE).await;
     !cancel.load(Ordering::Relaxed) && generation.load(Ordering::Relaxed) == expected
 }
+
+#[cfg(test)]
+#[path = "../../tests/app/search_test.rs"]
+mod tests;
