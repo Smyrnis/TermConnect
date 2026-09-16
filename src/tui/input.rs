@@ -23,6 +23,7 @@ pub enum Action {
     BookmarkHere,
     OpenBookmarks,
     OpenSearch,
+    CycleSession,
     Help,
     Back,
     Noop,
@@ -50,6 +51,7 @@ impl Action {
             Action::BookmarkHere => "bookmark_here",
             Action::OpenBookmarks => "open_bookmarks",
             Action::OpenSearch => "open_search",
+            Action::CycleSession => "cycle_session",
             Action::Help => "help",
             Action::Back => "back",
             Action::Noop => "noop",
@@ -80,6 +82,7 @@ impl Action {
             "bookmark_here" => Action::BookmarkHere,
             "open_bookmarks" => Action::OpenBookmarks,
             "open_search" => Action::OpenSearch,
+            "cycle_session" => Action::CycleSession,
             "help" => Action::Help,
             "back" => Action::Back,
             _ => return None,
@@ -246,6 +249,11 @@ impl KeyBindings {
             KeyCode::Char('f'),
             KeyModifiers::CONTROL,
         );
+        bind(
+            Action::CycleSession,
+            KeyCode::Char('n'),
+            KeyModifiers::CONTROL,
+        );
         bind(Action::Help, KeyCode::F(1), KeyModifiers::NONE);
 
         Self(map)
@@ -335,6 +343,7 @@ pub const ALL_ACTIONS: &[Action] = &[
     Action::BookmarkHere,
     Action::OpenBookmarks,
     Action::OpenSearch,
+    Action::CycleSession,
     Action::Help,
     Action::Back,
 ];
@@ -566,6 +575,14 @@ mod tests {
         assert_eq!(
             map_key_via_defaults_with_modifiers(KeyCode::Char('f'), KeyModifiers::CONTROL),
             Action::OpenSearch
+        );
+    }
+
+    #[test]
+    fn ctrl_n_maps_to_cycle_session() {
+        assert_eq!(
+            map_key_via_defaults_with_modifiers(KeyCode::Char('n'), KeyModifiers::CONTROL),
+            Action::CycleSession
         );
     }
 

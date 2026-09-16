@@ -90,6 +90,17 @@ impl Sessions {
     pub fn iter(&self) -> impl Iterator<Item = &Session> {
         self.items.iter()
     }
+
+    /// Makes the session with `id` active, if it exists. Returns whether
+    /// it was found.
+    pub fn activate(&mut self, id: u64) -> bool {
+        if let Some(index) = self.items.iter().position(|session| session.id == id) {
+            self.active = Some(index);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[cfg(test)]
@@ -187,5 +198,16 @@ mod tests {
 
         assert_eq!(sessions.active().unwrap().id, b);
         assert_eq!(sessions.len(), 1);
+    }
+
+    #[test]
+    fn activate_switches_to_the_session_with_the_given_id() {
+        let mut sessions = Sessions::new();
+        let a = sessions.insert(entry("a"), panel());
+        let _b = sessions.insert(entry("b"), panel());
+
+        assert!(sessions.activate(a));
+        assert_eq!(sessions.active().unwrap().id, a);
+        assert!(!sessions.activate(999));
     }
 }

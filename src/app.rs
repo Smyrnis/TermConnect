@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -55,7 +56,6 @@ enum Screen {
 enum ConnectionStatus {
     Disconnected,
     Connecting(String),
-    Connected(String),
     Failed(String),
 }
 
@@ -94,8 +94,15 @@ enum ConnectEvent {
 /// remote action (navigate, mkdir, rename, delete, refresh) ends the same
 /// way — either a fresh listing to show, or a failure message.
 enum PanelEvent {
-    Listed { path: PathBuf, entries: Vec<Entry> },
-    Failed(String),
+    Listed {
+        session_id: u64,
+        path: PathBuf,
+        entries: Vec<Entry>,
+    },
+    Failed {
+        session_id: u64,
+        message: String,
+    },
 }
 
 /// Progress reported by a running file transfer (see `run_transfer`).
@@ -105,12 +112,22 @@ enum TransferEvent {
     Failed { id: u64, message: String },
 }
 
+/// The parts of a connected session that can't live in `Sessions` itself
+/// (see Task 22/23's interface notes): `Handle` isn't `Clone`, and neither
+/// type can be constructed without a live connection, which would make
+/// `Sessions`'s own tests need one too.
+struct SessionResources {
+    handle: Arc<russh::client::Handle<TermConnectHandler>>,
+    sftp: Arc<SftpSession>,
+}
+
 pub struct App {
     should_quit: bool,
     screen: Screen,
     active_panel: ActivePanel,
     local: PanelState,
-    remote: Option<PanelState>,
+    sessions: connection::session::Sessions,
+    session_resources: HashMap<u64, SessionResources>,
     dialog: Option<Dialog>,
     help_visible: bool,
     pending_action: Option<PendingAction>,
@@ -119,9 +136,6 @@ pub struct App {
     connections: Vec<ConnectionEntry>,
     connections_cursor: usize,
     connection_status: ConnectionStatus,
-    connection_handle: Option<Arc<russh::client::Handle<TermConnectHandler>>>,
-    active_connection: Option<ConnectionEntry>,
-    sftp: Option<Arc<SftpSession>>,
     search: Option<SearchSession>,
     search_tx: mpsc::UnboundedSender<SearchEvent>,
     search_rx: mpsc::UnboundedReceiver<SearchEvent>,
@@ -197,7 +211,8 @@ impl App {
             screen: Screen::Files,
             active_panel: ActivePanel::Local,
             local,
-            remote: None,
+            sessions: connection::session::Sessions::new(),
+            session_resources: HashMap::new(),
             dialog: None,
             help_visible: false,
             pending_action: None,
@@ -206,9 +221,6 @@ impl App {
             connections: Vec::new(),
             connections_cursor: 0,
             connection_status: ConnectionStatus::Disconnected,
-            connection_handle: None,
-            active_connection: None,
-            sftp: None,
             search: None,
             search_tx,
             search_rx,
@@ -304,10 +316,12 @@ impl App {
 
     fn render_title(&self, frame: &mut Frame, area: Rect) {
         let status_text = match &self.connection_status {
-            ConnectionStatus::Disconnected => "Not connected".to_string(),
             ConnectionStatus::Connecting(name) => format!("Connecting to {name}\u{2026}"),
-            ConnectionStatus::Connected(name) => format!("{name} \u{2014} SSH: Connected"),
             ConnectionStatus::Failed(message) => format!("Connection failed: {message}"),
+            ConnectionStatus::Disconnected => match self.sessions.active() {
+                Some(session) => format!("{} \u{2014} SSH: Connected", session.entry.name),
+                None => "Not connected".to_string(),
+            },
         };
 
         let text = format!(
@@ -329,17 +343,30 @@ impl App {
             &self.local,
         );
 
-        match &self.remote {
-            Some(remote) => panels::render_panel(
-                frame,
-                remote_area,
-                "REMOTE",
-                self.active_panel == ActivePanel::Remote,
-                remote,
-            ),
+        match self.sessions.active() {
+            Some(session) => {
+                if self.sessions.len() > 1 {
+                    let (tabs_area, panel_area) = layout::split_remote_with_tabs(remote_area);
+                    self.render_session_tabs(frame, tabs_area);
+                    panels::render_panel(
+                        frame,
+                        panel_area,
+                        "REMOTE",
+                        self.active_panel == ActivePanel::Remote,
+                        &session.panel,
+                    );
+                } else {
+                    panels::render_panel(
+                        frame,
+                        remote_area,
+                        "REMOTE",
+                        self.active_panel == ActivePanel::Remote,
+                        &session.panel,
+                    );
+                }
+            }
             None => {
                 let remote_title = match &self.connection_status {
-                    ConnectionStatus::Connected(name) => format!("REMOTE {name}"),
                     ConnectionStatus::Connecting(name) => {
                         format!("REMOTE (connecting to {name}\u{2026})")
                     }
@@ -355,11 +382,31 @@ impl App {
         }
     }
 
+    /// A one-line strip of session host names, the active one marked with
+    /// `>` — plain text rather than a styled tab widget, matching the rest
+    /// of the app's low-frills rendering.
+    fn render_session_tabs(&self, frame: &mut Frame, area: Rect) {
+        let active_id = self.sessions.active_id();
+        let labels: Vec<String> = self
+            .sessions
+            .iter()
+            .map(|session| {
+                let marker = if Some(session.id) == active_id {
+                    '>'
+                } else {
+                    ' '
+                };
+                format!("{marker}{}", session.entry.name)
+            })
+            .collect();
+        frame.render_widget(Paragraph::new(labels.join("  ")), area);
+    }
+
     fn render_connections(&self, frame: &mut Frame, area: Rect) {
-        let active_name = match &self.connection_status {
-            ConnectionStatus::Connected(name) => Some(name.as_str()),
-            _ => None,
-        };
+        let active_name = self
+            .sessions
+            .active()
+            .map(|session| session.entry.name.as_str());
         connections_list::render_connections_list(
             frame,
             area,
@@ -421,6 +468,11 @@ impl App {
             Action::BookmarkHere => self.open_bookmark_add_dialog(),
             Action::OpenBookmarks => self.open_bookmarks_dialog(),
             Action::OpenSearch => self.open_search_screen(),
+            Action::CycleSession => {
+                if self.screen == Screen::Files {
+                    self.sessions.cycle();
+                }
+            }
             Action::Help => self.help_visible = true,
             Action::Back => self.handle_back(),
             Action::Up
@@ -505,26 +557,39 @@ impl App {
     /// network, so it's dispatched to a background task instead of run
     /// inline — see `spawn_remote_list`.
     fn apply_remote_panel_action(&mut self, action: Action) {
-        let Some(remote) = self.remote.as_mut() else {
-            return;
+        let target_path = {
+            let Some(session) = self.sessions.active_mut() else {
+                return;
+            };
+            match action {
+                Action::Up => {
+                    session.panel.move_cursor(-1);
+                    return;
+                }
+                Action::Down => {
+                    session.panel.move_cursor(1);
+                    return;
+                }
+                Action::ToggleSelect => {
+                    session.panel.toggle_selection();
+                    return;
+                }
+                Action::ToggleHidden => {
+                    session.panel.toggle_hidden();
+                    return;
+                }
+                Action::CycleSort => {
+                    session.panel.cycle_sort();
+                    return;
+                }
+                Action::Open => session.panel.target_path_for_open(),
+                Action::Refresh => Some(session.panel.path().to_path_buf()),
+                _ => return,
+            }
         };
 
-        match action {
-            Action::Up => remote.move_cursor(-1),
-            Action::Down => remote.move_cursor(1),
-            Action::ToggleSelect => remote.toggle_selection(),
-            Action::Open => {
-                if let Some(target) = remote.target_path_for_open() {
-                    self.spawn_remote_list(target);
-                }
-            }
-            Action::Refresh => {
-                let path = remote.path().to_path_buf();
-                self.spawn_remote_list(path);
-            }
-            Action::ToggleHidden => remote.toggle_hidden(),
-            Action::CycleSort => remote.cycle_sort(),
-            _ => {}
+        if let Some(path) = target_path {
+            self.spawn_remote_list(path);
         }
     }
 
@@ -539,6 +604,7 @@ impl App {
             Action::Down => {}
             Action::Open => self.connect_to_selected(),
             Action::Refresh => self.open_connections_screen(),
+            Action::Delete => self.disconnect_selected(),
             _ => {}
         }
     }
@@ -552,7 +618,7 @@ impl App {
         &mut self,
         terminal: &mut ratatui::Terminal<Backend>,
     ) -> Result<()> {
-        let Some(entry) = self.active_connection.clone() else {
+        let Some(entry) = self.sessions.active().map(|session| session.entry.clone()) else {
             self.notifications
                 .push(Severity::Warning, "Connect to a server first");
             return Ok(());
@@ -611,7 +677,7 @@ impl App {
         let target = match self.active_panel {
             ActivePanel::Local => SearchTarget::Local,
             ActivePanel::Remote => {
-                if self.remote.is_none() {
+                if self.sessions.active().is_none() {
                     self.notifications
                         .push(Severity::Warning, "Connect to a remote server first");
                     return;
@@ -682,15 +748,18 @@ impl App {
                 tokio::spawn(search::search_local(root, glob_pattern, tx, cancel));
             }
             SearchTarget::Remote => {
-                let (Some(sftp), Some(handle)) =
-                    (self.sftp.clone(), self.connection_handle.clone())
-                else {
+                let Some(session_id) = self.sessions.active_id() else {
                     return;
                 };
+                let Some(resources) = self.session_resources.get(&session_id) else {
+                    return;
+                };
+                let sftp = resources.sftp.clone();
+                let handle = resources.handle.clone();
                 let root = self
-                    .remote
-                    .as_ref()
-                    .map(|remote| remote.path().to_path_buf())
+                    .sessions
+                    .active()
+                    .map(|session| session.panel.path().to_path_buf())
                     .unwrap_or_default();
                 let root_str = path_to_remote_string(&root);
                 tokio::spawn(async move {
@@ -753,19 +822,28 @@ impl App {
             return;
         };
 
-        if matches!(&self.connection_status, ConnectionStatus::Connected(name) if *name == entry.name)
-        {
-            self.connection_handle = None;
-            self.sftp = None;
-            self.remote = None;
-            self.active_connection = None;
-            self.connection_status = ConnectionStatus::Disconnected;
+        if let Some(session) = self.sessions.by_host(&entry.name) {
+            self.sessions.activate(session.id);
             return;
         }
 
         self.connection_status = ConnectionStatus::Connecting(entry.name.clone());
         let tx = self.connect_tx.clone();
         tokio::spawn(run_connect(entry, tx));
+    }
+
+    /// Disconnects the connection under the connections-screen cursor, if
+    /// it's connected — `F8`'s counterpart to `Enter`'s connect/switch.
+    fn disconnect_selected(&mut self) {
+        let Some(entry) = self.connections.get(self.connections_cursor) else {
+            return;
+        };
+        let Some(id) = self.sessions.by_host(&entry.name).map(|session| session.id) else {
+            return;
+        };
+
+        self.sessions.remove(id);
+        self.session_resources.remove(&id);
     }
 
     fn apply_connect_event(&mut self, event: ConnectEvent) {
@@ -775,11 +853,17 @@ impl App {
                 handle,
                 sftp,
             } => {
-                self.connection_handle = Some(Arc::new(handle));
-                self.sftp = Some(Arc::new(sftp));
-                self.connection_status = ConnectionStatus::Connected(entry.name.clone());
-                self.active_connection = Some(entry);
-                self.spawn_initial_remote_listing();
+                self.connection_status = ConnectionStatus::Disconnected;
+                let placeholder_panel = PanelState::from_listing(PathBuf::from("/"), Vec::new());
+                let id = self.sessions.insert(entry, placeholder_panel);
+                self.session_resources.insert(
+                    id,
+                    SessionResources {
+                        handle: Arc::new(handle),
+                        sftp: Arc::new(sftp),
+                    },
+                );
+                self.spawn_initial_remote_listing(id);
             }
             ConnectEvent::NeedsPassword {
                 name,
@@ -801,18 +885,35 @@ impl App {
 
     fn apply_panel_event(&mut self, event: PanelEvent) {
         match event {
-            PanelEvent::Listed { path, entries } => match self.remote.as_mut() {
-                Some(remote) => remote.replace_listing(path, entries),
-                None => self.remote = Some(PanelState::from_listing(path, entries)),
-            },
-            PanelEvent::Failed(message) => self.notifications.push(Severity::Error, message),
+            PanelEvent::Listed {
+                session_id,
+                path,
+                entries,
+            } => {
+                if let Some(session) = self.sessions.by_id_mut(session_id) {
+                    session.panel.replace_listing(path, entries);
+                }
+            }
+            PanelEvent::Failed {
+                session_id,
+                message,
+            } => {
+                if self.sessions.by_id_mut(session_id).is_some() {
+                    self.notifications.push(Severity::Error, message);
+                } else {
+                    tracing::debug!(
+                        "dropping stale panel error for session {session_id}: {message}"
+                    );
+                }
+            }
         }
     }
 
-    fn spawn_initial_remote_listing(&mut self) {
-        let Some(sftp) = self.sftp.clone() else {
+    fn spawn_initial_remote_listing(&mut self, session_id: u64) {
+        let Some(resources) = self.session_resources.get(&session_id) else {
             return;
         };
+        let sftp = resources.sftp.clone();
         let tx = self.panel_tx.clone();
 
         tokio::spawn(async move {
@@ -821,77 +922,112 @@ impl App {
                 Err(err) => {
                     tracing::debug!("{err:?}");
                     let err = anyhow::Error::from(err);
-                    let _ = tx.send(PanelEvent::Failed(errors::user_message(
-                        "Unable to list home directory",
-                        &err,
-                    )));
+                    let _ = tx.send(PanelEvent::Failed {
+                        session_id,
+                        message: errors::user_message("Unable to list home directory", &err),
+                    });
                     return;
                 }
             };
-            relist(&sftp, PathBuf::from(home), &tx).await;
+            relist(&sftp, session_id, PathBuf::from(home), &tx).await;
         });
     }
 
+    /// Refreshes the *active* session's panel — used for user-driven
+    /// navigation/refresh, where "the remote panel" unambiguously means
+    /// whichever session is focused.
     fn spawn_remote_list(&mut self, path: PathBuf) {
-        let Some(sftp) = self.sftp.clone() else {
+        let Some(session_id) = self.sessions.active_id() else {
             return;
         };
+        self.spawn_remote_list_for(session_id, path);
+    }
+
+    /// Refreshes a specific session's panel by id — used when the session
+    /// that needs refreshing isn't necessarily the active one (a finished
+    /// transfer targets whichever session it was queued against).
+    fn spawn_remote_list_for(&mut self, session_id: u64, path: PathBuf) {
+        let Some(resources) = self.session_resources.get(&session_id) else {
+            return;
+        };
+        let sftp = resources.sftp.clone();
         let tx = self.panel_tx.clone();
-        tokio::spawn(async move { relist(&sftp, path, &tx).await });
+        tokio::spawn(async move { relist(&sftp, session_id, path, &tx).await });
     }
 
     fn spawn_remote_mkdir(&mut self, name: String) {
-        let (Some(remote), Some(sftp)) = (self.remote.as_ref(), self.sftp.clone()) else {
+        let Some(session_id) = self.sessions.active_id() else {
             return;
         };
-        let dir_path = remote.path().to_path_buf();
+        let Some(session) = self.sessions.active() else {
+            return;
+        };
+        let Some(resources) = self.session_resources.get(&session_id) else {
+            return;
+        };
+        let dir_path = session.panel.path().to_path_buf();
+        let sftp = resources.sftp.clone();
         let tx = self.panel_tx.clone();
 
         tokio::spawn(async move {
             let target = path_to_remote_string(&dir_path.join(&name));
             if let Err(err) = filesystem::remote::create_directory(&sftp, &target).await {
                 tracing::debug!("{err:?}");
-                let _ = tx.send(PanelEvent::Failed(errors::user_message(
-                    "Unable to create directory",
-                    &err,
-                )));
+                let _ = tx.send(PanelEvent::Failed {
+                    session_id,
+                    message: errors::user_message("Unable to create directory", &err),
+                });
                 return;
             }
-            relist(&sftp, dir_path, &tx).await;
+            relist(&sftp, session_id, dir_path, &tx).await;
         });
     }
 
     fn spawn_remote_rename(&mut self, new_name: String) {
-        let (Some(remote), Some(sftp)) = (self.remote.as_ref(), self.sftp.clone()) else {
+        let Some(session_id) = self.sessions.active_id() else {
             return;
         };
-        let Some(current_name) = remote.current_entry_name() else {
+        let Some(session) = self.sessions.active() else {
             return;
         };
-        let dir_path = remote.path().to_path_buf();
+        let Some(current_name) = session.panel.current_entry_name() else {
+            return;
+        };
+        let Some(resources) = self.session_resources.get(&session_id) else {
+            return;
+        };
+        let dir_path = session.panel.path().to_path_buf();
         let from = path_to_remote_string(&dir_path.join(current_name));
         let to = path_to_remote_string(&dir_path.join(&new_name));
+        let sftp = resources.sftp.clone();
         let tx = self.panel_tx.clone();
 
         tokio::spawn(async move {
             if let Err(err) = filesystem::remote::rename(&sftp, &from, &to).await {
                 tracing::debug!("{err:?}");
-                let _ = tx.send(PanelEvent::Failed(errors::user_message(
-                    "Unable to rename",
-                    &err,
-                )));
+                let _ = tx.send(PanelEvent::Failed {
+                    session_id,
+                    message: errors::user_message("Unable to rename", &err),
+                });
                 return;
             }
-            relist(&sftp, dir_path, &tx).await;
+            relist(&sftp, session_id, dir_path, &tx).await;
         });
     }
 
     fn spawn_remote_delete(&mut self) {
-        let (Some(remote), Some(sftp)) = (self.remote.as_ref(), self.sftp.clone()) else {
+        let Some(session_id) = self.sessions.active_id() else {
             return;
         };
-        let targets = remote.targets();
-        let dir_path = remote.path().to_path_buf();
+        let Some(session) = self.sessions.active() else {
+            return;
+        };
+        let Some(resources) = self.session_resources.get(&session_id) else {
+            return;
+        };
+        let targets = session.panel.targets();
+        let dir_path = session.panel.path().to_path_buf();
+        let sftp = resources.sftp.clone();
         let tx = self.panel_tx.clone();
 
         tokio::spawn(async move {
@@ -899,14 +1035,14 @@ impl App {
                 let target_str = path_to_remote_string(&target);
                 if let Err(err) = filesystem::remote::delete(&sftp, &target_str).await {
                     tracing::debug!("{err:?}");
-                    let _ = tx.send(PanelEvent::Failed(errors::user_message(
-                        "Unable to delete",
-                        &err,
-                    )));
+                    let _ = tx.send(PanelEvent::Failed {
+                        session_id,
+                        message: errors::user_message("Unable to delete", &err),
+                    });
                     return;
                 }
             }
-            relist(&sftp, dir_path, &tx).await;
+            relist(&sftp, session_id, dir_path, &tx).await;
         });
     }
 
@@ -929,26 +1065,34 @@ impl App {
     }
 
     fn enqueue_uploads(&mut self) {
-        let Some(remote) = &self.remote else {
+        let Some(session) = self.sessions.active() else {
             self.notifications
                 .push(Severity::Warning, "Connect to a remote server first");
             return;
         };
-        let remote_dir = remote.path().to_path_buf();
+        let session_id = session.id;
+        let remote_dir = session.panel.path().to_path_buf();
         let entries = self.local.target_entries();
-        self.enqueue_transfers(Direction::Upload, entries, remote_dir);
+        self.enqueue_transfers(session_id, Direction::Upload, entries, remote_dir);
     }
 
     fn enqueue_downloads(&mut self) {
-        let Some(remote) = &self.remote else {
+        let Some(session) = self.sessions.active() else {
             return;
         };
+        let session_id = session.id;
         let local_dir = self.local.path().to_path_buf();
-        let entries = remote.target_entries();
-        self.enqueue_transfers(Direction::Download, entries, local_dir);
+        let entries = session.panel.target_entries();
+        self.enqueue_transfers(session_id, Direction::Download, entries, local_dir);
     }
 
-    fn enqueue_transfers(&mut self, direction: Direction, entries: Vec<Entry>, dest_dir: PathBuf) {
+    fn enqueue_transfers(
+        &mut self,
+        session_id: u64,
+        direction: Direction,
+        entries: Vec<Entry>,
+        dest_dir: PathBuf,
+    ) {
         if entries.is_empty() {
             return;
         }
@@ -971,17 +1115,21 @@ impl App {
                 ),
             };
 
-            self.transfers
-                .enqueue(direction, local_path, remote_path, entry.name, entry.size);
+            self.transfers.enqueue(
+                session_id,
+                direction,
+                local_path,
+                remote_path,
+                entry.name,
+                entry.size,
+            );
         }
 
         if skipped_dirs > 0 {
             let plural = if skipped_dirs == 1 { "y" } else { "ies" };
             self.notifications.push(
                 Severity::Warning,
-                format!(
-                    "Copying directories isn't supported yet \u{2014} skipped {skipped_dirs} director{plural}"
-                ),
+                format!("Copying directories isn't supported yet \u{2014} skipped {skipped_dirs} director{plural}"),
             );
         }
     }
@@ -990,13 +1138,23 @@ impl App {
         let Some(id) = self.transfers.next_to_run() else {
             return;
         };
-        let Some(sftp) = self.sftp.clone() else {
+        let Some(job) = self.transfers.get(id) else {
             return;
         };
+        let session_id = job.session_id;
+
+        let Some(resources) = self.session_resources.get(&session_id) else {
+            if let Some(job) = self.transfers.get_mut(id) {
+                job.status = JobStatus::Failed("session disconnected".to_string());
+            }
+            self.maybe_start_next_transfer();
+            return;
+        };
+        let sftp = resources.sftp.clone();
+
         let Some(job) = self.transfers.get_mut(id) else {
             return;
         };
-
         job.status = JobStatus::InProgress;
         job.attempts += 1;
         let direction = job.direction;
@@ -1079,9 +1237,10 @@ impl App {
 
         match job.direction {
             Direction::Upload => {
-                if let Some(remote) = &self.remote {
-                    let path = remote.path().to_path_buf();
-                    self.spawn_remote_list(path);
+                let session_id = job.session_id;
+                if let Some(session) = self.sessions.by_id_mut(session_id) {
+                    let path = session.panel.path().to_path_buf();
+                    self.spawn_remote_list_for(session_id, path);
                 }
             }
             Direction::Download => {
@@ -1119,9 +1278,9 @@ impl App {
         match self.active_panel {
             ActivePanel::Local => self.local.path().to_path_buf(),
             ActivePanel::Remote => self
-                .remote
-                .as_ref()
-                .map(|remote| remote.path().to_path_buf())
+                .sessions
+                .active()
+                .map(|session| session.panel.path().to_path_buf())
                 .unwrap_or_default(),
         }
     }
@@ -1129,8 +1288,8 @@ impl App {
     fn add_bookmark(&mut self, label: String) {
         let host = match self.active_panel {
             ActivePanel::Local => None,
-            ActivePanel::Remote => match &self.active_connection {
-                Some(entry) => Some(entry.name.clone()),
+            ActivePanel::Remote => match self.sessions.active() {
+                Some(session) => Some(session.entry.name.clone()),
                 None => {
                     self.notifications
                         .push(Severity::Warning, "Connect to a remote server first");
@@ -1184,15 +1343,13 @@ impl App {
                 self.set_status(result);
             }
             Some(host) => {
-                let connected = matches!(
-                    &self.connection_status,
-                    ConnectionStatus::Connected(name) if *name == host
-                );
-                if !connected {
+                let Some(session_id) = self.sessions.by_host(&host).map(|session| session.id)
+                else {
                     self.notifications
                         .push(Severity::Warning, format!("Connect to {host} first"));
                     return;
-                }
+                };
+                self.sessions.activate(session_id);
                 self.active_panel = ActivePanel::Remote;
                 self.spawn_remote_list(bookmark.path);
             }
@@ -1213,7 +1370,7 @@ impl App {
         if self.screen != Screen::Files {
             return;
         }
-        if self.active_panel == ActivePanel::Remote && self.remote.is_none() {
+        if self.active_panel == ActivePanel::Remote && self.sessions.active().is_none() {
             return;
         }
 
@@ -1232,9 +1389,9 @@ impl App {
         let current_name = match self.active_panel {
             ActivePanel::Local => self.local.current_entry_name(),
             ActivePanel::Remote => self
-                .remote
-                .as_ref()
-                .and_then(PanelState::current_entry_name),
+                .sessions
+                .active()
+                .and_then(|session| session.panel.current_entry_name()),
         };
         let Some(current_name) = current_name else {
             return;
@@ -1254,8 +1411,8 @@ impl App {
 
         let targets = match self.active_panel {
             ActivePanel::Local => self.local.targets(),
-            ActivePanel::Remote => match &self.remote {
-                Some(remote) => remote.targets(),
+            ActivePanel::Remote => match self.sessions.active() {
+                Some(session) => session.panel.targets(),
                 None => return,
             },
         };
@@ -1368,18 +1525,27 @@ impl App {
 /// Lists `path` over SFTP and reports the outcome — the tail end of every
 /// remote panel operation (navigate, mkdir, rename, delete all finish by
 /// refreshing the listing, just like their local counterparts do).
-async fn relist(sftp: &SftpSession, path: PathBuf, tx: &mpsc::UnboundedSender<PanelEvent>) {
+async fn relist(
+    sftp: &SftpSession,
+    session_id: u64,
+    path: PathBuf,
+    tx: &mpsc::UnboundedSender<PanelEvent>,
+) {
     let path_str = path_to_remote_string(&path);
     match filesystem::remote::list(sftp, &path_str).await {
         Ok(entries) => {
-            let _ = tx.send(PanelEvent::Listed { path, entries });
+            let _ = tx.send(PanelEvent::Listed {
+                session_id,
+                path,
+                entries,
+            });
         }
         Err(err) => {
             tracing::debug!("{err:?}");
-            let _ = tx.send(PanelEvent::Failed(errors::user_message(
-                format!("Unable to list {}", path.display()),
-                &err,
-            )));
+            let _ = tx.send(PanelEvent::Failed {
+                session_id,
+                message: errors::user_message(format!("Unable to list {}", path.display()), &err),
+            });
         }
     }
 }
@@ -1563,6 +1729,16 @@ mod tests {
         (dir, app)
     }
 
+    fn sample_connection_entry() -> ConnectionEntry {
+        ConnectionEntry {
+            name: "test".to_string(),
+            host: "test.example.com".to_string(),
+            port: 22,
+            username: "user".to_string(),
+            identity_file: None,
+        }
+    }
+
     #[test]
     fn at_with_applies_panel_settings_to_the_local_panel() {
         let dir = tempfile::tempdir().unwrap();
@@ -1648,7 +1824,7 @@ mod tests {
     #[test]
     fn remote_panel_navigation_works_once_a_listing_exists() {
         let (_dir, mut app) = app_in_temp_dir();
-        app.remote = Some(PanelState::from_listing(
+        let panel = PanelState::from_listing(
             PathBuf::from("/home/user"),
             vec![Entry {
                 name: "child".to_string(),
@@ -1657,12 +1833,13 @@ mod tests {
                 size: 0,
                 permissions: None,
             }],
-        ));
+        );
+        app.sessions.insert(sample_connection_entry(), panel);
         app.active_panel = ActivePanel::Remote;
 
         app.apply_action(Action::Down);
 
-        assert_eq!(app.remote.as_ref().unwrap().cursor, 1);
+        assert_eq!(app.sessions.active().unwrap().panel.cursor, 1);
     }
 
     #[test]
@@ -1825,27 +2002,109 @@ mod tests {
     }
 
     #[test]
-    fn panel_event_listed_creates_the_remote_panel_if_absent() {
+    fn panel_event_listed_updates_the_matching_sessions_panel() {
         let (_dir, mut app) = app_in_temp_dir();
-        assert!(app.remote.is_none());
+        let id = app.sessions.insert(
+            sample_connection_entry(),
+            PanelState::from_listing(PathBuf::from("/"), Vec::new()),
+        );
 
         app.apply_panel_event(PanelEvent::Listed {
+            session_id: id,
             path: PathBuf::from("/home/user"),
             entries: Vec::new(),
         });
 
-        assert!(app.remote.is_some());
         assert_eq!(
-            app.remote.as_ref().unwrap().path(),
+            app.sessions.active().unwrap().panel.path(),
             std::path::Path::new("/home/user")
         );
     }
 
     #[test]
-    fn panel_event_failed_sets_status() {
+    fn panel_event_listed_for_a_vanished_session_is_dropped() {
         let (_dir, mut app) = app_in_temp_dir();
-        app.apply_panel_event(PanelEvent::Failed("boom".to_string()));
+
+        app.apply_panel_event(PanelEvent::Listed {
+            session_id: 999,
+            path: PathBuf::from("/x"),
+            entries: Vec::new(),
+        });
+
+        assert!(app.sessions.is_empty());
+    }
+
+    #[test]
+    fn panel_event_failed_shows_a_notification_when_the_session_still_exists() {
+        let (_dir, mut app) = app_in_temp_dir();
+        let id = app.sessions.insert(
+            sample_connection_entry(),
+            PanelState::from_listing(PathBuf::from("/"), Vec::new()),
+        );
+
+        app.apply_panel_event(PanelEvent::Failed {
+            session_id: id,
+            message: "boom".to_string(),
+        });
+
         assert_eq!(app.notifications.current().unwrap().message, "boom");
+    }
+
+    #[test]
+    fn panel_event_failed_for_a_vanished_session_is_dropped() {
+        let (_dir, mut app) = app_in_temp_dir();
+
+        app.apply_panel_event(PanelEvent::Failed {
+            session_id: 999,
+            message: "boom".to_string(),
+        });
+
+        assert!(app.notifications.current().is_none());
+    }
+
+    #[test]
+    fn cycle_session_action_is_a_silent_no_op_with_no_sessions() {
+        let (_dir, mut app) = app_in_temp_dir();
+        app.apply_action(Action::CycleSession);
+        assert!(app.sessions.is_empty());
+    }
+
+    #[test]
+    fn cycle_session_action_advances_the_active_session() {
+        let (_dir, mut app) = app_in_temp_dir();
+        let a = app.sessions.insert(
+            sample_connection_entry(),
+            PanelState::from_listing(PathBuf::from("/"), Vec::new()),
+        );
+        let mut second_entry = sample_connection_entry();
+        second_entry.name = "other".to_string();
+        let b = app.sessions.insert(
+            second_entry,
+            PanelState::from_listing(PathBuf::from("/"), Vec::new()),
+        );
+        assert_eq!(app.sessions.active().unwrap().id, b);
+
+        app.apply_action(Action::CycleSession);
+
+        assert_eq!(app.sessions.active().unwrap().id, a);
+    }
+
+    #[test]
+    fn connecting_to_an_already_connected_host_switches_instead_of_reconnecting() {
+        let (_dir, mut app) = app_in_temp_dir();
+        let entry = sample_connection_entry();
+        app.sessions.insert(
+            entry.clone(),
+            PanelState::from_listing(PathBuf::from("/"), Vec::new()),
+        );
+        app.connections = vec![entry];
+        app.connections_cursor = 0;
+
+        app.connect_to_selected();
+
+        // still exactly one session — no reconnect attempt was spawned
+        assert_eq!(app.sessions.len(), 1);
+        assert_eq!(app.connection_status, ConnectionStatus::Disconnected);
     }
 
     #[test]

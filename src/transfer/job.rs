@@ -21,6 +21,7 @@ pub enum JobStatus {
 #[derive(Debug, Clone)]
 pub struct TransferJob {
     pub id: u64,
+    pub session_id: u64,
     pub direction: Direction,
     pub local_path: PathBuf,
     pub remote_path: String,

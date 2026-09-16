@@ -22,6 +22,7 @@ impl TransferQueue {
 
     pub fn enqueue(
         &mut self,
+        session_id: u64,
         direction: Direction,
         local_path: PathBuf,
         remote_path: String,
@@ -33,6 +34,7 @@ impl TransferQueue {
 
         self.jobs.push(TransferJob {
             id,
+            session_id,
             direction,
             local_path,
             remote_path,
@@ -108,6 +110,7 @@ mod tests {
 
     fn queue_with_one_job(queue: &mut TransferQueue) -> u64 {
         queue.enqueue(
+            1,
             Direction::Upload,
             PathBuf::from("/local/file.txt"),
             "/remote/file.txt".to_string(),
