@@ -76,21 +76,5 @@ pub(crate) fn join(parent: &str, name: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn join_adds_a_separator_when_missing() {
-        assert_eq!(join("/home/user", "file.txt"), "/home/user/file.txt");
-    }
-
-    #[test]
-    fn join_does_not_double_the_separator() {
-        assert_eq!(join("/home/user/", "file.txt"), "/home/user/file.txt");
-    }
-
-    #[test]
-    fn join_handles_root() {
-        assert_eq!(join("/", "etc"), "/etc");
-    }
-}
+#[path = "../../tests/filesystem/remote_test.rs"]
+mod tests;
