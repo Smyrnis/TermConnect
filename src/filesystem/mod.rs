@@ -1,5 +1,6 @@
 pub mod local;
 pub mod remote;
+pub mod search;
 
 use std::path::PathBuf;
 
