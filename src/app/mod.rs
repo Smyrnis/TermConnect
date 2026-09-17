@@ -82,7 +82,7 @@ struct SearchSession {
 }
 
 /// Progress reported by a background connection attempt (see
-/// [`run_connect`]), delivered back to the event loop over a channel so the
+/// `run_connect`), delivered back to the event loop over a channel so the
 /// TUI never blocks on network I/O.
 enum ConnectEvent {
     Connected {

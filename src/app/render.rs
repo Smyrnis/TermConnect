@@ -23,7 +23,7 @@ impl App {
         }
     }
 
-    pub(super) fn render_title(&self, frame: &mut Frame, area: Rect) {
+    fn render_title(&self, frame: &mut Frame, area: Rect) {
         let status_text = match &self.connection_status {
             ConnectionStatus::Connecting(name) => format!("Connecting to {name}\u{2026}"),
             ConnectionStatus::Failed(message) if self.sessions.is_empty() => {
