@@ -23,7 +23,7 @@ use crate::filesystem::{self, Entry};
 use crate::terminal;
 use crate::transfer::{self, Direction, JobStatus, TransferOutcome, TransferQueue};
 use crate::tui::connections_list;
-use crate::tui::dialog::{ConfirmDialog, Dialog, DialogOutcome, ListDialog, TextInputDialog};
+use crate::tui::dialog::{ConfirmDialog, Dialog, DialogOutcome, FormDialog, ListDialog, TextInputDialog};
 use crate::tui::help;
 use crate::tui::input::{self, Action};
 use crate::tui::notifications::{Notifications, Severity};
@@ -48,6 +48,7 @@ enum PendingAction {
     Delete,
     AddBookmark,
     SubmitPassword,
+    AddConnection,
 }
 
 /// Which top-level screen is currently shown.

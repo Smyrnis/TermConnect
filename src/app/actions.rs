@@ -14,6 +14,7 @@ impl App {
             Action::Copy => self.start_copy(),
             Action::CancelTransfer => self.cancel_active_transfer(),
             Action::OpenConnections => self.open_connections_screen(),
+            Action::AddConnection => self.open_add_connection_dialog(),
             Action::BookmarkHere => self.open_bookmark_add_dialog(),
             Action::OpenBookmarks => self.open_bookmarks_dialog(),
             Action::OpenSearch => self.open_search_screen(),

@@ -1,5 +1,8 @@
 use super::*;
 
+use crate::connection::profile::ConnectionProfile;
+use crate::tui::dialog::{FormDialog, FormField};
+
 impl App {
     /// Hands the terminal over to the system `ssh` client, per the
     /// roadmap's Terminal Lifecycle: leave the alternate screen, let `ssh`
@@ -58,6 +61,44 @@ impl App {
                     .min(self.connections.len().saturating_sub(1));
             }
             Err(err) => self.notifications.push(Severity::Error, err.to_string()),
+        }
+    }
+
+    pub(super) fn open_add_connection_dialog(&mut self) {
+        if self.screen != Screen::Connections {
+            return;
+        }
+
+        self.dialog = Some(build_connection_form("Add connection", None));
+        self.pending_action = Some(PendingAction::AddConnection);
+    }
+
+    /// Only closes the dialog once `store::save` actually succeeds — a
+    /// disk-level failure (e.g. an unwritable config directory) must leave
+    /// the form open with the user's input intact, exactly like a
+    /// validation failure does, rather than discarding it.
+    pub(super) fn submit_add_connection(&mut self, values: Vec<String>) {
+        let profile = match build_connection_profile(&values, None) {
+            Ok(profile) => profile,
+            Err(message) => {
+                self.set_form_error(message);
+                return;
+            }
+        };
+
+        match connection::store::save(&profile) {
+            Ok(()) => {
+                self.dialog = None;
+                self.pending_action = None;
+                self.open_connections_screen();
+            }
+            Err(err) => self.notifications.push(Severity::Error, err.to_string()),
+        }
+    }
+
+    pub(super) fn set_form_error(&mut self, message: String) {
+        if let Some(Dialog::Form(form)) = self.dialog.as_mut() {
+            form.error = Some(message);
         }
     }
 
@@ -448,6 +489,77 @@ async fn finish_connect(
             });
         }
     }
+}
+
+fn build_connection_form(title: &str, existing: Option<&ConnectionEntry>) -> Dialog {
+    let (name, host, port, username, password) = match existing {
+        Some(entry) => (
+            entry.name.clone(),
+            entry.host.clone(),
+            entry.port.to_string(),
+            entry.username.clone(),
+            entry.password.clone().unwrap_or_default(),
+        ),
+        None => (
+            String::new(),
+            String::new(),
+            "22".to_string(),
+            String::new(),
+            String::new(),
+        ),
+    };
+
+    Dialog::Form(FormDialog::new(
+        title,
+        vec![
+            FormField::new("Name", name),
+            FormField::new("Host", host),
+            FormField::new("Port", port),
+            FormField::new("Username", username),
+            FormField::new_masked("Password", password),
+        ],
+    ))
+}
+
+fn build_connection_profile(
+    values: &[String],
+    preserve_from: Option<&ConnectionEntry>,
+) -> Result<ConnectionProfile, String> {
+    let [name, host, port, username, password] = values else {
+        return Err("Unexpected number of fields".to_string());
+    };
+    let name = name.trim();
+    let host = host.trim();
+    let username = username.trim();
+
+    if name.is_empty() {
+        return Err("Name can't be empty".to_string());
+    }
+    if host.is_empty() {
+        return Err("Host can't be empty".to_string());
+    }
+    if username.is_empty() {
+        return Err("Username can't be empty".to_string());
+    }
+    let port: u16 = port
+        .trim()
+        .parse()
+        .map_err(|_| "Port must be a number from 1-65535".to_string())?;
+    let password = if password.is_empty() {
+        None
+    } else {
+        Some(password.clone())
+    };
+
+    Ok(ConnectionProfile {
+        name: name.to_string(),
+        host: host.to_string(),
+        port,
+        username: username.to_string(),
+        identity_file: preserve_from.and_then(|entry| entry.identity_file.clone()),
+        remote_path: preserve_from.and_then(|entry| entry.remote_path.clone()),
+        password,
+    })
 }
 
 #[cfg(test)]

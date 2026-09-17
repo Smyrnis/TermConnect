@@ -1,10 +1,45 @@
 use super::*;
 use crate::connection::ConnectionSource;
+use crossterm::event::KeyEventState;
 
 fn app_in_temp_dir() -> (tempfile::TempDir, App) {
     let dir = tempfile::tempdir().unwrap();
     let app = App::at(dir.path().to_path_buf()).unwrap();
     (dir, app)
+}
+
+fn key(code: KeyCode) -> KeyEvent {
+    KeyEvent {
+        code,
+        modifiers: KeyModifiers::NONE,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    }
+}
+
+/// Serializes tests that redirect `$HOME` to a tempdir. `std::env::set_var`
+/// mutates process-global state; without this lock, two such tests running
+/// concurrently (the default under `cargo test`) could each see the
+/// other's `HOME` value mid-test. `std::sync::Mutex` avoids pulling in a
+/// dependency like `serial_test` just for this file.
+static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Builds an `App` in a fresh temp dir with `$HOME` redirected into that
+/// same dir for the test's duration — so `connection::store`'s `$HOME`-based
+/// save/load/delete round-trip against an isolated file instead of the
+/// machine's real `~/.config/termconnect/config.toml`. The returned guard
+/// must stay bound (not `_`) for the whole test body; dropping it early
+/// releases the lock before the test's `set_var` state is safe to unwind.
+fn app_with_isolated_home() -> (tempfile::TempDir, std::sync::MutexGuard<'static, ()>, App) {
+    let guard = HOME_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let dir = tempfile::tempdir().unwrap();
+    unsafe {
+        std::env::set_var("HOME", dir.path());
+    }
+    let app = App::at(dir.path().to_path_buf()).unwrap();
+    (dir, guard, app)
 }
 
 fn sample_connection_entry() -> ConnectionEntry {
@@ -240,4 +275,82 @@ fn disconnecting_a_session_fails_its_queued_jobs_with_one_aggregated_notificatio
         "expected exactly one aggregated transfer notification, got {messages:?}"
     );
     assert!(transfer_messages[0].contains("2"));
+}
+
+#[test]
+fn add_connection_dialog_saves_a_new_profile_on_submit() {
+    let (_dir, _guard, mut app) = app_with_isolated_home();
+    app.screen = Screen::Connections;
+
+    app.apply_action(Action::AddConnection);
+    assert!(matches!(app.dialog, Some(Dialog::Form(_))));
+
+    if let Some(Dialog::Form(form)) = app.dialog.as_mut() {
+        form.fields[0].value = "prod".to_string();
+        form.fields[1].value = "server.example.com".to_string();
+        form.fields[2].value = "2222".to_string();
+        form.fields[3].value = "deploy".to_string();
+        form.fields[4].value = "hunter2".to_string();
+    }
+    app.apply_dialog_key(key(KeyCode::Enter));
+
+    assert!(app.dialog.is_none());
+    let saved = crate::connection::store::load().unwrap();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].name, "prod");
+    assert_eq!(saved[0].host, "server.example.com");
+    assert_eq!(saved[0].port, 2222);
+    assert_eq!(saved[0].password, Some("hunter2".to_string()));
+}
+
+#[test]
+fn add_connection_dialog_keeps_the_dialog_open_on_invalid_port() {
+    let (_dir, _guard, mut app) = app_with_isolated_home();
+    app.screen = Screen::Connections;
+
+    app.apply_action(Action::AddConnection);
+    if let Some(Dialog::Form(form)) = app.dialog.as_mut() {
+        form.fields[0].value = "prod".to_string();
+        form.fields[1].value = "server.example.com".to_string();
+        form.fields[2].value = "not-a-port".to_string();
+        form.fields[3].value = "deploy".to_string();
+    }
+    app.apply_dialog_key(key(KeyCode::Enter));
+
+    match app.dialog {
+        Some(Dialog::Form(ref form)) => assert!(form.error.is_some()),
+        _ => panic!("expected the form dialog to stay open with an error"),
+    }
+}
+
+#[test]
+fn add_connection_action_does_nothing_outside_the_connections_screen() {
+    let (_dir, mut app) = app_in_temp_dir();
+    app.apply_action(Action::AddConnection);
+    assert!(app.dialog.is_none());
+}
+
+#[test]
+fn add_connection_dialog_stays_open_when_saving_fails() {
+    let (dir, _guard, mut app) = app_with_isolated_home();
+    // Make `~/.config` a plain file, so `store::save`'s `create_dir_all`
+    // for `~/.config/termconnect/` fails — this simulates any disk-level
+    // save error without needing to fake a permissions failure.
+    std::fs::write(dir.path().join(".config"), b"not a directory").unwrap();
+    app.screen = Screen::Connections;
+
+    app.apply_action(Action::AddConnection);
+    if let Some(Dialog::Form(form)) = app.dialog.as_mut() {
+        form.fields[0].value = "prod".to_string();
+        form.fields[1].value = "server.example.com".to_string();
+        form.fields[2].value = "22".to_string();
+        form.fields[3].value = "deploy".to_string();
+    }
+    app.apply_dialog_key(key(KeyCode::Enter));
+
+    assert!(
+        app.dialog.is_some(),
+        "the form must stay open so the user's input isn't lost on a save error"
+    );
+    assert!(app.notifications.current().is_some());
 }

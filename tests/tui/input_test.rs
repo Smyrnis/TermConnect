@@ -240,6 +240,11 @@ fn f1_maps_to_help() {
 }
 
 #[test]
+fn f6_is_bound_to_add_connection() {
+    assert_eq!(map_key_via_defaults(KeyCode::F(6)), Action::AddConnection);
+}
+
+#[test]
 fn ctrl_d_maps_to_bookmark_here() {
     assert_eq!(
         map_key_via_defaults_with_modifiers(KeyCode::Char('d'), KeyModifiers::CONTROL),
