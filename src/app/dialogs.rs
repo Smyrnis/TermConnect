@@ -142,6 +142,9 @@ impl App {
                     }
                 }
             }
+            DialogOutcome::FormSubmitted(_) => {
+                self.dialog = None;
+            }
         }
     }
 }
