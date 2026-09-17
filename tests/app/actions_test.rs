@@ -239,3 +239,55 @@ fn back_action_returns_to_files_screen_when_there_is_no_error() {
 
     assert_eq!(app.screen, Screen::Files);
 }
+
+#[test]
+fn rename_action_on_connections_screen_opens_the_edit_connection_form() {
+    let (_dir, mut app) = app_in_temp_dir();
+    app.screen = Screen::Connections;
+    app.connections = vec![ConnectionEntry {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 2222,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: Some("hunter2".to_string()),
+        source: ConnectionSource::Profile,
+    }];
+    app.connections_cursor = 0;
+
+    app.apply_action(Action::Rename);
+
+    match app.dialog {
+        Some(Dialog::Form(ref form)) => {
+            assert_eq!(form.fields[0].value, "prod");
+            assert_eq!(form.fields[1].value, "server.example.com");
+            assert_eq!(form.fields[2].value, "2222");
+            assert_eq!(form.fields[3].value, "deploy");
+            assert_eq!(form.fields[4].value, "hunter2");
+        }
+        _ => panic!("expected the edit form to open"),
+    }
+}
+
+#[test]
+fn rename_action_on_an_ssh_config_entry_does_not_open_a_dialog() {
+    let (_dir, mut app) = app_in_temp_dir();
+    app.screen = Screen::Connections;
+    app.connections = vec![ConnectionEntry {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::SshConfig,
+    }];
+    app.connections_cursor = 0;
+
+    app.apply_action(Action::Rename);
+
+    assert!(app.dialog.is_none());
+    assert!(app.notifications.current().is_some());
+}

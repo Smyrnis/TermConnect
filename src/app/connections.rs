@@ -96,6 +96,60 @@ impl App {
         }
     }
 
+    pub(super) fn open_edit_connection_dialog(&mut self) {
+        if self.screen != Screen::Connections {
+            return;
+        }
+        let Some(entry) = self.connections.get(self.connections_cursor).cloned() else {
+            return;
+        };
+        if entry.source == ConnectionSource::SshConfig {
+            self.notifications.push(
+                Severity::Info,
+                "This connection is defined in ~/.ssh/config and can't be edited here",
+            );
+            return;
+        }
+
+        self.dialog = Some(build_connection_form("Edit connection", Some(&entry)));
+        self.pending_action = Some(PendingAction::EditConnection { original: entry });
+    }
+
+    /// Same close-only-on-success rule as `submit_add_connection`. A rename
+    /// (name changed) deletes the old profile first — if that delete fails,
+    /// the form stays open rather than going on to save under the new name,
+    /// so the user doesn't end up with two saved copies from one confirm.
+    pub(super) fn submit_edit_connection(&mut self, values: Vec<String>) {
+        let Some(PendingAction::EditConnection { original }) = &self.pending_action else {
+            return;
+        };
+        let original = original.clone();
+
+        let profile = match build_connection_profile(&values, Some(&original)) {
+            Ok(profile) => profile,
+            Err(message) => {
+                self.set_form_error(message);
+                return;
+            }
+        };
+
+        if profile.name != original.name
+            && let Err(err) = connection::store::delete(&original.name)
+        {
+            self.notifications.push(Severity::Error, err.to_string());
+            return;
+        }
+
+        match connection::store::save(&profile) {
+            Ok(()) => {
+                self.dialog = None;
+                self.pending_action = None;
+                self.open_connections_screen();
+            }
+            Err(err) => self.notifications.push(Severity::Error, err.to_string()),
+        }
+    }
+
     pub(super) fn set_form_error(&mut self, message: String) {
         if let Some(Dialog::Form(form)) = self.dialog.as_mut() {
             form.error = Some(message);

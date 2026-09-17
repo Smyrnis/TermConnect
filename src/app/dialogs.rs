@@ -120,7 +120,10 @@ impl App {
                         }
                     }
                     Some(PendingAction::AddBookmark) => self.add_bookmark(value),
-                    Some(PendingAction::Delete) | Some(PendingAction::AddConnection) | None => {}
+                    Some(PendingAction::Delete)
+                    | Some(PendingAction::AddConnection)
+                    | Some(PendingAction::EditConnection { .. })
+                    | None => {}
                 }
             }
             DialogOutcome::Selected(index) => {
@@ -144,6 +147,7 @@ impl App {
             }
             DialogOutcome::FormSubmitted(values) => match self.pending_action {
                 Some(PendingAction::AddConnection) => self.submit_add_connection(values),
+                Some(PendingAction::EditConnection { .. }) => self.submit_edit_connection(values),
                 _ => self.dialog = None,
             },
         }

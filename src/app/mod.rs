@@ -16,7 +16,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::config;
 use crate::connection::client::TermConnectHandler;
-use crate::connection::{self, ConnectionEntry};
+use crate::connection::{self, ConnectionEntry, ConnectionSource};
 use crate::errors;
 use crate::filesystem::search::SearchEvent;
 use crate::filesystem::{self, Entry};
@@ -49,6 +49,7 @@ enum PendingAction {
     AddBookmark,
     SubmitPassword,
     AddConnection,
+    EditConnection { original: ConnectionEntry },
 }
 
 /// Which top-level screen is currently shown.

@@ -354,3 +354,84 @@ fn add_connection_dialog_stays_open_when_saving_fails() {
     );
     assert!(app.notifications.current().is_some());
 }
+
+#[test]
+fn edit_connection_preserves_identity_file_and_remote_path_not_shown_in_the_form() {
+    let (_dir, _guard, mut app) = app_with_isolated_home();
+    crate::connection::store::save(&crate::connection::profile::ConnectionProfile {
+        name: "prod".to_string(),
+        host: "old.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: Some(std::path::PathBuf::from("/home/user/.ssh/id_ed25519")),
+        remote_path: Some("/var/www".to_string()),
+        password: None,
+    })
+    .unwrap();
+
+    app.screen = Screen::Connections;
+    app.connections = vec![ConnectionEntry {
+        name: "prod".to_string(),
+        host: "old.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: Some(std::path::PathBuf::from("/home/user/.ssh/id_ed25519")),
+        remote_path: Some("/var/www".to_string()),
+        password: None,
+        source: ConnectionSource::Profile,
+    }];
+    app.connections_cursor = 0;
+
+    app.apply_action(Action::Rename);
+    if let Some(Dialog::Form(form)) = app.dialog.as_mut() {
+        form.fields[1].value = "new.example.com".to_string();
+    }
+    app.apply_dialog_key(key(KeyCode::Enter));
+
+    let saved = crate::connection::store::load().unwrap();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].host, "new.example.com");
+    assert_eq!(
+        saved[0].identity_file,
+        Some(std::path::PathBuf::from("/home/user/.ssh/id_ed25519"))
+    );
+    assert_eq!(saved[0].remote_path, Some("/var/www".to_string()));
+}
+
+#[test]
+fn renaming_a_connection_to_a_new_name_deletes_the_old_profile() {
+    let (_dir, _guard, mut app) = app_with_isolated_home();
+    crate::connection::store::save(&crate::connection::profile::ConnectionProfile {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+    })
+    .unwrap();
+
+    app.screen = Screen::Connections;
+    app.connections = vec![ConnectionEntry {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
+    }];
+    app.connections_cursor = 0;
+
+    app.apply_action(Action::Rename);
+    if let Some(Dialog::Form(form)) = app.dialog.as_mut() {
+        form.fields[0].value = "production".to_string();
+    }
+    app.apply_dialog_key(key(KeyCode::Enter));
+
+    let saved = crate::connection::store::load().unwrap();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].name, "production");
+}

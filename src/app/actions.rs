@@ -6,7 +6,10 @@ impl App {
             Action::Quit => self.should_quit = true,
             Action::SwitchPanel => self.active_panel.toggle(),
             Action::Mkdir => self.open_mkdir_dialog(),
-            Action::Rename => self.open_rename_dialog(),
+            Action::Rename => match self.screen {
+                Screen::Connections => self.open_edit_connection_dialog(),
+                _ => self.open_rename_dialog(),
+            },
             Action::Delete => match self.screen {
                 Screen::Connections => self.disconnect_selected(),
                 _ => self.open_delete_dialog(),
