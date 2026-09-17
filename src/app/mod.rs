@@ -89,7 +89,7 @@ struct SearchSession {
 /// TUI never blocks on network I/O.
 enum ConnectEvent {
     Connected {
-        entry: ConnectionEntry,
+        entry: Box<ConnectionEntry>,
         handle: russh::client::Handle<TermConnectHandler>,
         sftp: SftpSession,
     },

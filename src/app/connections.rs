@@ -86,6 +86,21 @@ impl App {
             }
         };
 
+        match connection::store::load() {
+            Ok(existing) if existing.iter().any(|p| p.name == profile.name) => {
+                self.set_form_error(format!(
+                    "A connection named \"{}\" already exists",
+                    profile.name
+                ));
+                return;
+            }
+            Ok(_) => {}
+            Err(err) => {
+                self.notifications.push(Severity::Error, err.to_string());
+                return;
+            }
+        }
+
         match connection::store::save(&profile) {
             Ok(()) => {
                 self.dialog = None;
@@ -132,6 +147,25 @@ impl App {
                 return;
             }
         };
+
+        match connection::store::load() {
+            Ok(existing)
+                if existing
+                    .iter()
+                    .any(|p| p.name == profile.name && p.name != original.name) =>
+            {
+                self.set_form_error(format!(
+                    "A connection named \"{}\" already exists",
+                    profile.name
+                ));
+                return;
+            }
+            Ok(_) => {}
+            Err(err) => {
+                self.notifications.push(Severity::Error, err.to_string());
+                return;
+            }
+        }
 
         if profile.name != original.name
             && let Err(err) = connection::store::delete(&original.name)
@@ -248,7 +282,7 @@ impl App {
             } => {
                 self.connection_status = ConnectionStatus::Disconnected;
                 let placeholder_panel = PanelState::from_listing(PathBuf::from("/"), Vec::new());
-                let id = self.sessions.insert(entry, placeholder_panel);
+                let id = self.sessions.insert(*entry, placeholder_panel);
                 self.session_resources.insert(
                     id,
                     SessionResources {
@@ -550,7 +584,7 @@ async fn finish_connect(
     match connection::client::open_sftp(&handle).await {
         Ok(sftp) => {
             let _ = tx.send(ConnectEvent::Connected {
-                entry,
+                entry: Box::new(entry),
                 handle,
                 sftp,
             });
@@ -621,6 +655,9 @@ fn build_connection_profile(
         .trim()
         .parse()
         .map_err(|_| "Port must be a number from 1-65535".to_string())?;
+    if port == 0 {
+        return Err("Port must be a number from 1-65535".to_string());
+    }
     let password = if password.is_empty() {
         None
     } else {

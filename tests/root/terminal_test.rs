@@ -1,4 +1,5 @@
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 use super::*;
@@ -91,6 +92,9 @@ fn command_falls_back_to_plain_ssh_when_sshpass_is_not_found() {
     let command = command_for_with(&entry, None);
 
     assert_eq!(command.get_program(), "ssh");
+    // The password must never leak into the child's environment when
+    // sshpass isn't being used to supply it.
+    assert!(command.get_envs().all(|(key, _)| key != "SSHPASS"));
 }
 
 #[test]
@@ -98,6 +102,7 @@ fn command_falls_back_to_plain_ssh_when_there_is_no_password() {
     let command = command_for_with(&sample_entry(), Some(PathBuf::from("/usr/bin/sshpass")));
 
     assert_eq!(command.get_program(), "ssh");
+    assert!(command.get_envs().all(|(key, _)| key != "SSHPASS"));
 }
 
 #[test]
@@ -105,6 +110,7 @@ fn find_sshpass_in_locates_an_executable_on_the_path() {
     let dir = tempfile::tempdir().unwrap();
     let sshpass_path = dir.path().join("sshpass");
     fs::write(&sshpass_path, b"").unwrap();
+    fs::set_permissions(&sshpass_path, fs::Permissions::from_mode(0o755)).unwrap();
 
     let path_var = dir.path().to_string_lossy().into_owned();
 
@@ -114,6 +120,18 @@ fn find_sshpass_in_locates_an_executable_on_the_path() {
 #[test]
 fn find_sshpass_in_returns_none_when_not_present() {
     let dir = tempfile::tempdir().unwrap();
+    let path_var = dir.path().to_string_lossy().into_owned();
+
+    assert_eq!(find_sshpass_in(&path_var), None);
+}
+
+#[test]
+fn find_sshpass_in_ignores_a_non_executable_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let sshpass_path = dir.path().join("sshpass");
+    fs::write(&sshpass_path, b"").unwrap();
+    fs::set_permissions(&sshpass_path, fs::Permissions::from_mode(0o644)).unwrap();
+
     let path_var = dir.path().to_string_lossy().into_owned();
 
     assert_eq!(find_sshpass_in(&path_var), None);

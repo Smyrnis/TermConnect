@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::os::unix::fs::PermissionsExt;
+use std::io::Write;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -78,7 +79,20 @@ fn write_config_file(path: &Path, file: &ConfigFile) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, toml::to_string_pretty(file)?)?;
+    // Open (or create) with 0600 from the very first `open(2)` call, so a
+    // freshly-created file — which may carry a plaintext password — is
+    // never briefly readable at the process umask (e.g. 0644) before the
+    // permissions get locked down below.
+    let mut handle = fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    handle.write_all(toml::to_string_pretty(file)?.as_bytes())?;
+    // Still needed for a file that already existed at looser permissions
+    // (e.g. from before this fix, or manual editing) — `.mode(0o600)` above
+    // only governs the permissions used at creation time.
     let mut permissions = fs::metadata(path)?.permissions();
     permissions.set_mode(0o600);
     fs::set_permissions(path, permissions)?;

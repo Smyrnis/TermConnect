@@ -324,6 +324,117 @@ fn add_connection_dialog_keeps_the_dialog_open_on_invalid_port() {
 }
 
 #[test]
+fn add_connection_dialog_keeps_the_dialog_open_on_port_zero() {
+    let (_dir, _guard, mut app) = app_with_isolated_home();
+    app.screen = Screen::Connections;
+
+    app.apply_action(Action::AddConnection);
+    if let Some(Dialog::Form(form)) = app.dialog.as_mut() {
+        form.fields[0].value = "prod".to_string();
+        form.fields[1].value = "server.example.com".to_string();
+        form.fields[2].value = "0".to_string();
+        form.fields[3].value = "deploy".to_string();
+    }
+    app.apply_dialog_key(key(KeyCode::Enter));
+
+    match app.dialog {
+        Some(Dialog::Form(ref form)) => assert!(form.error.is_some()),
+        _ => panic!("expected the form dialog to stay open with an error"),
+    }
+}
+
+#[test]
+fn add_connection_dialog_rejects_a_name_that_already_exists() {
+    let (_dir, _guard, mut app) = app_with_isolated_home();
+    crate::connection::store::save(&crate::connection::profile::ConnectionProfile {
+        name: "prod".to_string(),
+        host: "original.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+    })
+    .unwrap();
+
+    app.screen = Screen::Connections;
+    app.apply_action(Action::AddConnection);
+    if let Some(Dialog::Form(form)) = app.dialog.as_mut() {
+        form.fields[0].value = "prod".to_string();
+        form.fields[1].value = "new.example.com".to_string();
+        form.fields[2].value = "22".to_string();
+        form.fields[3].value = "deploy".to_string();
+    }
+    app.apply_dialog_key(key(KeyCode::Enter));
+
+    match app.dialog {
+        Some(Dialog::Form(ref form)) => assert!(form.error.is_some()),
+        _ => panic!("expected the form dialog to stay open with an error"),
+    }
+
+    let saved = crate::connection::store::load().unwrap();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].host, "original.example.com");
+}
+
+#[test]
+fn edit_connection_rejects_renaming_onto_an_existing_name() {
+    let (_dir, _guard, mut app) = app_with_isolated_home();
+    crate::connection::store::save(&crate::connection::profile::ConnectionProfile {
+        name: "prod".to_string(),
+        host: "prod.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+    })
+    .unwrap();
+    crate::connection::store::save(&crate::connection::profile::ConnectionProfile {
+        name: "staging".to_string(),
+        host: "staging.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+    })
+    .unwrap();
+
+    app.screen = Screen::Connections;
+    app.connections = vec![ConnectionEntry {
+        name: "prod".to_string(),
+        host: "prod.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
+    }];
+    app.connections_cursor = 0;
+
+    app.apply_action(Action::Rename);
+    if let Some(Dialog::Form(form)) = app.dialog.as_mut() {
+        form.fields[0].value = "staging".to_string();
+    }
+    app.apply_dialog_key(key(KeyCode::Enter));
+
+    match app.dialog {
+        Some(Dialog::Form(ref form)) => assert!(form.error.is_some()),
+        _ => panic!("expected the form dialog to stay open with an error"),
+    }
+
+    let mut saved = crate::connection::store::load().unwrap();
+    saved.sort_by(|a, b| a.name.cmp(&b.name));
+    assert_eq!(saved.len(), 2);
+    assert_eq!(saved[0].name, "prod");
+    assert_eq!(saved[0].host, "prod.example.com");
+    assert_eq!(saved[1].name, "staging");
+    assert_eq!(saved[1].host, "staging.example.com");
+}
+
+#[test]
 fn add_connection_action_does_nothing_outside_the_connections_screen() {
     let (_dir, mut app) = app_in_temp_dir();
     app.apply_action(Action::AddConnection);
