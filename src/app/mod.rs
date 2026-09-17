@@ -50,6 +50,7 @@ enum PendingAction {
     SubmitPassword,
     AddConnection,
     EditConnection { original: ConnectionEntry },
+    DeleteConnection { name: String },
 }
 
 /// Which top-level screen is currently shown.

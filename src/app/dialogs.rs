@@ -87,14 +87,20 @@ impl App {
             }
             DialogOutcome::Confirmed => {
                 self.dialog = None;
-                if let Some(PendingAction::Delete) = self.pending_action.take() {
-                    match self.active_panel {
+                match self.pending_action.take() {
+                    Some(PendingAction::Delete) => match self.active_panel {
                         ActivePanel::Local => {
                             let result = self.local.delete_targets();
                             self.set_status(result);
                         }
                         ActivePanel::Remote => self.spawn_remote_delete(),
+                    },
+                    Some(PendingAction::DeleteConnection { name }) => {
+                        let result = connection::store::delete(&name);
+                        self.set_status(result);
+                        self.open_connections_screen();
                     }
+                    _ => {}
                 }
             }
             DialogOutcome::Submitted(value) => {
@@ -123,6 +129,7 @@ impl App {
                     Some(PendingAction::Delete)
                     | Some(PendingAction::AddConnection)
                     | Some(PendingAction::EditConnection { .. })
+                    | Some(PendingAction::DeleteConnection { .. })
                     | None => {}
                 }
             }

@@ -280,3 +280,11 @@ fn ctrl_n_maps_to_cycle_session() {
 fn all_actions_excludes_noop() {
     assert!(!ALL_ACTIONS.contains(&Action::Noop));
 }
+
+#[test]
+fn delete_key_is_bound_to_delete_connection() {
+    assert_eq!(
+        map_key_via_defaults(KeyCode::Delete),
+        Action::DeleteConnection
+    );
+}

@@ -18,6 +18,7 @@ pub enum Action {
     CancelTransfer,
     OpenConnections,
     AddConnection,
+    DeleteConnection,
     OpenTerminal,
     ToggleHidden,
     CycleSort,
@@ -47,6 +48,7 @@ impl Action {
             Action::CancelTransfer => "cancel_transfer",
             Action::OpenConnections => "open_connections",
             Action::AddConnection => "add_connection",
+            Action::DeleteConnection => "delete_connection",
             Action::OpenTerminal => "open_terminal",
             Action::ToggleHidden => "toggle_hidden",
             Action::CycleSort => "cycle_sort",
@@ -79,6 +81,7 @@ impl Action {
             "cancel_transfer" => Action::CancelTransfer,
             "open_connections" => Action::OpenConnections,
             "add_connection" => Action::AddConnection,
+            "delete_connection" => Action::DeleteConnection,
             "open_terminal" => Action::OpenTerminal,
             "toggle_hidden" => Action::ToggleHidden,
             "cycle_sort" => Action::CycleSort,
@@ -225,6 +228,11 @@ impl KeyBindings {
         bind(Action::Delete, KeyCode::F(8), KeyModifiers::NONE);
         bind(Action::OpenConnections, KeyCode::F(9), KeyModifiers::NONE);
         bind(Action::AddConnection, KeyCode::F(6), KeyModifiers::NONE);
+        bind(
+            Action::DeleteConnection,
+            KeyCode::Delete,
+            KeyModifiers::NONE,
+        );
         bind(Action::Back, KeyCode::Esc, KeyModifiers::NONE);
         bind(Action::Refresh, KeyCode::Char('r'), KeyModifiers::CONTROL);
         bind(
@@ -349,6 +357,7 @@ pub const ALL_ACTIONS: &[Action] = &[
     Action::CancelTransfer,
     Action::OpenConnections,
     Action::AddConnection,
+    Action::DeleteConnection,
     Action::OpenTerminal,
     Action::ToggleHidden,
     Action::CycleSort,

@@ -435,3 +435,80 @@ fn renaming_a_connection_to_a_new_name_deletes_the_old_profile() {
     assert_eq!(saved.len(), 1);
     assert_eq!(saved[0].name, "production");
 }
+
+#[test]
+fn delete_connection_action_opens_a_confirm_dialog() {
+    let (_dir, mut app) = app_in_temp_dir();
+    app.screen = Screen::Connections;
+    app.connections = vec![ConnectionEntry {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
+    }];
+    app.connections_cursor = 0;
+
+    app.apply_action(Action::DeleteConnection);
+
+    assert!(matches!(app.dialog, Some(Dialog::Confirm(_))));
+}
+
+#[test]
+fn confirming_delete_connection_removes_the_saved_profile() {
+    let (_dir, _guard, mut app) = app_with_isolated_home();
+    crate::connection::store::save(&crate::connection::profile::ConnectionProfile {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+    })
+    .unwrap();
+
+    app.screen = Screen::Connections;
+    app.connections = vec![ConnectionEntry {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
+    }];
+    app.connections_cursor = 0;
+
+    app.apply_action(Action::DeleteConnection);
+    app.apply_dialog_key(key(KeyCode::Char('y')));
+
+    assert!(app.dialog.is_none());
+    assert!(crate::connection::store::load().unwrap().is_empty());
+}
+
+#[test]
+fn delete_connection_on_an_ssh_config_entry_does_not_open_a_dialog() {
+    let (_dir, mut app) = app_in_temp_dir();
+    app.screen = Screen::Connections;
+    app.connections = vec![ConnectionEntry {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::SshConfig,
+    }];
+    app.connections_cursor = 0;
+
+    app.apply_action(Action::DeleteConnection);
+
+    assert!(app.dialog.is_none());
+    assert!(app.notifications.current().is_some());
+}

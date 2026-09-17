@@ -150,6 +150,28 @@ impl App {
         }
     }
 
+    pub(super) fn open_delete_connection_dialog(&mut self) {
+        if self.screen != Screen::Connections {
+            return;
+        }
+        let Some(entry) = self.connections.get(self.connections_cursor) else {
+            return;
+        };
+        if entry.source == ConnectionSource::SshConfig {
+            self.notifications.push(
+                Severity::Info,
+                "This connection is defined in ~/.ssh/config and can't be deleted here",
+            );
+            return;
+        }
+
+        let name = entry.name.clone();
+        self.dialog = Some(Dialog::Confirm(ConfirmDialog::new(format!(
+            "Delete connection \"{name}\"?"
+        ))));
+        self.pending_action = Some(PendingAction::DeleteConnection { name });
+    }
+
     pub(super) fn set_form_error(&mut self, message: String) {
         if let Some(Dialog::Form(form)) = self.dialog.as_mut() {
             form.error = Some(message);
