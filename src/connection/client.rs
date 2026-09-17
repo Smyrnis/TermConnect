@@ -69,11 +69,11 @@ pub async fn connect(host: &str, port: u16) -> Result<Handle<TermConnectHandler>
     client::connect(config, (host, port), handler).await
 }
 
-/// Tries non-interactive authentication methods in the roadmap's priority
-/// order: an `ssh-agent`, then the entry's identity file. Returns `true` if
-/// authentication succeeded, `false` if neither method was available or
-/// accepted (in which case the caller should fall back to a password
-/// prompt).
+/// Tries non-interactive authentication methods in priority order: an
+/// `ssh-agent`, then the entry's identity file, then a password saved on
+/// the profile. Returns `true` if authentication succeeded, `false` if
+/// nothing was available or accepted (in which case the caller should fall
+/// back to an interactive password prompt).
 pub async fn authenticate_non_interactive(
     handle: &mut Handle<TermConnectHandler>,
     entry: &ConnectionEntry,
@@ -84,6 +84,12 @@ pub async fn authenticate_non_interactive(
 
     if let Some(identity_file) = &entry.identity_file
         && authenticate_with_key_file(handle, &entry.username, identity_file).await?
+    {
+        return Ok(true);
+    }
+
+    if let Some(password) = &entry.password
+        && authenticate_password(handle, &entry.username, password).await?
     {
         return Ok(true);
     }
