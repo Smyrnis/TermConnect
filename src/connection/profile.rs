@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// A saved connection, as stored in `~/.config/termconnect/config.toml`.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectionProfile {
     #[serde(skip)]
     pub name: String,
@@ -15,10 +15,21 @@ pub struct ConnectionProfile {
     pub identity_file: Option<PathBuf>,
     #[serde(default)]
     pub remote_path: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
 fn default_port() -> u16 {
     22
+}
+
+/// Where a [`ConnectionEntry`] came from — only `Profile`-sourced entries
+/// can be edited or deleted from the app; `SshConfig` entries are read-only,
+/// since `~/.ssh/config` isn't a file this app owns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionSource {
+    Profile,
+    SshConfig,
 }
 
 /// A connection ready to be dialed: either a saved profile or an entry
@@ -31,6 +42,9 @@ pub struct ConnectionEntry {
     pub port: u16,
     pub username: String,
     pub identity_file: Option<PathBuf>,
+    pub remote_path: Option<String>,
+    pub password: Option<String>,
+    pub source: ConnectionSource,
 }
 
 impl From<ConnectionProfile> for ConnectionEntry {
@@ -41,6 +55,13 @@ impl From<ConnectionProfile> for ConnectionEntry {
             port: profile.port,
             username: profile.username,
             identity_file: profile.identity_file,
+            remote_path: profile.remote_path,
+            password: profile.password,
+            source: ConnectionSource::Profile,
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/connection/profile_test.rs"]
+mod tests;

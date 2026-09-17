@@ -1,4 +1,5 @@
 use super::*;
+use crate::connection::ConnectionSource;
 
 fn app_in_temp_dir() -> (tempfile::TempDir, App) {
     let dir = tempfile::tempdir().unwrap();
@@ -13,6 +14,9 @@ fn sample_connection_entry() -> ConnectionEntry {
         port: 22,
         username: "user".to_string(),
         identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
     }
 }
 

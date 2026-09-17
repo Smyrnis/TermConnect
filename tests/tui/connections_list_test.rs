@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 
-use crate::connection::ConnectionEntry;
+use crate::connection::{ConnectionEntry, ConnectionSource};
 
 use super::*;
 
@@ -15,6 +15,9 @@ fn renders_connection_names() {
         port: 22,
         username: "deploy".to_string(),
         identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
     }];
 
     let backend = TestBackend::new(60, 8);
@@ -44,6 +47,9 @@ fn entry(name: &str) -> ConnectionEntry {
         port: 22,
         username: "user".to_string(),
         identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
     }
 }
 

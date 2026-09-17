@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use super::*;
+use crate::connection::{ConnectionEntry, ConnectionSource};
 
 fn sample_entry() -> ConnectionEntry {
     ConnectionEntry {
@@ -9,6 +10,9 @@ fn sample_entry() -> ConnectionEntry {
         port: 2222,
         username: "deploy".to_string(),
         identity_file: Some(PathBuf::from("/home/user/.ssh/id_ed25519")),
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
     }
 }
 

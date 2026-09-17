@@ -6,7 +6,7 @@ pub mod store;
 
 use anyhow::Result;
 
-pub use profile::ConnectionEntry;
+pub use profile::{ConnectionEntry, ConnectionSource};
 
 /// The connections available to dial: saved profiles first, then any
 /// `~/.ssh/config` hosts not already saved as a profile — so the same host
@@ -32,6 +32,9 @@ pub fn list_all() -> Result<Vec<ConnectionEntry>> {
             port: host.port.unwrap_or(22),
             username: host.user.unwrap_or_else(default_username),
             identity_file: host.identity_file,
+            remote_path: None,
+            password: None,
+            source: ConnectionSource::SshConfig,
         });
     }
 

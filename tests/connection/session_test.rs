@@ -1,5 +1,6 @@
 use super::*;
 use std::path::PathBuf;
+use crate::connection::ConnectionSource;
 
 fn entry(name: &str) -> ConnectionEntry {
     ConnectionEntry {
@@ -8,6 +9,9 @@ fn entry(name: &str) -> ConnectionEntry {
         port: 22,
         username: "user".to_string(),
         identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
     }
 }
 

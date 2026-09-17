@@ -1,5 +1,6 @@
 use super::*;
 use std::fs;
+use crate::connection::ConnectionSource;
 
 fn app_in_temp_dir() -> (tempfile::TempDir, App) {
     let dir = tempfile::tempdir().unwrap();
@@ -14,6 +15,9 @@ fn sample_connection_entry() -> ConnectionEntry {
         port: 22,
         username: "user".to_string(),
         identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
     }
 }
 
@@ -99,6 +103,9 @@ fn connections_cursor_moves_within_bounds() {
             port: 22,
             username: "user".to_string(),
             identity_file: None,
+            remote_path: None,
+            password: None,
+            source: ConnectionSource::Profile,
         },
         ConnectionEntry {
             name: "b".to_string(),
@@ -106,6 +113,9 @@ fn connections_cursor_moves_within_bounds() {
             port: 22,
             username: "user".to_string(),
             identity_file: None,
+            remote_path: None,
+            password: None,
+            source: ConnectionSource::Profile,
         },
     ];
 
