@@ -29,6 +29,43 @@ fn serializing_a_profile_round_trips_the_password() {
 }
 
 #[test]
+fn debug_formatting_a_profile_redacts_the_password() {
+    let profile = ConnectionProfile {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: Some("hunter2".to_string()),
+    };
+
+    let debug_output = format!("{profile:?}");
+
+    assert!(!debug_output.contains("hunter2"));
+    assert!(debug_output.contains("server.example.com"));
+}
+
+#[test]
+fn debug_formatting_an_entry_redacts_the_password() {
+    let entry = ConnectionEntry {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: Some("hunter2".to_string()),
+        source: ConnectionSource::Profile,
+    };
+
+    let debug_output = format!("{entry:?}");
+
+    assert!(!debug_output.contains("hunter2"));
+    assert!(debug_output.contains("server.example.com"));
+}
+
+#[test]
 fn converting_a_profile_to_an_entry_tags_it_as_profile_sourced() {
     let profile = ConnectionProfile {
         name: "prod".to_string(),

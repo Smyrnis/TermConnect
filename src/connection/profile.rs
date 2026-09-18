@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-/// A saved connection, as stored in `~/.config/termconnect/config.toml`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// A saved connection, as stored in `~/.config/termconnect/connections.toml`.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectionProfile {
     #[serde(skip)]
     pub name: String,
@@ -17,6 +17,22 @@ pub struct ConnectionProfile {
     pub remote_path: Option<String>,
     #[serde(default)]
     pub password: Option<String>,
+}
+
+/// Manual impl so a stray `{:?}` (e.g. paired with `tracing::debug!`,
+/// per `errors::user_message`'s convention) never prints the password.
+impl std::fmt::Debug for ConnectionProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnectionProfile")
+            .field("name", &self.name)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("identity_file", &self.identity_file)
+            .field("remote_path", &self.remote_path)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 fn default_port() -> u16 {
@@ -35,7 +51,7 @@ pub enum ConnectionSource {
 /// A connection ready to be dialed: either a saved profile or an entry
 /// discovered in `~/.ssh/config`, unified into one shape so the UI doesn't
 /// need to care where it came from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct ConnectionEntry {
     pub name: String,
     pub host: String,
@@ -45,6 +61,23 @@ pub struct ConnectionEntry {
     pub remote_path: Option<String>,
     pub password: Option<String>,
     pub source: ConnectionSource,
+}
+
+/// Manual impl so a stray `{:?}` never prints the password — see
+/// `ConnectionProfile`'s `Debug` impl above.
+impl std::fmt::Debug for ConnectionEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConnectionEntry")
+            .field("name", &self.name)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("identity_file", &self.identity_file)
+            .field("remote_path", &self.remote_path)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("source", &self.source)
+            .finish()
+    }
 }
 
 impl From<ConnectionProfile> for ConnectionEntry {
