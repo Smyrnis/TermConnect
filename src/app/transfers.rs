@@ -52,21 +52,20 @@ impl App {
             return;
         }
 
-        let mut skipped_dirs = 0;
-        for entry in entries {
-            if entry.is_dir {
-                skipped_dirs += 1;
-                continue;
-            }
+        if entries.iter().any(|entry| entry.is_dir) {
+            self.start_directory_copy(session_id, direction, entries, dest_dir);
+            return;
+        }
 
+        for entry in entries {
             let (local_path, remote_path) = match direction {
                 Direction::Upload => (
                     entry.path.clone(),
-                    path_to_remote_string(&dest_dir.join(&entry.name)),
+                    filesystem::path_to_remote_string(&dest_dir.join(&entry.name)),
                 ),
                 Direction::Download => (
                     dest_dir.join(&entry.name),
-                    path_to_remote_string(&entry.path),
+                    filesystem::path_to_remote_string(&entry.path),
                 ),
             };
 
@@ -80,14 +79,57 @@ impl App {
                 None,
             );
         }
+    }
 
-        if skipped_dirs > 0 {
-            let plural = if skipped_dirs == 1 { "y" } else { "ies" };
-            self.notifications.push(
-                Severity::Warning,
-                format!("Copying directories isn't supported yet \u{2014} skipped {skipped_dirs} director{plural}"),
-            );
-        }
+    /// Kicks off a directory copy's planning phase: looks up the session's
+    /// SFTP handle synchronously (so a disconnected session fails fast
+    /// with a notification, exactly like `maybe_start_next_transfer`
+    /// already does for a job whose session vanished — no `tokio::spawn`
+    /// happens on that path), then spawns `plan_directory_copy` and sends
+    /// its outcome back as `PlanReady`/`PlanFailed`.
+    fn start_directory_copy(
+        &mut self,
+        session_id: u64,
+        direction: Direction,
+        entries: Vec<Entry>,
+        dest_dir: PathBuf,
+    ) {
+        let Some(resources) = self.session_resources.get(&session_id) else {
+            self.notifications
+                .push(Severity::Error, "Copy failed: session disconnected");
+            return;
+        };
+        let sftp = resources.sftp.clone();
+
+        let batch_id = self.transfers.start_batch();
+        let display_name = match entries.as_slice() {
+            [entry] => entry.name.clone(),
+            _ => format!("{} items", entries.len()),
+        };
+        self.planning = Some((batch_id, display_name));
+
+        let tx = self.transfer_tx.clone();
+        tokio::spawn(async move {
+            let event =
+                match transfer::plan::plan_directory_copy(direction, entries, &dest_dir, &sftp)
+                    .await
+                {
+                    Ok(plan) => TransferEvent::PlanReady {
+                        batch_id,
+                        session_id,
+                        direction,
+                        plan,
+                    },
+                    Err(err) => {
+                        tracing::debug!("{err:?}");
+                        TransferEvent::PlanFailed {
+                            batch_id,
+                            message: errors::user_message("Copy failed", &err),
+                        }
+                    }
+                };
+            let _ = tx.send(event);
+        });
     }
 
     pub(super) fn maybe_start_next_transfer(&mut self) {

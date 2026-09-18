@@ -1,10 +1,36 @@
 use super::*;
+use crate::connection::ConnectionSource;
 use crate::transfer::plan::{DirectoryPlan, PlannedFile};
 
 fn app_in_temp_dir() -> (tempfile::TempDir, App) {
     let dir = tempfile::tempdir().unwrap();
     let app = App::at(dir.path().to_path_buf()).unwrap();
     (dir, app)
+}
+
+fn app_with_a_local_directory_selected() -> (tempfile::TempDir, App) {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("myfolder")).unwrap();
+    let mut app = App::at(dir.path().to_path_buf()).unwrap();
+    // The listing is just [Parent, myfolder] — move the cursor onto
+    // myfolder itself, since target_entries() otherwise falls back to
+    // whatever row the cursor sits on and the default cursor (0) is the
+    // synthetic ".." row.
+    app.local.cursor = app.local.rows().len() - 1;
+    (dir, app)
+}
+
+fn sample_connection_entry() -> ConnectionEntry {
+    ConnectionEntry {
+        name: "test".to_string(),
+        host: "test.example.com".to_string(),
+        port: 22,
+        username: "user".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
+    }
 }
 
 #[test]
@@ -28,6 +54,29 @@ fn maybe_start_next_transfer_notifies_when_the_jobs_session_has_disconnected() {
     assert_eq!(notification.severity, Severity::Error);
     assert!(notification.message.contains("file.txt"));
     assert!(notification.message.contains("disconnected"));
+}
+
+#[test]
+fn copying_a_directory_with_a_disconnected_session_fails_without_spawning() {
+    let (_dir, mut app) = app_with_a_local_directory_selected();
+    app.sessions.insert(
+        sample_connection_entry(),
+        PanelState::from_listing(PathBuf::from("/remote"), Vec::new()),
+    );
+    // sessions.active() now succeeds, but there's no matching entry in
+    // app.session_resources — simulates a session whose SFTP handle is
+    // gone. Before this task, this scenario hit the old "isn't supported
+    // yet" directory-skip path instead (session_resources was never even
+    // consulted for a skipped directory), so this is a meaningful RED:
+    // today the message wouldn't mention "disconnected" at all.
+
+    app.start_copy();
+
+    assert!(app.planning.is_none());
+    let notification = app.notifications.current().unwrap();
+    assert_eq!(notification.severity, Severity::Error);
+    assert!(notification.message.contains("disconnected"));
+    assert!(app.transfers.next_to_run().is_none());
 }
 
 #[test]
