@@ -5,6 +5,10 @@ use super::job::{Direction, JobStatus, TransferJob};
 /// Retries a failed job this many additional times before giving up.
 const MAX_ATTEMPTS: u32 = 3;
 
+// Used by batch_progress() to report directory-copy progress; wired into the
+// status line by a later task. Marked dead_code because this crate doesn't
+// call it yet — the caller will.
+#[allow(dead_code)]
 pub struct BatchProgress {
     pub total_files: usize,
     pub completed_files: usize,
@@ -146,6 +150,7 @@ impl TransferQueue {
 
     /// Aggregates every job sharing `batch_id` — used to show combined
     /// progress for a directory copy in the status line.
+    #[allow(dead_code)]
     pub fn batch_progress(&self, batch_id: u64) -> BatchProgress {
         let mut progress = BatchProgress {
             total_files: 0,
@@ -154,7 +159,11 @@ impl TransferQueue {
             transferred_bytes: 0,
         };
 
-        for job in self.jobs.iter().filter(|job| job.batch_id == Some(batch_id)) {
+        for job in self
+            .jobs
+            .iter()
+            .filter(|job| job.batch_id == Some(batch_id))
+        {
             progress.total_files += 1;
             progress.total_bytes += job.total_bytes;
             progress.transferred_bytes += job.transferred_bytes;
@@ -171,6 +180,7 @@ impl TransferQueue {
     /// alone — the caller cancels that one separately via its own
     /// `AtomicBool`, exactly like a single-file transfer already does.
     /// Returns how many jobs were cancelled.
+    #[allow(dead_code)]
     pub fn cancel_batch(&mut self, batch_id: u64) -> usize {
         let mut count = 0;
         for job in self.jobs.iter_mut() {
