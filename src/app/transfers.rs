@@ -186,6 +186,37 @@ impl App {
                 }
                 self.maybe_start_next_transfer();
             }
+            TransferEvent::PlanReady {
+                batch_id,
+                session_id,
+                direction,
+                plan,
+            } => {
+                self.planning = None;
+                for file in plan.files {
+                    self.transfers.enqueue(
+                        session_id,
+                        direction,
+                        file.local_path,
+                        file.remote_path,
+                        file.display_name,
+                        file.size,
+                        Some(batch_id),
+                    );
+                }
+                if plan.skipped_symlinks > 0 {
+                    let plural = if plan.skipped_symlinks == 1 { "" } else { "s" };
+                    self.notifications.push(
+                        Severity::Warning,
+                        format!("Skipped {} symlink{plural}", plan.skipped_symlinks),
+                    );
+                }
+                self.maybe_start_next_transfer();
+            }
+            TransferEvent::PlanFailed { message, .. } => {
+                self.planning = None;
+                self.notifications.push(Severity::Error, message);
+            }
         }
     }
 

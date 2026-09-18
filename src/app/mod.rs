@@ -118,11 +118,37 @@ enum PanelEvent {
     },
 }
 
-/// Progress reported by a running file transfer (see `run_transfer`).
+/// Progress reported by a running file transfer (see `run_transfer`), or
+/// by the planning phase a directory copy runs first (see
+/// `start_directory_copy` in `app/transfers.rs`).
 enum TransferEvent {
-    Progress { id: u64, transferred: u64 },
-    Finished { id: u64, outcome: TransferOutcome },
-    Failed { id: u64, message: String },
+    Progress {
+        id: u64,
+        transferred: u64,
+    },
+    Finished {
+        id: u64,
+        outcome: TransferOutcome,
+    },
+    Failed {
+        id: u64,
+        message: String,
+    },
+    // Nothing sends these yet outside tests — the producer (the planning
+    // phase's background task) lands in a later task. Remove this once
+    // `start_directory_copy` sends them for real.
+    #[allow(dead_code)]
+    PlanReady {
+        batch_id: u64,
+        session_id: u64,
+        direction: Direction,
+        plan: transfer::plan::DirectoryPlan,
+    },
+    #[allow(dead_code)]
+    PlanFailed {
+        batch_id: u64,
+        message: String,
+    },
 }
 
 /// The parts of a connected session that can't live in `Sessions` itself:
@@ -159,6 +185,12 @@ pub struct App {
     active_transfer_cancel: Option<Arc<AtomicBool>>,
     transfer_tx: mpsc::UnboundedSender<TransferEvent>,
     transfer_rx: mpsc::UnboundedReceiver<TransferEvent>,
+    /// Set while a directory copy's planning phase (tree walk + destination
+    /// directory creation) is running: the batch id and a display name for
+    /// the "Scanning …" status line (see `app/render.rs`). `None` the rest
+    /// of the time, including once planning finishes and the batch's file
+    /// jobs are queued.
+    planning: Option<(u64, String)>,
     key_bindings: input::KeyBindings,
     bookmarks: config::bookmarks::Bookmarks,
     bookmarks_path: Option<PathBuf>,
@@ -245,6 +277,7 @@ impl App {
             active_transfer_cancel: None,
             transfer_tx,
             transfer_rx,
+            planning: None,
             key_bindings,
             bookmarks,
             bookmarks_path,
