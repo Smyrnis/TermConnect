@@ -5,6 +5,7 @@ mod config;
 mod connection;
 mod errors;
 mod filesystem;
+mod logging;
 mod terminal;
 mod transfer;
 mod tui;
@@ -19,11 +20,33 @@ fn install_panic_hook() {
     }));
 }
 
+/// Sends trace output to a log file rather than the default stdout writer,
+/// which would print over the TUI's alternate screen the moment `RUST_LOG`
+/// is set. Falls back to discarding log output (rather than stdout) if the
+/// log file can't be opened, so a broken log path degrades quietly instead
+/// of corrupting the display.
+fn init_tracing() {
+    let filter = tracing_subscriber::EnvFilter::from_default_env();
+    match logging::open_writer() {
+        Ok(file) => {
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_writer(std::sync::Mutex::new(file))
+                .init();
+        }
+        Err(err) => {
+            eprintln!("termconnect: failed to open log file, logging disabled: {err}");
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_writer(std::io::sink)
+                .init();
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .init();
+    init_tracing();
 
     install_panic_hook();
 
