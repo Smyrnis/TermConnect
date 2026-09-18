@@ -125,10 +125,9 @@ enum TransferEvent {
     Failed { id: u64, message: String },
 }
 
-/// The parts of a connected session that can't live in `Sessions` itself
-/// (see Task 22/23's interface notes): `Handle` isn't `Clone`, and neither
-/// type can be constructed without a live connection, which would make
-/// `Sessions`'s own tests need one too.
+/// The parts of a connected session that can't live in `Sessions` itself:
+/// `Handle` isn't `Clone`, and neither type can be constructed without a
+/// live connection, which would make `Sessions`'s own tests need one too.
 struct SessionResources {
     handle: Arc<russh::client::Handle<TermConnectHandler>>,
     sftp: Arc<SftpSession>,
