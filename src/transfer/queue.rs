@@ -13,6 +13,8 @@ const MAX_ATTEMPTS: u32 = 3;
 pub struct TransferQueue {
     jobs: Vec<TransferJob>,
     next_id: u64,
+    #[allow(dead_code)]
+    next_batch_id: u64,
 }
 
 impl TransferQueue {
@@ -20,6 +22,7 @@ impl TransferQueue {
         Self::default()
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn enqueue(
         &mut self,
         session_id: u64,
@@ -28,6 +31,7 @@ impl TransferQueue {
         remote_path: String,
         display_name: String,
         total_bytes: u64,
+        batch_id: Option<u64>,
     ) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
@@ -43,8 +47,18 @@ impl TransferQueue {
             transferred_bytes: 0,
             status: JobStatus::Queued,
             attempts: 0,
+            batch_id,
         });
 
+        id
+    }
+
+    /// Mints a new batch id, shared by every `TransferJob` spawned from one
+    /// directory copy (see `enqueue`'s `batch_id` parameter).
+    #[allow(dead_code)]
+    pub fn start_batch(&mut self) -> u64 {
+        let id = self.next_batch_id;
+        self.next_batch_id += 1;
         id
     }
 

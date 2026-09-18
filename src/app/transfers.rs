@@ -77,6 +77,7 @@ impl App {
                 remote_path,
                 entry.name,
                 entry.size,
+                None,
             );
         }
 

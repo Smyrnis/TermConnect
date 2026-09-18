@@ -18,6 +18,7 @@ fn maybe_start_next_transfer_notifies_when_the_jobs_session_has_disconnected() {
         "/remote/file.txt".to_string(),
         "file.txt".to_string(),
         100,
+        None,
     );
 
     app.maybe_start_next_transfer();

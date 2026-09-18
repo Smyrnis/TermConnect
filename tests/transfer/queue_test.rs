@@ -8,6 +8,7 @@ fn queue_with_one_job(queue: &mut TransferQueue) -> u64 {
         "/remote/file.txt".to_string(),
         "file.txt".to_string(),
         100,
+        None,
     )
 }
 
@@ -16,6 +17,14 @@ fn enqueue_assigns_increasing_ids() {
     let mut queue = TransferQueue::new();
     let first = queue_with_one_job(&mut queue);
     let second = queue_with_one_job(&mut queue);
+    assert_ne!(first, second);
+}
+
+#[test]
+fn start_batch_assigns_increasing_ids() {
+    let mut queue = TransferQueue::new();
+    let first = queue.start_batch();
+    let second = queue.start_batch();
     assert_ne!(first, second);
 }
 
@@ -72,6 +81,7 @@ fn fail_queued_for_session_marks_only_that_sessions_queued_jobs() {
         "/remote/a1.txt".to_string(),
         "a1.txt".to_string(),
         10,
+        None,
     );
     let a2 = queue.enqueue(
         1,
@@ -80,6 +90,7 @@ fn fail_queued_for_session_marks_only_that_sessions_queued_jobs() {
         "/remote/a2.txt".to_string(),
         "a2.txt".to_string(),
         10,
+        None,
     );
     let other = queue_with_one_job(&mut queue); // session_id 1 too, but...
     queue.get_mut(other).unwrap().session_id = 2;
@@ -90,6 +101,7 @@ fn fail_queued_for_session_marks_only_that_sessions_queued_jobs() {
         "/remote/a3.txt".to_string(),
         "a3.txt".to_string(),
         10,
+        None,
     );
     queue.get_mut(in_progress).unwrap().status = JobStatus::InProgress;
 

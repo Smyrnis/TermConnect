@@ -219,6 +219,7 @@ fn disconnecting_a_session_fails_its_queued_jobs_with_one_aggregated_notificatio
         "/remote/a.txt".to_string(),
         "a.txt".to_string(),
         10,
+        None,
     );
     let job_b = app.transfers.enqueue(
         id,
@@ -227,6 +228,7 @@ fn disconnecting_a_session_fails_its_queued_jobs_with_one_aggregated_notificatio
         "/remote/b.txt".to_string(),
         "b.txt".to_string(),
         10,
+        None,
     );
     // A job for a different session should be untouched.
     let other_session_job = app.transfers.enqueue(
@@ -236,6 +238,7 @@ fn disconnecting_a_session_fails_its_queued_jobs_with_one_aggregated_notificatio
         "/remote/c.txt".to_string(),
         "c.txt".to_string(),
         10,
+        None,
     );
 
     app.disconnect_selected();
