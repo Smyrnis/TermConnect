@@ -61,11 +61,11 @@ impl App {
             let (local_path, remote_path) = match direction {
                 Direction::Upload => (
                     entry.path.clone(),
-                    filesystem::path_to_remote_string(&dest_dir.join(&entry.name)),
+                    path_to_remote_string(&dest_dir.join(&entry.name)),
                 ),
                 Direction::Download => (
                     dest_dir.join(&entry.name),
-                    filesystem::path_to_remote_string(&entry.path),
+                    path_to_remote_string(&entry.path),
                 ),
             };
 
@@ -234,44 +234,123 @@ impl App {
                 direction,
                 plan,
             } => {
-                self.planning = None;
-                for file in plan.files {
-                    self.transfers.enqueue(
-                        session_id,
-                        direction,
-                        file.local_path,
-                        file.remote_path,
-                        file.display_name,
-                        file.size,
-                        Some(batch_id),
-                    );
+                self.clear_planning(batch_id);
+
+                // Planning is async, so the session can disconnect while it
+                // was running. Enqueueing anyway would let every file fail
+                // one at a time through maybe_start_next_transfer's own
+                // "session disconnected" path, each pushing its own
+                // non-expiring Error notification. Fail fast with one
+                // instead, and leave the queue untouched.
+                if !self.session_resources.contains_key(&session_id) {
+                    self.notifications
+                        .push(Severity::Error, "Copy failed: session disconnected");
+                    return;
                 }
-                if plan.skipped_symlinks > 0 {
-                    let plural = if plan.skipped_symlinks == 1 { "" } else { "s" };
-                    self.notifications.push(
-                        Severity::Warning,
-                        format!("Skipped {} symlink{plural}", plan.skipped_symlinks),
-                    );
-                }
-                self.maybe_start_next_transfer();
+
+                self.apply_plan_ready(batch_id, session_id, direction, plan);
             }
-            TransferEvent::PlanFailed { message, .. } => {
-                self.planning = None;
+            TransferEvent::PlanFailed { batch_id, message } => {
+                self.clear_planning(batch_id);
                 self.notifications.push(Severity::Error, message);
             }
         }
     }
 
+    /// The part of `PlanReady` handling that runs once the session's still
+    /// known to be present: enqueues every planned file under `batch_id`
+    /// and warns once about any skipped symlinks. Split out from the event
+    /// arm above so it stays unit-testable without a live `SftpSession` —
+    /// the session-presence guard's own "session present" branch needs one
+    /// to exercise, which no unit test in this codebase can construct, but
+    /// this half has no such dependency.
+    fn apply_plan_ready(
+        &mut self,
+        batch_id: u64,
+        session_id: u64,
+        direction: Direction,
+        plan: transfer::plan::DirectoryPlan,
+    ) {
+        if plan.files.is_empty() {
+            // Planning may still have created the destination directory
+            // (e.g. an empty source directory) even though nothing got
+            // enqueued — without this, no job ever runs to trigger the
+            // usual per-job refresh, so the new directory stays invisible
+            // until a manual Ctrl+R.
+            self.refresh_destination_panel(session_id, direction);
+        }
+
+        for file in plan.files {
+            self.transfers.enqueue(
+                session_id,
+                direction,
+                file.local_path,
+                file.remote_path,
+                file.display_name,
+                file.size,
+                Some(batch_id),
+            );
+        }
+        if plan.skipped_symlinks > 0 {
+            let plural = if plan.skipped_symlinks == 1 { "" } else { "s" };
+            self.notifications.push(
+                Severity::Warning,
+                format!("Skipped {} symlink{plural}", plan.skipped_symlinks),
+            );
+        }
+        self.maybe_start_next_transfer();
+    }
+
+    /// Clears `self.planning` only if it's still tracking `batch_id`. Plain
+    /// `self.planning = None` would let one directory copy's completion
+    /// wipe out a second, still-scanning copy's "Scanning..." indicator if
+    /// the user pressed `F5` again on another directory while the first
+    /// one's planning was still running.
+    fn clear_planning(&mut self, batch_id: u64) {
+        if self
+            .planning
+            .as_ref()
+            .is_some_and(|(id, _)| *id == batch_id)
+        {
+            self.planning = None;
+        }
+    }
+
     /// Refreshes whichever panel just received a file, so the new listing
-    /// is visible without a manual `Ctrl+R`.
+    /// is visible without a manual `Ctrl+R`. For a job that's part of a
+    /// batch, this only actually refreshes once nothing else from the same
+    /// batch is still queued to run next — refreshing after every file in
+    /// a large directory copy would otherwise issue a full remote listing
+    /// (and churn the panel's cursor/selection) after every single file.
     fn refresh_transfer_destination(&mut self, id: u64) {
         let Some(job) = self.transfers.get(id) else {
             return;
         };
+        let session_id = job.session_id;
+        let direction = job.direction;
 
-        match job.direction {
+        if let Some(batch_id) = job.batch_id {
+            let batch_still_running = self
+                .transfers
+                .next_to_run()
+                .and_then(|next_id| self.transfers.get(next_id))
+                .is_some_and(|next_job| next_job.batch_id == Some(batch_id));
+            if batch_still_running {
+                return;
+            }
+        }
+
+        self.refresh_destination_panel(session_id, direction);
+    }
+
+    /// Does the actual panel refresh for `session_id`/`direction` — shared
+    /// by `refresh_transfer_destination` (per-job, batch-aware) and
+    /// `apply_transfer_event`'s `PlanReady` zero-file case (nothing ever
+    /// gets enqueued for an empty directory, so the per-job path above
+    /// never runs).
+    fn refresh_destination_panel(&mut self, session_id: u64, direction: Direction) {
+        match direction {
             Direction::Upload => {
-                let session_id = job.session_id;
                 if let Some(session) = self.sessions.by_id_mut(session_id) {
                     let path = session.panel.path().to_path_buf();
                     self.spawn_remote_list_for(session_id, path);

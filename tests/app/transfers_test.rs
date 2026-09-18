@@ -81,11 +81,20 @@ fn copying_a_directory_with_a_disconnected_session_fails_without_spawning() {
     assert!(app.transfers.next_to_run().is_none());
 }
 
+// plan_ready_* tests below exercise `apply_plan_ready` directly rather than
+// the full `apply_transfer_event(TransferEvent::PlanReady { .. })` path,
+// because the real event handler now guards on
+// `self.session_resources.contains_key(&session_id)` before calling it (see
+// `plan_ready_fails_without_enqueueing_when_the_session_has_disconnected`
+// below) — and `SessionResources` holds a live `SftpSession`/SSH `Handle`
+// that no unit test in this codebase can construct without a real
+// connection. `apply_plan_ready` is the part of the handler that runs once
+// that guard has already passed, so it's what these tests target.
+
 #[test]
 fn plan_ready_enqueues_every_planned_file_under_the_batch_id() {
     let (_dir, mut app) = app_in_temp_dir();
     let batch_id = app.transfers.start_batch();
-    app.planning = Some((batch_id, "myfolder".to_string()));
     let plan = DirectoryPlan {
         files: vec![
             PlannedFile {
@@ -104,14 +113,8 @@ fn plan_ready_enqueues_every_planned_file_under_the_batch_id() {
         skipped_symlinks: 0,
     };
 
-    app.apply_transfer_event(TransferEvent::PlanReady {
-        batch_id,
-        session_id: 1,
-        direction: Direction::Upload,
-        plan,
-    });
+    app.apply_plan_ready(batch_id, 1, Direction::Upload, plan);
 
-    assert!(app.planning.is_none());
     let progress = app.transfers.batch_progress(batch_id);
     assert_eq!(progress.total_files, 2);
     assert_eq!(progress.total_bytes, 30);
@@ -121,11 +124,36 @@ fn plan_ready_enqueues_every_planned_file_under_the_batch_id() {
 fn plan_ready_warns_once_about_skipped_symlinks() {
     let (_dir, mut app) = app_in_temp_dir();
     let batch_id = app.transfers.start_batch();
-    app.planning = Some((batch_id, "myfolder".to_string()));
     let plan = DirectoryPlan {
         files: Vec::new(),
         skipped_symlinks: 3,
     };
+
+    app.apply_plan_ready(batch_id, 1, Direction::Upload, plan);
+
+    let notification = app.notifications.current().unwrap();
+    assert_eq!(notification.severity, Severity::Warning);
+    assert!(notification.message.contains("3 symlinks"));
+}
+
+#[test]
+fn plan_ready_fails_without_enqueueing_when_the_session_has_disconnected() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let batch_id = app.transfers.start_batch();
+    app.planning = Some((batch_id, "myfolder".to_string()));
+    let plan = DirectoryPlan {
+        files: vec![PlannedFile {
+            local_path: PathBuf::from("/local/a.txt"),
+            remote_path: "/remote/a.txt".to_string(),
+            display_name: "a.txt".to_string(),
+            size: 10,
+        }],
+        skipped_symlinks: 0,
+    };
+    // No session_resources entry for session 1 exists — simulates the
+    // session disconnecting while planning (an async background task) was
+    // still running, after start_directory_copy's own synchronous
+    // pre-spawn check already passed.
 
     app.apply_transfer_event(TransferEvent::PlanReady {
         batch_id,
@@ -134,9 +162,14 @@ fn plan_ready_warns_once_about_skipped_symlinks() {
         plan,
     });
 
+    assert!(app.planning.is_none());
     let notification = app.notifications.current().unwrap();
-    assert_eq!(notification.severity, Severity::Warning);
-    assert!(notification.message.contains("3 symlinks"));
+    assert_eq!(notification.severity, Severity::Error);
+    assert!(notification.message.contains("disconnected"));
+    // Nothing was enqueued under this batch — the queue is left completely
+    // untouched, matching the "aggregate into one notification, don't
+    // partially enqueue" pattern `disconnect_selected` uses elsewhere.
+    assert_eq!(app.transfers.batch_progress(batch_id).total_files, 0);
 }
 
 #[test]

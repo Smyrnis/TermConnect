@@ -20,6 +20,12 @@ use crate::connection::{self, ConnectionEntry, ConnectionSource};
 use crate::errors;
 use crate::filesystem::search::SearchEvent;
 use crate::filesystem::{self, Entry};
+// SFTP paths are always POSIX-style strings; since TermConnect targets
+// Linux only, a `PathBuf`'s own `Display` already produces exactly that.
+// Lives in `filesystem` (used by `transfer::plan` too, which can't depend
+// back on `app`); re-exported here so every existing call site in this
+// module tree keeps working unchanged.
+use crate::filesystem::path_to_remote_string;
 use crate::terminal;
 use crate::transfer::{self, Direction, JobStatus, TransferOutcome, TransferQueue};
 use crate::tui::connections_list;
@@ -134,17 +140,12 @@ enum TransferEvent {
         id: u64,
         message: String,
     },
-    // Nothing sends these yet outside tests — the producer (the planning
-    // phase's background task) lands in a later task. Remove this once
-    // `start_directory_copy` sends them for real.
-    #[allow(dead_code)]
     PlanReady {
         batch_id: u64,
         session_id: u64,
         direction: Direction,
         plan: transfer::plan::DirectoryPlan,
     },
-    #[allow(dead_code)]
     PlanFailed {
         batch_id: u64,
         message: String,
@@ -349,13 +350,6 @@ impl App {
         }
     }
 }
-
-/// SFTP paths are always POSIX-style strings; since TermConnect targets
-/// Linux only, a `PathBuf`'s own `Display` already produces exactly that.
-/// Lives in `filesystem` (used by `transfer::plan` too, which can't
-/// depend back on `app`); re-exported here so every existing call site
-/// in this module tree keeps working unchanged.
-use crate::filesystem::path_to_remote_string;
 
 /// How long a search waits, idle, before actually dispatching — coalesces a
 /// burst of pattern-changing keystrokes into a single search per pause.

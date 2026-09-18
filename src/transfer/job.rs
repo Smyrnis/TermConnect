@@ -30,7 +30,6 @@ pub struct TransferJob {
     pub transferred_bytes: u64,
     pub status: JobStatus,
     pub attempts: u32,
-    #[allow(dead_code)]
     pub batch_id: Option<u64>,
 }
 
