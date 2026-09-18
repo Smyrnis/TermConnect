@@ -50,10 +50,7 @@ fn target_path_for_open_resolves_parent_and_directory_targets() {
     assert_eq!(panel.target_path_for_open(), Some(PathBuf::from("/home")));
 
     panel.cursor = 1;
-    assert_eq!(
-        panel.target_path_for_open(),
-        Some(PathBuf::from("/home/user/child"))
-    );
+    assert_eq!(panel.target_path_for_open(), Some(PathBuf::from("/home/user/child")));
 }
 
 #[test]
@@ -156,11 +153,7 @@ fn target_entries_returns_all_selected_entries() {
     panel.cursor = 2;
     panel.toggle_selection();
 
-    let mut names: Vec<String> = panel
-        .target_entries()
-        .into_iter()
-        .map(|entry| entry.name)
-        .collect();
+    let mut names: Vec<String> = panel.target_entries().into_iter().map(|entry| entry.name).collect();
     names.sort();
 
     assert_eq!(names, vec!["a.txt".to_string(), "b.txt".to_string()]);
@@ -174,12 +167,7 @@ fn create_directory_adds_a_new_row_after_refresh() {
     panel.create_directory("new_dir").unwrap();
 
     assert!(dir.path().join("new_dir").is_dir());
-    assert!(
-        panel
-            .rows()
-            .iter()
-            .any(|row| matches!(row, Row::Entry(entry) if entry.name == "new_dir"))
-    );
+    assert!(panel.rows().iter().any(|row| matches!(row, Row::Entry(entry) if entry.name == "new_dir")));
 }
 
 #[test]
@@ -237,13 +225,7 @@ fn render_panel_draws_the_given_title() {
         })
         .unwrap();
 
-    let content: String = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
+    let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
 
     assert!(content.contains("LOCAL"));
 }

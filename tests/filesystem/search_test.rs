@@ -135,15 +135,7 @@ async fn search_local_stops_promptly_when_already_cancelled() {
     let cancel = Arc::new(AtomicBool::new(true));
 
     let (tx, rx) = mpsc::unbounded_channel();
-    search_local_with_limits(
-        dir.path().to_path_buf(),
-        "*.log".to_string(),
-        tx,
-        cancel,
-        16,
-        1000,
-    )
-    .await;
+    search_local_with_limits(dir.path().to_path_buf(), "*.log".to_string(), tx, cancel, 16, 1000).await;
 
     let (found, _) = drain(rx).await;
     assert!(found.is_empty());

@@ -36,11 +36,7 @@ struct DiscoveredTree {
 /// otherwise ignored, which also means a symlink back to an ancestor
 /// directory can never cause infinite recursion.
 fn discover_local_tree(root: &Path) -> Result<DiscoveredTree> {
-    let mut tree = DiscoveredTree {
-        directories: Vec::new(),
-        files: Vec::new(),
-        skipped_symlinks: 0,
-    };
+    let mut tree = DiscoveredTree { directories: Vec::new(), files: Vec::new(), skipped_symlinks: 0 };
     discover_local_tree_into(root, Path::new(""), &mut tree)?;
     Ok(tree)
 }
@@ -89,26 +85,16 @@ use super::Direction;
 /// SFTP directory listing instead of a local one. Boxed because async fns
 /// can't recurse directly (mirrors `filesystem::remote::remove_dir_recursive`,
 /// the existing recursive-SFTP-walk pattern in this codebase).
-fn discover_remote_tree<'a>(
-    sftp: &'a SftpSession,
-    root: &'a str,
-) -> BoxFuture<'a, Result<DiscoveredTree>> {
+fn discover_remote_tree<'a>(sftp: &'a SftpSession, root: &'a str) -> BoxFuture<'a, Result<DiscoveredTree>> {
     Box::pin(async move {
-        let mut tree = DiscoveredTree {
-            directories: Vec::new(),
-            files: Vec::new(),
-            skipped_symlinks: 0,
-        };
+        let mut tree = DiscoveredTree { directories: Vec::new(), files: Vec::new(), skipped_symlinks: 0 };
         discover_remote_tree_into(sftp, root, Path::new(""), &mut tree).await?;
         Ok(tree)
     })
 }
 
 fn discover_remote_tree_into<'a>(
-    sftp: &'a SftpSession,
-    root: &'a str,
-    relative: &'a Path,
-    tree: &'a mut DiscoveredTree,
+    sftp: &'a SftpSession, root: &'a str, relative: &'a Path, tree: &'a mut DiscoveredTree,
 ) -> BoxFuture<'a, Result<()>> {
     Box::pin(async move {
         let current = if relative.as_os_str().is_empty() {
@@ -158,27 +144,12 @@ async fn ensure_remote_directory(sftp: &SftpSession, path: &str) -> Result<()> {
 /// destination paths — pure path mapping, no I/O. Split out of
 /// `plan_directory_copy` so it's unit-testable without a live
 /// `SftpSession`.
-fn planned_file_for_loose_entry(
-    direction: Direction,
-    entry: &Entry,
-    dest_dir: &Path,
-) -> PlannedFile {
+fn planned_file_for_loose_entry(direction: Direction, entry: &Entry, dest_dir: &Path) -> PlannedFile {
     let (local_path, remote_path) = match direction {
-        Direction::Upload => (
-            entry.path.clone(),
-            filesystem::path_to_remote_string(&dest_dir.join(&entry.name)),
-        ),
-        Direction::Download => (
-            dest_dir.join(&entry.name),
-            filesystem::path_to_remote_string(&entry.path),
-        ),
+        Direction::Upload => (entry.path.clone(), filesystem::path_to_remote_string(&dest_dir.join(&entry.name))),
+        Direction::Download => (dest_dir.join(&entry.name), filesystem::path_to_remote_string(&entry.path)),
     };
-    PlannedFile {
-        local_path,
-        remote_path,
-        display_name: entry.name.clone(),
-        size: entry.size,
-    }
+    PlannedFile { local_path, remote_path, display_name: entry.name.clone(), size: entry.size }
 }
 
 /// Resolves the final source/destination paths for every file already
@@ -186,23 +157,18 @@ fn planned_file_for_loose_entry(
 /// I/O. Split out of `plan_directory_copy` so it's unit-testable without a
 /// live `SftpSession`.
 fn planned_files_for_tree(
-    direction: Direction,
-    entry: &Entry,
-    dest_root: &Path,
-    tree: &DiscoveredTree,
+    direction: Direction, entry: &Entry, dest_root: &Path, tree: &DiscoveredTree,
 ) -> Vec<PlannedFile> {
     tree.files
         .iter()
         .map(|(relative_file, size)| {
             let (local_path, remote_path) = match direction {
-                Direction::Upload => (
-                    entry.path.join(relative_file),
-                    filesystem::path_to_remote_string(&dest_root.join(relative_file)),
-                ),
-                Direction::Download => (
-                    dest_root.join(relative_file),
-                    filesystem::path_to_remote_string(&entry.path.join(relative_file)),
-                ),
+                Direction::Upload => {
+                    (entry.path.join(relative_file), filesystem::path_to_remote_string(&dest_root.join(relative_file)))
+                }
+                Direction::Download => {
+                    (dest_root.join(relative_file), filesystem::path_to_remote_string(&entry.path.join(relative_file)))
+                }
             };
             PlannedFile {
                 local_path,
@@ -221,10 +187,7 @@ fn planned_files_for_tree(
 /// any directory) pass straight through unchanged, alongside every file
 /// discovered under each selected directory.
 pub async fn plan_directory_copy(
-    direction: Direction,
-    source_entries: Vec<Entry>,
-    dest_dir: &Path,
-    sftp: &SftpSession,
+    direction: Direction, source_entries: Vec<Entry>, dest_dir: &Path, sftp: &SftpSession,
 ) -> Result<DirectoryPlan> {
     let mut files = Vec::new();
     let mut skipped_symlinks = 0;
@@ -253,10 +216,7 @@ pub async fn plan_directory_copy(
         files.extend(planned_files_for_tree(direction, &entry, &dest_root, &tree));
     }
 
-    Ok(DirectoryPlan {
-        files,
-        skipped_symlinks,
-    })
+    Ok(DirectoryPlan { files, skipped_symlinks })
 }
 
 async fn ensure_directory(direction: Direction, sftp: &SftpSession, path: &Path) -> Result<()> {

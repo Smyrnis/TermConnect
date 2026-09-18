@@ -15,10 +15,7 @@ fn state_dir() -> Result<PathBuf> {
         return Ok(PathBuf::from(xdg).join("termconnect"));
     }
     let home = std::env::var("HOME").context("HOME environment variable is not set")?;
-    Ok(PathBuf::from(home)
-        .join(".local")
-        .join("state")
-        .join("termconnect"))
+    Ok(PathBuf::from(home).join(".local").join("state").join("termconnect"))
 }
 
 /// Opens the log file for appending, creating its parent directory (and

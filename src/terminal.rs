@@ -43,15 +43,10 @@ fn find_sshpass() -> Option<PathBuf> {
 }
 
 fn find_sshpass_in(path_var: &str) -> Option<PathBuf> {
-    std::env::split_paths(path_var)
-        .map(|dir| dir.join("sshpass"))
-        .find(|candidate| {
-            candidate.is_file()
-                && candidate
-                    .metadata()
-                    .map(|metadata| metadata.permissions().mode() & 0o111 != 0)
-                    .unwrap_or(false)
-        })
+    std::env::split_paths(path_var).map(|dir| dir.join("sshpass")).find(|candidate| {
+        candidate.is_file()
+            && candidate.metadata().map(|metadata| metadata.permissions().mode() & 0o111 != 0).unwrap_or(false)
+    })
 }
 
 /// Runs the system `ssh` client interactively, blocking until it exits.

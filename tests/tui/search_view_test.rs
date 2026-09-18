@@ -6,31 +6,17 @@ use crate::filesystem::Entry;
 use super::*;
 
 fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers: KeyModifiers::NONE,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
+    KeyEvent { code, modifiers: KeyModifiers::NONE, kind: KeyEventKind::Press, state: KeyEventState::NONE }
 }
 
 fn entry(name: &str) -> Entry {
-    Entry {
-        name: name.to_string(),
-        path: PathBuf::from(format!("/{name}")),
-        is_dir: false,
-        size: 0,
-        permissions: None,
-    }
+    Entry { name: name.to_string(), path: PathBuf::from(format!("/{name}")), is_dir: false, size: 0, permissions: None }
 }
 
 #[test]
 fn typing_inserts_at_the_cursor_and_reports_pattern_changed() {
     let mut view = SearchView::new();
-    assert_eq!(
-        view.handle_key(key(KeyCode::Char('a'))),
-        SearchOutcome::PatternChanged
-    );
+    assert_eq!(view.handle_key(key(KeyCode::Char('a'))), SearchOutcome::PatternChanged);
     assert_eq!(view.pattern, "a");
     assert_eq!(view.cursor, 1);
 }

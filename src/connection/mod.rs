@@ -13,13 +13,9 @@ pub use profile::{ConnectionEntry, ConnectionSource};
 /// alias never appears twice, and a saved profile always wins.
 pub fn list_all() -> Result<Vec<ConnectionEntry>> {
     let profiles = store::load()?;
-    let known_names: std::collections::HashSet<String> = profiles
-        .iter()
-        .map(|profile| profile.name.clone())
-        .collect();
+    let known_names: std::collections::HashSet<String> = profiles.iter().map(|profile| profile.name.clone()).collect();
 
-    let mut entries: Vec<ConnectionEntry> =
-        profiles.into_iter().map(ConnectionEntry::from).collect();
+    let mut entries: Vec<ConnectionEntry> = profiles.into_iter().map(ConnectionEntry::from).collect();
 
     for host in ssh_config::load()? {
         if known_names.contains(host.name.as_str()) {

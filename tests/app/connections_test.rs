@@ -9,12 +9,7 @@ fn app_in_temp_dir() -> (tempfile::TempDir, App) {
 }
 
 fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers: KeyModifiers::NONE,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
+    KeyEvent { code, modifiers: KeyModifiers::NONE, kind: KeyEventKind::Press, state: KeyEventState::NONE }
 }
 
 /// Serializes tests that redirect `$HOME` to a tempdir. `std::env::set_var`
@@ -31,9 +26,7 @@ static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// must stay bound (not `_`) for the whole test body; dropping it early
 /// releases the lock before the test's `set_var` state is safe to unwind.
 fn app_with_isolated_home() -> (tempfile::TempDir, std::sync::MutexGuard<'static, ()>, App) {
-    let guard = HOME_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let guard = HOME_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let dir = tempfile::tempdir().unwrap();
     unsafe {
         std::env::set_var("HOME", dir.path());
@@ -78,10 +71,7 @@ async fn connecting_to_an_unreachable_host_reports_failure() {
     }];
 
     app.connect_to_selected();
-    assert_eq!(
-        app.connection_status,
-        ConnectionStatus::Connecting("unreachable".to_string())
-    );
+    assert_eq!(app.connection_status, ConnectionStatus::Connecting("unreachable".to_string()));
 
     let event = app.connect_rx.recv().await.unwrap();
     app.apply_connect_event(event);
@@ -95,10 +85,7 @@ async fn connecting_to_an_unreachable_host_reports_failure() {
 #[test]
 fn panel_event_listed_updates_the_matching_sessions_panel() {
     let (_dir, mut app) = app_in_temp_dir();
-    let id = app.sessions.insert(
-        sample_connection_entry(),
-        PanelState::from_listing(PathBuf::from("/"), Vec::new()),
-    );
+    let id = app.sessions.insert(sample_connection_entry(), PanelState::from_listing(PathBuf::from("/"), Vec::new()));
 
     app.apply_panel_event(PanelEvent::Listed {
         session_id: id,
@@ -106,21 +93,14 @@ fn panel_event_listed_updates_the_matching_sessions_panel() {
         entries: Vec::new(),
     });
 
-    assert_eq!(
-        app.sessions.active().unwrap().panel.path(),
-        std::path::Path::new("/home/user")
-    );
+    assert_eq!(app.sessions.active().unwrap().panel.path(), std::path::Path::new("/home/user"));
 }
 
 #[test]
 fn panel_event_listed_for_a_vanished_session_is_dropped() {
     let (_dir, mut app) = app_in_temp_dir();
 
-    app.apply_panel_event(PanelEvent::Listed {
-        session_id: 999,
-        path: PathBuf::from("/x"),
-        entries: Vec::new(),
-    });
+    app.apply_panel_event(PanelEvent::Listed { session_id: 999, path: PathBuf::from("/x"), entries: Vec::new() });
 
     assert!(app.sessions.is_empty());
 }
@@ -128,15 +108,9 @@ fn panel_event_listed_for_a_vanished_session_is_dropped() {
 #[test]
 fn panel_event_failed_shows_a_notification_when_the_session_still_exists() {
     let (_dir, mut app) = app_in_temp_dir();
-    let id = app.sessions.insert(
-        sample_connection_entry(),
-        PanelState::from_listing(PathBuf::from("/"), Vec::new()),
-    );
+    let id = app.sessions.insert(sample_connection_entry(), PanelState::from_listing(PathBuf::from("/"), Vec::new()));
 
-    app.apply_panel_event(PanelEvent::Failed {
-        session_id: id,
-        message: "boom".to_string(),
-    });
+    app.apply_panel_event(PanelEvent::Failed { session_id: id, message: "boom".to_string() });
 
     assert_eq!(app.notifications.current().unwrap().message, "boom");
 }
@@ -145,10 +119,7 @@ fn panel_event_failed_shows_a_notification_when_the_session_still_exists() {
 fn panel_event_failed_for_a_vanished_session_is_dropped() {
     let (_dir, mut app) = app_in_temp_dir();
 
-    app.apply_panel_event(PanelEvent::Failed {
-        session_id: 999,
-        message: "boom".to_string(),
-    });
+    app.apply_panel_event(PanelEvent::Failed { session_id: 999, message: "boom".to_string() });
 
     assert!(app.notifications.current().is_none());
 }
@@ -157,10 +128,7 @@ fn panel_event_failed_for_a_vanished_session_is_dropped() {
 fn connecting_to_an_already_connected_host_switches_instead_of_reconnecting() {
     let (_dir, mut app) = app_in_temp_dir();
     let entry = sample_connection_entry();
-    app.sessions.insert(
-        entry.clone(),
-        PanelState::from_listing(PathBuf::from("/"), Vec::new()),
-    );
+    app.sessions.insert(entry.clone(), PanelState::from_listing(PathBuf::from("/"), Vec::new()));
     app.connections = vec![entry];
     app.connections_cursor = 0;
 
@@ -175,10 +143,7 @@ fn connecting_to_an_already_connected_host_switches_instead_of_reconnecting() {
 fn disconnect_selected_reports_a_confirmation_notification() {
     let (_dir, mut app) = app_in_temp_dir();
     let entry = sample_connection_entry();
-    app.sessions.insert(
-        entry.clone(),
-        PanelState::from_listing(PathBuf::from("/"), Vec::new()),
-    );
+    app.sessions.insert(entry.clone(), PanelState::from_listing(PathBuf::from("/"), Vec::new()));
     app.connections = vec![entry];
     app.connections_cursor = 0;
     app.screen = Screen::Connections;
@@ -204,10 +169,7 @@ fn disconnect_selected_reports_a_confirmation_notification() {
 fn disconnecting_a_session_fails_its_queued_jobs_with_one_aggregated_notification() {
     let (_dir, mut app) = app_in_temp_dir();
     let entry = sample_connection_entry();
-    let id = app.sessions.insert(
-        entry.clone(),
-        PanelState::from_listing(PathBuf::from("/"), Vec::new()),
-    );
+    let id = app.sessions.insert(entry.clone(), PanelState::from_listing(PathBuf::from("/"), Vec::new()));
     app.connections = vec![entry];
     app.connections_cursor = 0;
     app.screen = Screen::Connections;
@@ -243,18 +205,9 @@ fn disconnecting_a_session_fails_its_queued_jobs_with_one_aggregated_notificatio
 
     app.disconnect_selected();
 
-    assert!(matches!(
-        app.transfers.get(job_a).unwrap().status,
-        JobStatus::Failed(_)
-    ));
-    assert!(matches!(
-        app.transfers.get(job_b).unwrap().status,
-        JobStatus::Failed(_)
-    ));
-    assert_eq!(
-        app.transfers.get(other_session_job).unwrap().status,
-        JobStatus::Queued
-    );
+    assert!(matches!(app.transfers.get(job_a).unwrap().status, JobStatus::Failed(_)));
+    assert!(matches!(app.transfers.get(job_b).unwrap().status, JobStatus::Failed(_)));
+    assert_eq!(app.transfers.get(other_session_job).unwrap().status, JobStatus::Queued);
 
     // Collect every notification pushed, in order.
     let messages: Vec<String> = std::iter::from_fn(|| {
@@ -268,15 +221,9 @@ fn disconnecting_a_session_fails_its_queued_jobs_with_one_aggregated_notificatio
 
     // Exactly one message aggregates both cancelled/failed transfers —
     // not one notification per job — plus the disconnect confirmation.
-    let transfer_messages: Vec<&String> = messages
-        .iter()
-        .filter(|m| m.contains("transfer") && m.contains("disconnected"))
-        .collect();
-    assert_eq!(
-        transfer_messages.len(),
-        1,
-        "expected exactly one aggregated transfer notification, got {messages:?}"
-    );
+    let transfer_messages: Vec<&String> =
+        messages.iter().filter(|m| m.contains("transfer") && m.contains("disconnected")).collect();
+    assert_eq!(transfer_messages.len(), 1, "expected exactly one aggregated transfer notification, got {messages:?}");
     assert!(transfer_messages[0].contains("2"));
 }
 
@@ -462,10 +409,7 @@ fn add_connection_dialog_stays_open_when_saving_fails() {
     }
     app.apply_dialog_key(key(KeyCode::Enter));
 
-    assert!(
-        app.dialog.is_some(),
-        "the form must stay open so the user's input isn't lost on a save error"
-    );
+    assert!(app.dialog.is_some(), "the form must stay open so the user's input isn't lost on a save error");
     assert!(app.notifications.current().is_some());
 }
 
@@ -505,10 +449,7 @@ fn edit_connection_preserves_identity_file_and_remote_path_not_shown_in_the_form
     let saved = crate::connection::store::load().unwrap();
     assert_eq!(saved.len(), 1);
     assert_eq!(saved[0].host, "new.example.com");
-    assert_eq!(
-        saved[0].identity_file,
-        Some(std::path::PathBuf::from("/home/user/.ssh/id_ed25519"))
-    );
+    assert_eq!(saved[0].identity_file, Some(std::path::PathBuf::from("/home/user/.ssh/id_ed25519")));
     assert_eq!(saved[0].remote_path, Some("/var/www".to_string()));
 }
 

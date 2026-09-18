@@ -2,22 +2,13 @@ use super::*;
 use crossterm::event::{KeyCode, KeyEventKind, KeyEventState, KeyModifiers};
 
 fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers: KeyModifiers::NONE,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
+    KeyEvent { code, modifiers: KeyModifiers::NONE, kind: KeyEventKind::Press, state: KeyEventState::NONE }
 }
 
 fn sample_form() -> FormDialog {
     FormDialog::new(
         "Add connection",
-        vec![
-            FormField::new("Name", ""),
-            FormField::new("Host", ""),
-            FormField::new_masked("Password", ""),
-        ],
+        vec![FormField::new("Name", ""), FormField::new("Host", ""), FormField::new_masked("Password", "")],
     )
 }
 
@@ -72,11 +63,7 @@ fn enter_submits_every_fields_value_in_order() {
 
     assert_eq!(
         outcome,
-        FormOutcome::Submitted(vec![
-            "prod".to_string(),
-            "server.example.com".to_string(),
-            "secret".to_string(),
-        ])
+        FormOutcome::Submitted(vec!["prod".to_string(), "server.example.com".to_string(), "secret".to_string(),])
     );
 }
 
@@ -106,17 +93,9 @@ fn masked_field_renders_asterisks_not_the_value() {
 
     let backend = ratatui::backend::TestBackend::new(60, 10);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
-    terminal
-        .draw(|frame| render_form(frame, frame.area(), &form))
-        .unwrap();
+    terminal.draw(|frame| render_form(frame, frame.area(), &form)).unwrap();
 
-    let content: String = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
+    let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
 
     assert!(content.contains("******"));
     assert!(!content.contains("secret"));
@@ -129,17 +108,9 @@ fn error_message_renders_when_set() {
 
     let backend = ratatui::backend::TestBackend::new(60, 10);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
-    terminal
-        .draw(|frame| render_form(frame, frame.area(), &form))
-        .unwrap();
+    terminal.draw(|frame| render_form(frame, frame.area(), &form)).unwrap();
 
-    let content: String = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
+    let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
 
     assert!(content.contains("Host can't be empty"));
 }

@@ -139,16 +139,10 @@ fn cycle_session_action_is_a_silent_no_op_with_no_sessions() {
 #[test]
 fn cycle_session_action_advances_the_active_session() {
     let (_dir, mut app) = app_in_temp_dir();
-    let a = app.sessions.insert(
-        sample_connection_entry(),
-        PanelState::from_listing(PathBuf::from("/"), Vec::new()),
-    );
+    let a = app.sessions.insert(sample_connection_entry(), PanelState::from_listing(PathBuf::from("/"), Vec::new()));
     let mut second_entry = sample_connection_entry();
     second_entry.name = "other".to_string();
-    let b = app.sessions.insert(
-        second_entry,
-        PanelState::from_listing(PathBuf::from("/"), Vec::new()),
-    );
+    let b = app.sessions.insert(second_entry, PanelState::from_listing(PathBuf::from("/"), Vec::new()));
     assert_eq!(app.sessions.active().unwrap().id, b);
 
     app.apply_action(Action::CycleSession);
@@ -160,10 +154,7 @@ fn cycle_session_action_advances_the_active_session() {
 fn delete_on_the_connections_screen_disconnects_the_selected_session() {
     let (_dir, mut app) = app_in_temp_dir();
     let entry = sample_connection_entry();
-    app.sessions.insert(
-        entry.clone(),
-        PanelState::from_listing(PathBuf::from("/"), Vec::new()),
-    );
+    app.sessions.insert(entry.clone(), PanelState::from_listing(PathBuf::from("/"), Vec::new()));
     app.connections = vec![entry];
     app.connections_cursor = 0;
     app.screen = Screen::Connections;

@@ -13,11 +13,7 @@ use crate::connection::ConnectionEntry;
 /// sessions, a host can be connected without being the active one, and the
 /// user needs to be able to tell both states apart at a glance.
 pub fn render_connections_list(
-    frame: &mut Frame,
-    area: Rect,
-    entries: &[ConnectionEntry],
-    cursor: usize,
-    connected_names: &HashSet<&str>,
+    frame: &mut Frame, area: Rect, entries: &[ConnectionEntry], cursor: usize, connected_names: &HashSet<&str>,
     active_name: Option<&str>,
 ) {
     let block = Block::default().title("Connections").borders(Borders::ALL);
@@ -37,10 +33,7 @@ pub fn render_connections_list(
             } else {
                 "  "
             };
-            ListItem::new(format!(
-                "{marker}{} ({}@{}:{})",
-                entry.name, entry.username, entry.host, entry.port
-            ))
+            ListItem::new(format!("{marker}{} ({}@{}:{})", entry.name, entry.username, entry.host, entry.port))
         })
         .collect();
 

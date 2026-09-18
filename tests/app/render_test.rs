@@ -26,16 +26,8 @@ fn render_status_text(app: &App) -> String {
 
     let backend = TestBackend::new(60, 1);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|frame| app.render_status(frame, frame.area()))
-        .unwrap();
-    terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect()
+    terminal.draw(|frame| app.render_status(frame, frame.area())).unwrap();
+    terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect()
 }
 
 #[test]
@@ -44,25 +36,14 @@ fn failed_status_does_not_clobber_the_title_when_a_session_is_active() {
     use ratatui::backend::TestBackend;
 
     let (_dir, mut app) = app_in_temp_dir();
-    app.sessions.insert(
-        sample_connection_entry(),
-        PanelState::from_listing(PathBuf::from("/"), Vec::new()),
-    );
+    app.sessions.insert(sample_connection_entry(), PanelState::from_listing(PathBuf::from("/"), Vec::new()));
     app.connection_status = ConnectionStatus::Failed("boom".to_string());
 
     let backend = TestBackend::new(60, 3);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|frame| app.render_title(frame, frame.area()))
-        .unwrap();
+    terminal.draw(|frame| app.render_title(frame, frame.area())).unwrap();
 
-    let content: String = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
+    let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
 
     assert!(content.contains("SSH: Connected"));
     assert!(!content.contains("Connection failed"));
@@ -78,17 +59,9 @@ fn failed_status_still_shows_when_there_is_no_active_session() {
 
     let backend = TestBackend::new(60, 3);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|frame| app.render_title(frame, frame.area()))
-        .unwrap();
+    terminal.draw(|frame| app.render_title(frame, frame.area())).unwrap();
 
-    let content: String = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
+    let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
 
     assert!(content.contains("Connection failed"));
 }

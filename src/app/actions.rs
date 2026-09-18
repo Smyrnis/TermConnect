@@ -49,10 +49,7 @@ impl App {
     /// showing; otherwise falls back to its usual meaning of closing the
     /// dialog/returning to the Files screen.
     fn handle_back(&mut self) {
-        let showing_error = matches!(
-            self.notifications.current().map(|n| n.severity),
-            Some(Severity::Error)
-        );
+        let showing_error = matches!(self.notifications.current().map(|n| n.severity), Some(Severity::Error));
         if showing_error {
             self.notifications.dismiss_current();
         } else {

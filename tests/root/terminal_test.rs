@@ -21,22 +21,10 @@ fn sample_entry() -> ConnectionEntry {
 #[test]
 fn command_includes_port_identity_and_user_at_host() {
     let command = command_for(&sample_entry());
-    let args: Vec<String> = command
-        .get_args()
-        .map(|arg| arg.to_string_lossy().into_owned())
-        .collect();
+    let args: Vec<String> = command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
 
     assert_eq!(command.get_program(), "ssh");
-    assert_eq!(
-        args,
-        vec![
-            "-p",
-            "2222",
-            "-i",
-            "/home/user/.ssh/id_ed25519",
-            "deploy@server.example.com",
-        ]
-    );
+    assert_eq!(args, vec!["-p", "2222", "-i", "/home/user/.ssh/id_ed25519", "deploy@server.example.com",]);
 }
 
 #[test]
@@ -45,10 +33,7 @@ fn command_omits_identity_flag_when_none_is_set() {
     entry.identity_file = None;
 
     let command = command_for(&entry);
-    let args: Vec<String> = command
-        .get_args()
-        .map(|arg| arg.to_string_lossy().into_owned())
-        .collect();
+    let args: Vec<String> = command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
 
     assert_eq!(args, vec!["-p", "2222", "deploy@server.example.com"]);
 }
@@ -59,28 +44,11 @@ fn command_wraps_with_sshpass_when_password_and_sshpass_are_both_present() {
     entry.password = Some("hunter2".to_string());
 
     let command = command_for_with(&entry, Some(PathBuf::from("/usr/bin/sshpass")));
-    let args: Vec<String> = command
-        .get_args()
-        .map(|arg| arg.to_string_lossy().into_owned())
-        .collect();
+    let args: Vec<String> = command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
 
     assert_eq!(command.get_program(), "/usr/bin/sshpass");
-    assert_eq!(
-        args,
-        vec![
-            "-e",
-            "ssh",
-            "-p",
-            "2222",
-            "-i",
-            "/home/user/.ssh/id_ed25519",
-            "deploy@server.example.com",
-        ]
-    );
-    let sshpass_env = command
-        .get_envs()
-        .find(|(key, _)| *key == "SSHPASS")
-        .and_then(|(_, value)| value);
+    assert_eq!(args, vec!["-e", "ssh", "-p", "2222", "-i", "/home/user/.ssh/id_ed25519", "deploy@server.example.com",]);
+    let sshpass_env = command.get_envs().find(|(key, _)| *key == "SSHPASS").and_then(|(_, value)| value);
     assert_eq!(sshpass_env, Some(std::ffi::OsStr::new("hunter2")));
 }
 

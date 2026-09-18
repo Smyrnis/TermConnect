@@ -36,9 +36,7 @@ pub fn glob_match(pattern: &str, name: &str) -> bool {
 fn match_from(pattern: &[char], name: &[char]) -> bool {
     match (pattern.first(), name.first()) {
         (None, None) => true,
-        (Some('*'), _) => {
-            match_from(&pattern[1..], name) || (!name.is_empty() && match_from(pattern, &name[1..]))
-        }
+        (Some('*'), _) => match_from(&pattern[1..], name) || (!name.is_empty() && match_from(pattern, &name[1..])),
         (Some('?'), Some(_)) => match_from(&pattern[1..], &name[1..]),
         (Some(p), Some(n)) if p == n => match_from(&pattern[1..], &name[1..]),
         _ => false,
@@ -46,10 +44,7 @@ fn match_from(pattern: &[char], name: &[char]) -> bool {
 }
 
 pub async fn search_local(
-    root: PathBuf,
-    pattern: String,
-    tx: mpsc::UnboundedSender<SearchEvent>,
-    cancel: Arc<AtomicBool>,
+    root: PathBuf, pattern: String, tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>,
 ) {
     search_local_with_limits(root, pattern, tx, cancel, MAX_DEPTH, MAX_RESULTS).await;
 }
@@ -58,11 +53,7 @@ pub async fn search_local(
 /// `search_local` so tests can exercise the depth/cap boundaries with
 /// small numbers instead of `MAX_DEPTH`/`MAX_RESULTS`.
 async fn search_local_with_limits(
-    root: PathBuf,
-    pattern: String,
-    tx: mpsc::UnboundedSender<SearchEvent>,
-    cancel: Arc<AtomicBool>,
-    max_depth: usize,
+    root: PathBuf, pattern: String, tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>, max_depth: usize,
     max_results: usize,
 ) {
     let mut found = 0usize;
@@ -108,21 +99,12 @@ async fn search_local_with_limits(
 
             let name = dir_entry.file_name().to_string_lossy().into_owned();
             let path = dir_entry.path();
-            let is_dir = dir_entry
-                .file_type()
-                .await
-                .map(|t| t.is_dir())
-                .unwrap_or(false);
+            let is_dir = dir_entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
 
             if glob_match(&pattern, &name) {
                 let size = dir_entry.metadata().await.map(|m| m.len()).unwrap_or(0);
-                let _ = tx.send(SearchEvent::Found(Entry {
-                    name,
-                    path: path.clone(),
-                    is_dir,
-                    size,
-                    permissions: None,
-                }));
+                let _ =
+                    tx.send(SearchEvent::Found(Entry { name, path: path.clone(), is_dir, size, permissions: None }));
                 found += 1;
             }
 
@@ -148,24 +130,10 @@ fn shell_quote(value: &str) -> String {
 }
 
 pub async fn search_remote(
-    handle: &Handle<TermConnectHandler>,
-    sftp: &SftpSession,
-    root: String,
-    pattern: String,
-    tx: mpsc::UnboundedSender<SearchEvent>,
-    cancel: Arc<AtomicBool>,
+    handle: &Handle<TermConnectHandler>, sftp: &SftpSession, root: String, pattern: String,
+    tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>,
 ) {
-    search_remote_with_limits(
-        handle,
-        sftp,
-        root,
-        pattern,
-        tx,
-        cancel,
-        MAX_DEPTH,
-        MAX_RESULTS,
-    )
-    .await;
+    search_remote_with_limits(handle, sftp, root, pattern, tx, cancel, MAX_DEPTH, MAX_RESULTS).await;
 }
 
 /// `search_remote`'s inner implementation, parameterized on `max_depth`/
@@ -173,14 +141,8 @@ pub async fn search_remote(
 /// without waiting on the real (much larger) `MAX_DEPTH`/`MAX_RESULTS`.
 #[allow(clippy::too_many_arguments)]
 async fn search_remote_with_limits(
-    handle: &Handle<TermConnectHandler>,
-    sftp: &SftpSession,
-    root: String,
-    pattern: String,
-    tx: mpsc::UnboundedSender<SearchEvent>,
-    cancel: Arc<AtomicBool>,
-    max_depth: usize,
-    max_results: usize,
+    handle: &Handle<TermConnectHandler>, sftp: &SftpSession, root: String, pattern: String,
+    tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>, max_depth: usize, max_results: usize,
 ) {
     match run_find(handle, &root, &pattern, max_depth, &cancel).await {
         Some(paths) => {
@@ -223,18 +185,10 @@ async fn search_remote_with_limits(
 /// SFTP-walk fallback) if the channel can't be opened, `exec` fails, or the
 /// command exits non-zero.
 async fn run_find(
-    handle: &Handle<TermConnectHandler>,
-    root: &str,
-    pattern: &str,
-    max_depth: usize,
-    cancel: &Arc<AtomicBool>,
+    handle: &Handle<TermConnectHandler>, root: &str, pattern: &str, max_depth: usize, cancel: &Arc<AtomicBool>,
 ) -> Option<Vec<String>> {
     let mut channel = handle.channel_open_session().await.ok()?;
-    let command = format!(
-        "find {} -maxdepth {max_depth} -iname {}",
-        shell_quote(root),
-        shell_quote(pattern)
-    );
+    let command = format!("find {} -maxdepth {max_depth} -iname {}", shell_quote(root), shell_quote(pattern));
     channel.exec(true, command.into_bytes()).await.ok()?;
 
     let mut output = Vec::new();
@@ -270,24 +224,14 @@ async fn run_find(
     }
 
     let text = String::from_utf8_lossy(&output);
-    Some(
-        text.lines()
-            .filter(|line| !line.is_empty())
-            .map(str::to_string)
-            .collect(),
-    )
+    Some(text.lines().filter(|line| !line.is_empty()).map(str::to_string).collect())
 }
 
 /// Depth-limited, cancellable, capped SFTP `read_dir` walk — the fallback
 /// when `find` isn't available, mirroring `search_local`'s shape.
 async fn search_remote_walk(
-    sftp: &SftpSession,
-    root: String,
-    pattern: String,
-    tx: mpsc::UnboundedSender<SearchEvent>,
-    cancel: Arc<AtomicBool>,
-    max_depth: usize,
-    max_results: usize,
+    sftp: &SftpSession, root: String, pattern: String, tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>,
+    max_depth: usize, max_results: usize,
 ) {
     let mut found = 0usize;
     let mut truncated = false;

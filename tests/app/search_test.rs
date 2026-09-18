@@ -3,12 +3,7 @@ use crossterm::event::{KeyCode, KeyEventState, KeyModifiers};
 use std::fs;
 
 fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers: KeyModifiers::NONE,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
+    KeyEvent { code, modifiers: KeyModifiers::NONE, kind: KeyEventKind::Press, state: KeyEventState::NONE }
 }
 
 fn app_in_temp_dir() -> (tempfile::TempDir, App) {
@@ -65,14 +60,7 @@ async fn typing_a_pattern_streams_matching_results_back_into_the_search_view() {
         app.apply_search_event(event);
     }
 
-    assert!(
-        app.search
-            .unwrap()
-            .view
-            .results
-            .iter()
-            .any(|entry| entry.name == "target.log")
-    );
+    assert!(app.search.unwrap().view.results.iter().any(|entry| entry.name == "target.log"));
 }
 
 #[tokio::test]
@@ -104,18 +92,6 @@ async fn rapid_pattern_changes_dispatch_only_one_search_for_the_final_pattern() 
     // final pattern "aaa" — not one per keystroke ("a", "aa", "aaa").
     assert_eq!(done_count, 1, "expected exactly one dispatched search");
     let session = app.search.unwrap();
-    assert!(
-        session
-            .view
-            .results
-            .iter()
-            .any(|entry| entry.name == "aaa.log")
-    );
-    assert!(
-        !session
-            .view
-            .results
-            .iter()
-            .any(|entry| entry.name == "bbb.log")
-    );
+    assert!(session.view.results.iter().any(|entry| entry.name == "aaa.log"));
+    assert!(!session.view.results.iter().any(|entry| entry.name == "bbb.log"));
 }

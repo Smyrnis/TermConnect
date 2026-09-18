@@ -97,12 +97,8 @@ impl PanelState {
     /// `sort_spec` — pure state, touches neither the filesystem nor the
     /// network, so toggling either is instant.
     fn recompute_rows(&mut self) {
-        let mut visible: Vec<Entry> = self
-            .all_entries
-            .iter()
-            .filter(|entry| self.show_hidden || !entry.name.starts_with('.'))
-            .cloned()
-            .collect();
+        let mut visible: Vec<Entry> =
+            self.all_entries.iter().filter(|entry| self.show_hidden || !entry.name.starts_with('.')).cloned().collect();
         sort::sort_entries(&mut visible, self.sort_spec);
 
         let mut rows = Vec::with_capacity(visible.len() + 1);
@@ -275,25 +271,11 @@ impl PanelState {
     }
 }
 
-pub fn render_panel(
-    frame: &mut Frame,
-    area: Rect,
-    title: &str,
-    is_active: bool,
-    panel: &PanelState,
-) {
-    let border_style = if is_active {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default()
-    };
+pub fn render_panel(frame: &mut Frame, area: Rect, title: &str, is_active: bool, panel: &PanelState) {
+    let border_style = if is_active { Style::default().fg(Color::Yellow) } else { Style::default() };
 
     let block = Block::default()
-        .title(format!(
-            "{title} {} [{}]",
-            panel.path().display(),
-            sort_indicator(panel.sort_spec())
-        ))
+        .title(format!("{title} {} [{}]", panel.path().display(), sort_indicator(panel.sort_spec())))
         .borders(Borders::ALL)
         .border_style(border_style);
 
@@ -315,16 +297,9 @@ fn sort_indicator(spec: SortSpec) -> String {
 }
 
 pub fn render_placeholder(frame: &mut Frame, area: Rect, title: &str, is_active: bool) {
-    let border_style = if is_active {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default()
-    };
+    let border_style = if is_active { Style::default().fg(Color::Yellow) } else { Style::default() };
 
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(border_style);
+    let block = Block::default().title(title).borders(Borders::ALL).border_style(border_style);
 
     frame.render_widget(block, area);
 }

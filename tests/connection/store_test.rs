@@ -9,9 +9,7 @@ use super::*;
 #[test]
 fn config_path_is_connections_toml_under_config_dir() {
     let path = config_path().unwrap();
-    let expected = crate::config::config_dir()
-        .unwrap()
-        .join("connections.toml");
+    let expected = crate::config::config_dir().unwrap().join("connections.toml");
 
     assert_eq!(path, expected);
 }
@@ -50,10 +48,7 @@ remote_path = "/var/www/app"
     assert_eq!(profiles[0].host, "server.example.com");
     assert_eq!(profiles[0].port, 2222);
     assert_eq!(profiles[0].username, "deploy");
-    assert_eq!(
-        profiles[0].identity_file,
-        Some(PathBuf::from("/home/user/.ssh/id_ed25519"))
-    );
+    assert_eq!(profiles[0].identity_file, Some(PathBuf::from("/home/user/.ssh/id_ed25519")));
 }
 
 #[test]

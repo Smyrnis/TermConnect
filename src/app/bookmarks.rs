@@ -6,28 +6,19 @@ impl App {
             return;
         }
 
-        let default_label = self
-            .active_panel_path()
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("bookmark")
-            .to_string();
+        let default_label =
+            self.active_panel_path().file_name().and_then(|name| name.to_str()).unwrap_or("bookmark").to_string();
 
-        self.dialog = Some(Dialog::TextInput(TextInputDialog::new(
-            "Bookmark name",
-            default_label,
-        )));
+        self.dialog = Some(Dialog::TextInput(TextInputDialog::new("Bookmark name", default_label)));
         self.pending_action = Some(PendingAction::AddBookmark);
     }
 
     fn active_panel_path(&self) -> PathBuf {
         match self.active_panel {
             ActivePanel::Local => self.local.path().to_path_buf(),
-            ActivePanel::Remote => self
-                .sessions
-                .active()
-                .map(|session| session.panel.path().to_path_buf())
-                .unwrap_or_default(),
+            ActivePanel::Remote => {
+                self.sessions.active().map(|session| session.panel.path().to_path_buf()).unwrap_or_default()
+            }
         }
     }
 
@@ -37,16 +28,14 @@ impl App {
             ActivePanel::Remote => match self.sessions.active() {
                 Some(session) => Some(session.entry.name.clone()),
                 None => {
-                    self.notifications
-                        .push(Severity::Warning, "Connect to a remote server first");
+                    self.notifications.push(Severity::Warning, "Connect to a remote server first");
                     return;
                 }
             },
         };
 
         let path = self.active_panel_path();
-        self.bookmarks
-            .add(config::bookmarks::Bookmark { label, path, host });
+        self.bookmarks.add(config::bookmarks::Bookmark { label, path, host });
         self.save_bookmarks();
     }
 
@@ -59,18 +48,12 @@ impl App {
             .bookmarks
             .iter()
             .map(|bookmark| match &bookmark.host {
-                Some(host) => format!(
-                    "{} \u{2014} {} [{host}]",
-                    bookmark.label,
-                    bookmark.path.display()
-                ),
+                Some(host) => format!("{} \u{2014} {} [{host}]", bookmark.label, bookmark.path.display()),
                 None => format!("{} \u{2014} {}", bookmark.label, bookmark.path.display()),
             })
             .collect();
 
-        self.dialog = Some(Dialog::List(
-            ListDialog::new("Bookmarks", items).removable(true),
-        ));
+        self.dialog = Some(Dialog::List(ListDialog::new("Bookmarks", items).removable(true)));
     }
 
     /// Navigates to a bookmark. A remote bookmark whose host has no active
@@ -89,10 +72,8 @@ impl App {
                 self.set_status(result);
             }
             Some(host) => {
-                let Some(session_id) = self.sessions.by_host(&host).map(|session| session.id)
-                else {
-                    self.notifications
-                        .push(Severity::Warning, format!("Connect to {host} first"));
+                let Some(session_id) = self.sessions.by_host(&host).map(|session| session.id) else {
+                    self.notifications.push(Severity::Warning, format!("Connect to {host} first"));
                     return;
                 };
                 self.sessions.activate(session_id);

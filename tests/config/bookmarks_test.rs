@@ -2,11 +2,7 @@ use super::*;
 use std::fs;
 
 fn sample() -> Bookmark {
-    Bookmark {
-        label: "projects".to_string(),
-        path: PathBuf::from("/home/user/projects"),
-        host: None,
-    }
+    Bookmark { label: "projects".to_string(), path: PathBuf::from("/home/user/projects"), host: None }
 }
 
 #[test]

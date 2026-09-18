@@ -41,12 +41,7 @@ fn load_from(path: &Path) -> Result<(Settings, Vec<StartupWarning>)> {
     let file: settings::SettingsFile = match toml::from_str(&contents) {
         Ok(file) => file,
         Err(err) => {
-            return Ok((
-                Settings::default(),
-                vec![StartupWarning(format!(
-                    "failed to parse config.toml: {err}"
-                ))],
-            ));
+            return Ok((Settings::default(), vec![StartupWarning(format!("failed to parse config.toml: {err}"))]));
         }
     };
 

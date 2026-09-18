@@ -11,11 +11,7 @@ pub struct PanelSettings {
 
 impl Default for PanelSettings {
     fn default() -> Self {
-        Self {
-            show_hidden: false,
-            sort_key: "name".to_string(),
-            sort_order: "ascending".to_string(),
-        }
+        Self { show_hidden: false, sort_key: "name".to_string(), sort_order: "ascending".to_string() }
     }
 }
 
@@ -53,9 +49,7 @@ pub(crate) fn settings_from_file(file: SettingsFile) -> (Settings, Vec<String>) 
     let sort_key = match file.panel.sort_key {
         Some(value) if value == "name" || value == "size" => value,
         Some(other) => {
-            warnings.push(format!(
-                "unknown panel.sort_key \"{other}\", using \"name\""
-            ));
+            warnings.push(format!("unknown panel.sort_key \"{other}\", using \"name\""));
             defaults.sort_key.clone()
         }
         None => defaults.sort_key.clone(),
@@ -64,25 +58,13 @@ pub(crate) fn settings_from_file(file: SettingsFile) -> (Settings, Vec<String>) 
     let sort_order = match file.panel.sort_order {
         Some(value) if value == "ascending" || value == "descending" => value,
         Some(other) => {
-            warnings.push(format!(
-                "unknown panel.sort_order \"{other}\", using \"ascending\""
-            ));
+            warnings.push(format!("unknown panel.sort_order \"{other}\", using \"ascending\""));
             defaults.sort_order.clone()
         }
         None => defaults.sort_order.clone(),
     };
 
-    (
-        Settings {
-            panel: PanelSettings {
-                show_hidden,
-                sort_key,
-                sort_order,
-            },
-            keys: file.keys,
-        },
-        warnings,
-    )
+    (Settings { panel: PanelSettings { show_hidden, sort_key, sort_order }, keys: file.keys }, warnings)
 }
 
 #[cfg(test)]

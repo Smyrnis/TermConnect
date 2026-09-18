@@ -11,8 +11,7 @@ impl App {
             ActivePanel::Local => SearchTarget::Local,
             ActivePanel::Remote => {
                 if self.sessions.active().is_none() {
-                    self.notifications
-                        .push(Severity::Warning, "Connect to a remote server first");
+                    self.notifications.push(Severity::Warning, "Connect to a remote server first");
                     return;
                 }
                 SearchTarget::Remote
@@ -101,11 +100,7 @@ impl App {
                 };
                 let sftp = resources.sftp.clone();
                 let handle = resources.handle.clone();
-                let root = self
-                    .sessions
-                    .active()
-                    .map(|session| session.panel.path().to_path_buf())
-                    .unwrap_or_default();
+                let root = self.sessions.active().map(|session| session.panel.path().to_path_buf()).unwrap_or_default();
                 let root_str = path_to_remote_string(&root);
                 tokio::spawn(async move {
                     if !wait_out_search_debounce(&cancel, &generation_state, generation).await {
@@ -144,11 +139,7 @@ impl App {
             SearchTarget::Local => ActivePanel::Local,
             SearchTarget::Remote => ActivePanel::Remote,
         };
-        let parent = entry
-            .path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| entry.path.clone());
+        let parent = entry.path.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| entry.path.clone());
 
         if let Some(session) = self.search.take() {
             session.cancel.store(true, Ordering::Relaxed);
@@ -172,11 +163,7 @@ impl App {
 /// or a newer pattern change superseded it (`generation` no longer matches
 /// `expected`), in which case the caller should skip dispatching the actual
 /// search entirely.
-async fn wait_out_search_debounce(
-    cancel: &Arc<AtomicBool>,
-    generation: &Arc<AtomicU64>,
-    expected: u64,
-) -> bool {
+async fn wait_out_search_debounce(cancel: &Arc<AtomicBool>, generation: &Arc<AtomicU64>, expected: u64) -> bool {
     tokio::time::sleep(SEARCH_DEBOUNCE).await;
     !cancel.load(Ordering::Relaxed) && generation.load(Ordering::Relaxed) == expected
 }

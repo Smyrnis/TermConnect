@@ -36,11 +36,7 @@ pub struct Notifications {
 impl Notifications {
     pub fn push(&mut self, severity: Severity, message: impl Into<String>) {
         let expires_at = severity.ttl().map(|ttl| Instant::now() + ttl);
-        self.queue.push_back(Notification {
-            severity,
-            message: message.into(),
-            expires_at,
-        });
+        self.queue.push_back(Notification { severity, message: message.into(), expires_at });
     }
 
     pub fn current(&self) -> Option<&Notification> {

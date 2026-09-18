@@ -36,17 +36,11 @@ fn init_tracing() {
     let filter = tracing_subscriber::EnvFilter::from_default_env();
     match logging::open_writer() {
         Ok(file) => {
-            tracing_subscriber::fmt()
-                .with_env_filter(filter)
-                .with_writer(std::sync::Mutex::new(file))
-                .init();
+            tracing_subscriber::fmt().with_env_filter(filter).with_writer(std::sync::Mutex::new(file)).init();
         }
         Err(err) => {
             eprintln!("termconnect: failed to open log file, logging disabled: {err}");
-            tracing_subscriber::fmt()
-                .with_env_filter(filter)
-                .with_writer(std::io::sink)
-                .init();
+            tracing_subscriber::fmt().with_env_filter(filter).with_writer(std::io::sink).init();
         }
     }
 }

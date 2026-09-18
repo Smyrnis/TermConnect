@@ -16,9 +16,7 @@ pub struct SshConfigHost {
 }
 
 pub fn default_path() -> Option<PathBuf> {
-    std::env::var("HOME")
-        .ok()
-        .map(|home| PathBuf::from(home).join(".ssh").join("config"))
+    std::env::var("HOME").ok().map(|home| PathBuf::from(home).join(".ssh").join("config"))
 }
 
 /// Reads and parses `~/.ssh/config`. A missing file is not an error — it
@@ -76,14 +74,10 @@ pub fn parse(contents: &str) -> Vec<SshConfigHost> {
                 }
             }
             "hostname" => {
-                set_group(&mut hosts, group_start, |host| {
-                    host.host_name = Some(value.to_string())
-                });
+                set_group(&mut hosts, group_start, |host| host.host_name = Some(value.to_string()));
             }
             "user" => {
-                set_group(&mut hosts, group_start, |host| {
-                    host.user = Some(value.to_string())
-                });
+                set_group(&mut hosts, group_start, |host| host.user = Some(value.to_string()));
             }
             "port" => {
                 if let Ok(port) = value.parse() {
@@ -92,9 +86,7 @@ pub fn parse(contents: &str) -> Vec<SshConfigHost> {
             }
             "identityfile" => {
                 let path = expand_home(value);
-                set_group(&mut hosts, group_start, |host| {
-                    host.identity_file = Some(path.clone())
-                });
+                set_group(&mut hosts, group_start, |host| host.identity_file = Some(path.clone()));
             }
             _ => {}
         }

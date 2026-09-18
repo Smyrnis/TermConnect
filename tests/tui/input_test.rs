@@ -8,12 +8,7 @@ fn key(code: KeyCode) -> KeyEvent {
 }
 
 fn key_with_modifiers(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
+    KeyEvent { code, modifiers, kind: KeyEventKind::Press, state: KeyEventState::NONE }
 }
 
 fn map_key_via_defaults(code: KeyCode) -> Action {
@@ -26,24 +21,12 @@ fn map_key_via_defaults_with_modifiers(code: KeyCode, modifiers: KeyModifiers) -
 
 #[test]
 fn format_key_spec_renders_a_plain_function_key() {
-    assert_eq!(
-        format_key_spec(KeySpec {
-            code: KeyCode::F(10),
-            modifiers: KeyModifiers::NONE
-        }),
-        "F10"
-    );
+    assert_eq!(format_key_spec(KeySpec { code: KeyCode::F(10), modifiers: KeyModifiers::NONE }), "F10");
 }
 
 #[test]
 fn format_key_spec_renders_a_control_modifier() {
-    assert_eq!(
-        format_key_spec(KeySpec {
-            code: KeyCode::Char('r'),
-            modifiers: KeyModifiers::CONTROL
-        }),
-        "Ctrl+R"
-    );
+    assert_eq!(format_key_spec(KeySpec { code: KeyCode::Char('r'), modifiers: KeyModifiers::CONTROL }), "Ctrl+R");
 }
 
 #[test]
@@ -63,22 +46,10 @@ fn defaults_cover_every_bindable_action_with_the_original_hardcoded_keys() {
         (Action::Delete, key(KeyCode::F(8))),
         (Action::OpenConnections, key(KeyCode::F(9))),
         (Action::Back, key(KeyCode::Esc)),
-        (
-            Action::Refresh,
-            key_with_modifiers(KeyCode::Char('r'), KeyModifiers::CONTROL),
-        ),
-        (
-            Action::CancelTransfer,
-            key_with_modifiers(KeyCode::Char('c'), KeyModifiers::CONTROL),
-        ),
-        (
-            Action::ToggleHidden,
-            key_with_modifiers(KeyCode::Char('h'), KeyModifiers::CONTROL),
-        ),
-        (
-            Action::CycleSort,
-            key_with_modifiers(KeyCode::Char('s'), KeyModifiers::CONTROL),
-        ),
+        (Action::Refresh, key_with_modifiers(KeyCode::Char('r'), KeyModifiers::CONTROL)),
+        (Action::CancelTransfer, key_with_modifiers(KeyCode::Char('c'), KeyModifiers::CONTROL)),
+        (Action::ToggleHidden, key_with_modifiers(KeyCode::Char('h'), KeyModifiers::CONTROL)),
+        (Action::CycleSort, key_with_modifiers(KeyCode::Char('s'), KeyModifiers::CONTROL)),
     ];
     for (action, event) in cases {
         assert_eq!(bindings.map_key(event), action);
@@ -93,23 +64,14 @@ fn an_unbound_key_maps_to_noop() {
 
 #[test]
 fn parse_key_spec_parses_plain_function_keys() {
-    assert_eq!(
-        parse_key_spec("F10").unwrap(),
-        KeySpec {
-            code: KeyCode::F(10),
-            modifiers: KeyModifiers::NONE
-        }
-    );
+    assert_eq!(parse_key_spec("F10").unwrap(), KeySpec { code: KeyCode::F(10), modifiers: KeyModifiers::NONE });
 }
 
 #[test]
 fn parse_key_spec_parses_ctrl_modifier_case_insensitively() {
     assert_eq!(
         parse_key_spec("Ctrl+R").unwrap(),
-        KeySpec {
-            code: KeyCode::Char('r'),
-            modifiers: KeyModifiers::CONTROL
-        }
+        KeySpec { code: KeyCode::Char('r'), modifiers: KeyModifiers::CONTROL }
     );
 }
 
@@ -140,13 +102,7 @@ fn from_overrides_applies_a_valid_override() {
     let (bindings, warnings) = KeyBindings::from_overrides(&overrides);
 
     assert!(warnings.is_empty());
-    assert_eq!(
-        bindings.map_key(key_with_modifiers(
-            KeyCode::Char('q'),
-            KeyModifiers::CONTROL
-        )),
-        Action::Quit
-    );
+    assert_eq!(bindings.map_key(key_with_modifiers(KeyCode::Char('q'), KeyModifiers::CONTROL)), Action::Quit);
 }
 
 #[test]
@@ -204,27 +160,15 @@ fn defaults_never_bind_two_actions_to_the_same_key() {
     let bindings = KeyBindings::defaults();
     let mut seen: Vec<KeySpec> = Vec::new();
     for action in ALL_ACTIONS {
-        let spec = bindings
-            .key_for(*action)
-            .expect("every action in ALL_ACTIONS should have a default binding");
-        assert!(
-            !seen.contains(&spec),
-            "action {:?} shares a default KeySpec {:?} with another action",
-            action,
-            spec
-        );
+        let spec = bindings.key_for(*action).expect("every action in ALL_ACTIONS should have a default binding");
+        assert!(!seen.contains(&spec), "action {:?} shares a default KeySpec {:?} with another action", action, spec);
         seen.push(spec);
     }
 }
 
 #[test]
 fn action_name_and_from_name_round_trip() {
-    for action in [
-        Action::Quit,
-        Action::ToggleHidden,
-        Action::CycleSort,
-        Action::Back,
-    ] {
+    for action in [Action::Quit, Action::ToggleHidden, Action::CycleSort, Action::Back] {
         assert_eq!(Action::from_name(action.name()), Some(action));
     }
 }
@@ -246,34 +190,22 @@ fn f6_is_bound_to_add_connection() {
 
 #[test]
 fn ctrl_d_maps_to_bookmark_here() {
-    assert_eq!(
-        map_key_via_defaults_with_modifiers(KeyCode::Char('d'), KeyModifiers::CONTROL),
-        Action::BookmarkHere
-    );
+    assert_eq!(map_key_via_defaults_with_modifiers(KeyCode::Char('d'), KeyModifiers::CONTROL), Action::BookmarkHere);
 }
 
 #[test]
 fn ctrl_b_maps_to_open_bookmarks() {
-    assert_eq!(
-        map_key_via_defaults_with_modifiers(KeyCode::Char('b'), KeyModifiers::CONTROL),
-        Action::OpenBookmarks
-    );
+    assert_eq!(map_key_via_defaults_with_modifiers(KeyCode::Char('b'), KeyModifiers::CONTROL), Action::OpenBookmarks);
 }
 
 #[test]
 fn ctrl_f_maps_to_open_search() {
-    assert_eq!(
-        map_key_via_defaults_with_modifiers(KeyCode::Char('f'), KeyModifiers::CONTROL),
-        Action::OpenSearch
-    );
+    assert_eq!(map_key_via_defaults_with_modifiers(KeyCode::Char('f'), KeyModifiers::CONTROL), Action::OpenSearch);
 }
 
 #[test]
 fn ctrl_n_maps_to_cycle_session() {
-    assert_eq!(
-        map_key_via_defaults_with_modifiers(KeyCode::Char('n'), KeyModifiers::CONTROL),
-        Action::CycleSession
-    );
+    assert_eq!(map_key_via_defaults_with_modifiers(KeyCode::Char('n'), KeyModifiers::CONTROL), Action::CycleSession);
 }
 
 #[test]
@@ -283,8 +215,5 @@ fn all_actions_excludes_noop() {
 
 #[test]
 fn delete_key_is_bound_to_delete_connection() {
-    assert_eq!(
-        map_key_via_defaults(KeyCode::Delete),
-        Action::DeleteConnection
-    );
+    assert_eq!(map_key_via_defaults(KeyCode::Delete), Action::DeleteConnection);
 }

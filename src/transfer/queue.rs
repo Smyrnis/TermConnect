@@ -32,14 +32,8 @@ impl TransferQueue {
 
     #[allow(clippy::too_many_arguments)]
     pub fn enqueue(
-        &mut self,
-        session_id: u64,
-        direction: Direction,
-        local_path: PathBuf,
-        remote_path: String,
-        display_name: String,
-        total_bytes: u64,
-        batch_id: Option<u64>,
+        &mut self, session_id: u64, direction: Direction, local_path: PathBuf, remote_path: String,
+        display_name: String, total_bytes: u64, batch_id: Option<u64>,
     ) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
@@ -78,22 +72,15 @@ impl TransferQueue {
     }
 
     pub fn is_active(&self) -> bool {
-        self.jobs
-            .iter()
-            .any(|job| job.status == JobStatus::InProgress)
+        self.jobs.iter().any(|job| job.status == JobStatus::InProgress)
     }
 
     pub fn active(&self) -> Option<&TransferJob> {
-        self.jobs
-            .iter()
-            .find(|job| job.status == JobStatus::InProgress)
+        self.jobs.iter().find(|job| job.status == JobStatus::InProgress)
     }
 
     pub fn queued_count(&self) -> usize {
-        self.jobs
-            .iter()
-            .filter(|job| job.status == JobStatus::Queued)
-            .count()
+        self.jobs.iter().filter(|job| job.status == JobStatus::Queued).count()
     }
 
     /// The next job to run, if any and nothing is currently active.
@@ -101,10 +88,7 @@ impl TransferQueue {
         if self.is_active() {
             return None;
         }
-        self.jobs
-            .iter()
-            .find(|job| job.status == JobStatus::Queued)
-            .map(|job| job.id)
+        self.jobs.iter().find(|job| job.status == JobStatus::Queued).map(|job| job.id)
     }
 
     /// Marks every still-queued job belonging to `session_id` as `Failed`
@@ -147,18 +131,9 @@ impl TransferQueue {
     /// Aggregates every job sharing `batch_id` — used to show combined
     /// progress for a directory copy in the status line.
     pub fn batch_progress(&self, batch_id: u64) -> BatchProgress {
-        let mut progress = BatchProgress {
-            total_files: 0,
-            completed_files: 0,
-            total_bytes: 0,
-            transferred_bytes: 0,
-        };
+        let mut progress = BatchProgress { total_files: 0, completed_files: 0, total_bytes: 0, transferred_bytes: 0 };
 
-        for job in self
-            .jobs
-            .iter()
-            .filter(|job| job.batch_id == Some(batch_id))
-        {
+        for job in self.jobs.iter().filter(|job| job.batch_id == Some(batch_id)) {
             progress.total_files += 1;
             progress.total_bytes += job.total_bytes;
             progress.transferred_bytes += job.transferred_bytes;

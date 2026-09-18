@@ -61,10 +61,7 @@ fn maybe_start_next_transfer_notifies_when_the_jobs_session_has_disconnected() {
 #[test]
 fn copying_a_directory_with_a_disconnected_session_fails_without_spawning() {
     let (_dir, mut app) = app_with_a_local_directory_selected();
-    app.sessions.insert(
-        sample_connection_entry(),
-        PanelState::from_listing(PathBuf::from("/remote"), Vec::new()),
-    );
+    app.sessions.insert(sample_connection_entry(), PanelState::from_listing(PathBuf::from("/remote"), Vec::new()));
     // sessions.active() now succeeds, but there's no matching entry in
     // app.session_resources — simulates a session whose SFTP handle is
     // gone. Before this task, this scenario hit the old "isn't supported
@@ -124,10 +121,7 @@ fn plan_ready_enqueues_every_planned_file_under_the_batch_id() {
 fn plan_ready_warns_once_about_skipped_symlinks() {
     let (_dir, mut app) = app_in_temp_dir();
     let batch_id = app.transfers.start_batch();
-    let plan = DirectoryPlan {
-        files: Vec::new(),
-        skipped_symlinks: 3,
-    };
+    let plan = DirectoryPlan { files: Vec::new(), skipped_symlinks: 3 };
 
     app.apply_plan_ready(batch_id, 1, Direction::Upload, plan);
 
@@ -155,12 +149,7 @@ fn plan_ready_fails_without_enqueueing_when_the_session_has_disconnected() {
     // still running, after start_directory_copy's own synchronous
     // pre-spawn check already passed.
 
-    app.apply_transfer_event(TransferEvent::PlanReady {
-        batch_id,
-        session_id: 1,
-        direction: Direction::Upload,
-        plan,
-    });
+    app.apply_transfer_event(TransferEvent::PlanReady { batch_id, session_id: 1, direction: Direction::Upload, plan });
 
     assert!(app.planning.is_none());
     let notification = app.notifications.current().unwrap();
@@ -218,17 +207,11 @@ fn cancel_active_transfer_cancels_every_other_queued_job_in_the_same_batch() {
     app.cancel_active_transfer();
 
     assert!(cancel.load(Ordering::Relaxed));
-    assert_eq!(
-        app.transfers.get(queued).unwrap().status,
-        JobStatus::Cancelled
-    );
+    assert_eq!(app.transfers.get(queued).unwrap().status, JobStatus::Cancelled);
     // The in-flight job is untouched here — it finishes cancelling
     // through the normal TransferEvent::Finished path once its own
     // AtomicBool is observed, not by having its status flipped directly.
-    assert_eq!(
-        app.transfers.get(active).unwrap().status,
-        JobStatus::InProgress
-    );
+    assert_eq!(app.transfers.get(active).unwrap().status, JobStatus::InProgress);
 }
 
 #[test]

@@ -23,21 +23,11 @@ impl TextInputDialog {
     pub fn new(title: impl Into<String>, initial_value: impl Into<String>) -> Self {
         let value = initial_value.into();
         let cursor = value.chars().count();
-        Self {
-            title: title.into(),
-            value,
-            masked: false,
-            cursor,
-        }
+        Self { title: title.into(), value, masked: false, cursor }
     }
 
     pub fn new_masked(title: impl Into<String>) -> Self {
-        Self {
-            title: title.into(),
-            value: String::new(),
-            masked: true,
-            cursor: 0,
-        }
+        Self { title: title.into(), value: String::new(), masked: true, cursor: 0 }
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> TextInputOutcome {
@@ -93,26 +83,14 @@ impl TextInputDialog {
     }
 
     fn byte_index_for(&self, char_index: usize) -> usize {
-        self.value
-            .char_indices()
-            .nth(char_index)
-            .map(|(byte, _)| byte)
-            .unwrap_or(self.value.len())
+        self.value.char_indices().nth(char_index).map(|(byte, _)| byte).unwrap_or(self.value.len())
     }
 }
 
 pub fn render_text_input(frame: &mut Frame, area: Rect, dialog: &TextInputDialog) {
-    let displayed_value = if dialog.masked {
-        "*".repeat(dialog.value.chars().count())
-    } else {
-        dialog.value.clone()
-    };
+    let displayed_value = if dialog.masked { "*".repeat(dialog.value.chars().count()) } else { dialog.value.clone() };
 
-    let popup = centered_popup(
-        area,
-        super::content_width(&[dialog.title.as_str(), displayed_value.as_str()]),
-        4,
-    );
+    let popup = centered_popup(area, super::content_width(&[dialog.title.as_str(), displayed_value.as_str()]), 4);
 
     let block = Block::default()
         .title(dialog.title.as_str())
@@ -124,19 +102,13 @@ pub fn render_text_input(frame: &mut Frame, area: Rect, dialog: &TextInputDialog
         .iter()
         .enumerate()
         .map(|(i, ch)| {
-            let style = if i == dialog.cursor {
-                Style::default().add_modifier(Modifier::REVERSED)
-            } else {
-                Style::default()
-            };
+            let style =
+                if i == dialog.cursor { Style::default().add_modifier(Modifier::REVERSED) } else { Style::default() };
             Span::styled(ch.to_string(), style)
         })
         .collect();
     if dialog.cursor >= chars.len() {
-        spans.push(Span::styled(
-            " ",
-            Style::default().add_modifier(Modifier::REVERSED),
-        ));
+        spans.push(Span::styled(" ", Style::default().add_modifier(Modifier::REVERSED)));
     }
 
     let paragraph = Paragraph::new(Line::from(spans)).block(block);
@@ -146,12 +118,8 @@ pub fn render_text_input(frame: &mut Frame, area: Rect, dialog: &TextInputDialog
 }
 
 fn centered_popup(area: Rect, width: u16, height: u16) -> Rect {
-    let [popup] = Layout::vertical([Constraint::Length(height)])
-        .flex(Flex::Center)
-        .areas(area);
-    let [popup] = Layout::horizontal([Constraint::Length(width.min(area.width))])
-        .flex(Flex::Center)
-        .areas(popup);
+    let [popup] = Layout::vertical([Constraint::Length(height)]).flex(Flex::Center).areas(area);
+    let [popup] = Layout::horizontal([Constraint::Length(width.min(area.width))]).flex(Flex::Center).areas(popup);
     popup
 }
 

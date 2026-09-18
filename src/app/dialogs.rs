@@ -9,10 +9,7 @@ impl App {
             return;
         }
 
-        self.dialog = Some(Dialog::TextInput(TextInputDialog::new(
-            "New directory name",
-            "",
-        )));
+        self.dialog = Some(Dialog::TextInput(TextInputDialog::new("New directory name", "")));
         self.pending_action = Some(PendingAction::Mkdir);
     }
 
@@ -23,19 +20,13 @@ impl App {
 
         let current_name = match self.active_panel {
             ActivePanel::Local => self.local.current_entry_name(),
-            ActivePanel::Remote => self
-                .sessions
-                .active()
-                .and_then(|session| session.panel.current_entry_name()),
+            ActivePanel::Remote => self.sessions.active().and_then(|session| session.panel.current_entry_name()),
         };
         let Some(current_name) = current_name else {
             return;
         };
 
-        self.dialog = Some(Dialog::TextInput(TextInputDialog::new(
-            "Rename to",
-            current_name,
-        )));
+        self.dialog = Some(Dialog::TextInput(TextInputDialog::new("Rename to", current_name)));
         self.pending_action = Some(PendingAction::Rename);
     }
 
@@ -56,10 +47,7 @@ impl App {
         }
 
         let message = if targets.len() == 1 {
-            let name = targets[0]
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("?");
+            let name = targets[0].file_name().and_then(|name| name.to_str()).unwrap_or("?");
             format!("Delete \"{name}\"?")
         } else {
             format!("Delete {} selected items?", targets.len())
@@ -140,10 +128,7 @@ impl App {
             DialogOutcome::Removed(index) => {
                 if let Some(removed) = self.bookmarks.remove(index) {
                     self.save_bookmarks();
-                    self.notifications.push(
-                        Severity::Info,
-                        format!("Removed bookmark \"{}\"", removed.label),
-                    );
+                    self.notifications.push(Severity::Info, format!("Removed bookmark \"{}\"", removed.label));
                 }
                 if let Some(Dialog::List(list)) = self.dialog.as_mut() {
                     list.items.remove(index);

@@ -32,11 +32,7 @@ fn settings_from_file_accepts_valid_panel_values() {
 #[test]
 fn settings_from_file_falls_back_and_warns_on_an_unknown_sort_key() {
     let file = SettingsFile {
-        panel: PanelSettingsFile {
-            show_hidden: None,
-            sort_key: Some("date".to_string()),
-            sort_order: None,
-        },
+        panel: PanelSettingsFile { show_hidden: None, sort_key: Some("date".to_string()), sort_order: None },
         keys: HashMap::new(),
     };
 
@@ -51,10 +47,7 @@ fn settings_from_file_falls_back_and_warns_on_an_unknown_sort_key() {
 fn settings_from_file_passes_keys_through_unvalidated() {
     let mut keys = HashMap::new();
     keys.insert("quit".to_string(), "ctrl+q".to_string());
-    let file = SettingsFile {
-        panel: PanelSettingsFile::default(),
-        keys: keys.clone(),
-    };
+    let file = SettingsFile { panel: PanelSettingsFile::default(), keys: keys.clone() };
 
     let (settings, _) = settings_from_file(file);
 

@@ -23,11 +23,7 @@ pub enum TransferOutcome {
 /// transferred via `on_progress` every [`PROGRESS_STEP_BYTES`] and
 /// checking `cancel` between chunks.
 pub async fn execute(
-    direction: Direction,
-    local_path: &Path,
-    remote_path: &str,
-    sftp: &SftpSession,
-    cancel: &AtomicBool,
+    direction: Direction, local_path: &Path, remote_path: &str, sftp: &SftpSession, cancel: &AtomicBool,
     on_progress: impl FnMut(u64),
 ) -> Result<TransferOutcome> {
     match direction {
@@ -35,8 +31,7 @@ pub async fn execute(
             let remote_part_path = format!("{remote_path}.part");
             let mut source = LocalFile::open(local_path).await?;
             let mut destination = sftp.create(&remote_part_path).await?;
-            let result =
-                copy_with_progress(&mut source, &mut destination, cancel, on_progress).await;
+            let result = copy_with_progress(&mut source, &mut destination, cancel, on_progress).await;
             // Best-effort: a shutdown failure after a copy failure would
             // otherwise mask the real error below.
             let _ = destination.shutdown().await;
@@ -47,8 +42,7 @@ pub async fn execute(
             let part = part_path(local_path);
             let mut source = sftp.open(remote_path).await?;
             let mut destination = LocalFile::create(&part).await?;
-            let result =
-                copy_with_progress(&mut source, &mut destination, cancel, on_progress).await;
+            let result = copy_with_progress(&mut source, &mut destination, cancel, on_progress).await;
             finalize_local(&result, &part, local_path).await?;
             result
         }
@@ -56,10 +50,7 @@ pub async fn execute(
 }
 
 async fn copy_with_progress<R, W>(
-    source: &mut R,
-    destination: &mut W,
-    cancel: &AtomicBool,
-    mut on_progress: impl FnMut(u64),
+    source: &mut R, destination: &mut W, cancel: &AtomicBool, mut on_progress: impl FnMut(u64),
 ) -> Result<TransferOutcome>
 where
     R: AsyncRead + Unpin,
@@ -105,11 +96,7 @@ fn part_path(path: &Path) -> PathBuf {
 /// Resolves a download's part file once its copy loop has finished:
 /// renamed to `final_path` on success, otherwise removed. A missing part
 /// file (e.g. it was never created) is not an error.
-async fn finalize_local(
-    result: &Result<TransferOutcome>,
-    part_path: &Path,
-    final_path: &Path,
-) -> Result<()> {
+async fn finalize_local(result: &Result<TransferOutcome>, part_path: &Path, final_path: &Path) -> Result<()> {
     match result {
         Ok(TransferOutcome::Completed) => {
             tokio::fs::rename(part_path, final_path).await?;
@@ -127,10 +114,7 @@ async fn finalize_local(
 /// success via `sftp.rename`, otherwise removed via `sftp.remove_file`
 /// (best-effort — an already-gone part file is not an error).
 async fn finalize_remote(
-    result: &Result<TransferOutcome>,
-    sftp: &SftpSession,
-    part_path: &str,
-    final_path: &str,
+    result: &Result<TransferOutcome>, sftp: &SftpSession, part_path: &str, final_path: &str,
 ) -> Result<()> {
     match result {
         Ok(TransferOutcome::Completed) => {

@@ -22,19 +22,9 @@ fn renders_connection_names() {
 
     let backend = TestBackend::new(60, 8);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|frame| {
-            render_connections_list(frame, frame.area(), &entries, 0, &HashSet::new(), None)
-        })
-        .unwrap();
+    terminal.draw(|frame| render_connections_list(frame, frame.area(), &entries, 0, &HashSet::new(), None)).unwrap();
 
-    let content: String = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
+    let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
 
     assert!(content.contains("production"));
     assert!(content.contains("deploy@server.example.com:22"));
@@ -56,25 +46,15 @@ fn entry(name: &str) -> ConnectionEntry {
 /// Renders into rows of plain text (one `String` per terminal row) so
 /// assertions can check which marker appears on which entry's line,
 /// rather than just "somewhere in the whole buffer".
-fn render_rows(
-    entries: &[ConnectionEntry],
-    connected: &HashSet<&str>,
-    active: Option<&str>,
-) -> Vec<String> {
+fn render_rows(entries: &[ConnectionEntry], connected: &HashSet<&str>, active: Option<&str>) -> Vec<String> {
     let width = 60;
     let backend = TestBackend::new(width, 8);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|frame| render_connections_list(frame, frame.area(), entries, 0, connected, active))
-        .unwrap();
+    terminal.draw(|frame| render_connections_list(frame, frame.area(), entries, 0, connected, active)).unwrap();
 
     let buffer = terminal.backend().buffer().clone();
     (0..buffer.area.height)
-        .map(|y| {
-            (0..buffer.area.width)
-                .map(|x| buffer[(x, y)].symbol().to_string())
-                .collect::<String>()
-        })
+        .map(|y| (0..buffer.area.width).map(|x| buffer[(x, y)].symbol().to_string()).collect::<String>())
         .collect()
 }
 

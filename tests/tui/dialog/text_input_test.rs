@@ -2,12 +2,7 @@ use super::*;
 use crossterm::event::{KeyEventKind, KeyEventState, KeyModifiers};
 
 fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers: KeyModifiers::NONE,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
+    KeyEvent { code, modifiers: KeyModifiers::NONE, kind: KeyEventKind::Press, state: KeyEventState::NONE }
 }
 
 #[test]
@@ -55,17 +50,9 @@ fn masked_dialog_renders_asterisks_not_the_value() {
 
     let backend = ratatui::backend::TestBackend::new(60, 6);
     let mut terminal = ratatui::Terminal::new(backend).unwrap();
-    terminal
-        .draw(|frame| render_text_input(frame, frame.area(), &dialog))
-        .unwrap();
+    terminal.draw(|frame| render_text_input(frame, frame.area(), &dialog)).unwrap();
 
-    let content: String = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
+    let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
 
     assert!(content.contains("***"));
     assert!(!content.contains("set"));

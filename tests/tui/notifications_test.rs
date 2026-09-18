@@ -47,10 +47,7 @@ fn errors_never_auto_expire() {
 
     notifications.expire(now + Duration::from_secs(3600));
 
-    assert_eq!(
-        notifications.current().unwrap().message,
-        "connection failed"
-    );
+    assert_eq!(notifications.current().unwrap().message, "connection failed");
 }
 
 #[test]

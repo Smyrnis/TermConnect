@@ -42,11 +42,7 @@ impl Bookmarks {
     }
 
     pub fn remove(&mut self, index: usize) -> Option<Bookmark> {
-        if index < self.0.len() {
-            Some(self.0.remove(index))
-        } else {
-            None
-        }
+        if index < self.0.len() { Some(self.0.remove(index)) } else { None }
     }
 }
 
@@ -78,12 +74,9 @@ fn load_from(path: &Path) -> Result<(Bookmarks, Vec<super::StartupWarning>)> {
 
     match toml::from_str::<BookmarksFile>(&contents) {
         Ok(file) => Ok((Bookmarks(file.bookmark), Vec::new())),
-        Err(err) => Ok((
-            Bookmarks::default(),
-            vec![super::StartupWarning(format!(
-                "failed to parse bookmarks.toml: {err}"
-            ))],
-        )),
+        Err(err) => {
+            Ok((Bookmarks::default(), vec![super::StartupWarning(format!("failed to parse bookmarks.toml: {err}"))]))
+        }
     }
 }
 
@@ -93,9 +86,7 @@ pub(crate) fn save_to(path: &Path, bookmarks: &Bookmarks) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let file = BookmarksFile {
-        bookmark: bookmarks.0.clone(),
-    };
+    let file = BookmarksFile { bookmark: bookmarks.0.clone() };
     fs::write(path, toml::to_string_pretty(&file)?)?;
     Ok(())
 }

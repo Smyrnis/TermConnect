@@ -51,8 +51,7 @@ pub fn save(profile: &ConnectionProfile) -> Result<()> {
 
 fn save_to(path: &Path, profile: &ConnectionProfile) -> Result<()> {
     let mut file = read_config_file(path)?;
-    file.connections
-        .insert(profile.name.clone(), profile.clone());
+    file.connections.insert(profile.name.clone(), profile.clone());
     write_config_file(path, &file)
 }
 
@@ -86,12 +85,7 @@ fn write_config_file(path: &Path, file: &ConfigFile) -> Result<()> {
     // freshly-created file — which may carry a plaintext password — is
     // never briefly readable at the process umask (e.g. 0644) before the
     // permissions get locked down below.
-    let mut handle = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
+    let mut handle = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
     handle.write_all(toml::to_string_pretty(file)?.as_bytes())?;
     // Still needed for a file that already existed at looser permissions
     // (e.g. from before this fix, or manual editing) — `.mode(0o600)` above

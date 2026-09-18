@@ -94,62 +94,28 @@ struct SearchSession {
 /// `run_connect`), delivered back to the event loop over a channel so the
 /// TUI never blocks on network I/O.
 enum ConnectEvent {
-    Connected {
-        entry: Box<ConnectionEntry>,
-        handle: russh::client::Handle<TermConnectHandler>,
-        sftp: SftpSession,
-    },
-    NeedsPassword {
-        name: String,
-        username: String,
-        respond_to: oneshot::Sender<String>,
-    },
-    Failed {
-        message: String,
-    },
+    Connected { entry: Box<ConnectionEntry>, handle: russh::client::Handle<TermConnectHandler>, sftp: SftpSession },
+    NeedsPassword { name: String, username: String, respond_to: oneshot::Sender<String> },
+    Failed { message: String },
 }
 
 /// The result of a background SFTP operation on the remote panel: every
 /// remote action (navigate, mkdir, rename, delete, refresh) ends the same
 /// way — either a fresh listing to show, or a failure message.
 enum PanelEvent {
-    Listed {
-        session_id: u64,
-        path: PathBuf,
-        entries: Vec<Entry>,
-    },
-    Failed {
-        session_id: u64,
-        message: String,
-    },
+    Listed { session_id: u64, path: PathBuf, entries: Vec<Entry> },
+    Failed { session_id: u64, message: String },
 }
 
 /// Progress reported by a running file transfer (see `run_transfer`), or
 /// by the planning phase a directory copy runs first (see
 /// `start_directory_copy` in `app/transfers.rs`).
 enum TransferEvent {
-    Progress {
-        id: u64,
-        transferred: u64,
-    },
-    Finished {
-        id: u64,
-        outcome: TransferOutcome,
-    },
-    Failed {
-        id: u64,
-        message: String,
-    },
-    PlanReady {
-        batch_id: u64,
-        session_id: u64,
-        direction: Direction,
-        plan: transfer::plan::DirectoryPlan,
-    },
-    PlanFailed {
-        batch_id: u64,
-        message: String,
-    },
+    Progress { id: u64, transferred: u64 },
+    Finished { id: u64, outcome: TransferOutcome },
+    Failed { id: u64, message: String },
+    PlanReady { batch_id: u64, session_id: u64, direction: Direction, plan: transfer::plan::DirectoryPlan },
+    PlanFailed { batch_id: u64, message: String },
 }
 
 /// The parts of a connected session that can't live in `Sessions` itself:
@@ -204,13 +170,8 @@ impl App {
         let (bookmarks, bookmark_warnings) = config::bookmarks::load()?;
         let bookmarks_path = config::bookmarks::bookmarks_path()?;
 
-        let mut app = Self::at_with(
-            std::env::current_dir()?,
-            &settings.panel,
-            key_bindings,
-            bookmarks,
-            Some(bookmarks_path),
-        )?;
+        let mut app =
+            Self::at_with(std::env::current_dir()?, &settings.panel, key_bindings, bookmarks, Some(bookmarks_path))?;
 
         for warning in config_warnings {
             app.notifications.push(Severity::Warning, warning.0);
@@ -237,11 +198,8 @@ impl App {
     }
 
     fn at_with(
-        path: PathBuf,
-        panel_settings: &config::settings::PanelSettings,
-        key_bindings: input::KeyBindings,
-        bookmarks: config::bookmarks::Bookmarks,
-        bookmarks_path: Option<PathBuf>,
+        path: PathBuf, panel_settings: &config::settings::PanelSettings, key_bindings: input::KeyBindings,
+        bookmarks: config::bookmarks::Bookmarks, bookmarks_path: Option<PathBuf>,
     ) -> Result<Self> {
         let (connect_tx, connect_rx) = mpsc::unbounded_channel();
         let (panel_tx, panel_rx) = mpsc::unbounded_channel();

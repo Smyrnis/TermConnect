@@ -35,24 +35,14 @@ impl App {
             },
         };
 
-        let text = format!(
-            "TermConnect{:>width$}",
-            status_text,
-            width = status_text.len() + 4
-        );
+        let text = format!("TermConnect{:>width$}", status_text, width = status_text.len() + 4);
         frame.render_widget(Paragraph::new(text), area);
     }
 
     fn render_files(&self, frame: &mut Frame, area: Rect) {
         let (local_area, remote_area) = layout::split_panels(area);
 
-        panels::render_panel(
-            frame,
-            local_area,
-            "LOCAL",
-            self.active_panel == ActivePanel::Local,
-            &self.local,
-        );
+        panels::render_panel(frame, local_area, "LOCAL", self.active_panel == ActivePanel::Local, &self.local);
 
         match self.sessions.active() {
             Some(session) => {
@@ -83,12 +73,7 @@ impl App {
                     }
                     _ => "REMOTE".to_string(),
                 };
-                panels::render_placeholder(
-                    frame,
-                    remote_area,
-                    &remote_title,
-                    self.active_panel == ActivePanel::Remote,
-                );
+                panels::render_placeholder(frame, remote_area, &remote_title, self.active_panel == ActivePanel::Remote);
             }
         }
     }
@@ -102,11 +87,7 @@ impl App {
             .sessions
             .iter()
             .map(|session| {
-                let marker = if Some(session.id) == active_id {
-                    '>'
-                } else {
-                    ' '
-                };
+                let marker = if Some(session.id) == active_id { '>' } else { ' ' };
                 format!("{marker}{}", session.entry.name)
             })
             .collect();
@@ -114,15 +95,9 @@ impl App {
     }
 
     fn render_connections(&self, frame: &mut Frame, area: Rect) {
-        let connected_names: std::collections::HashSet<&str> = self
-            .sessions
-            .iter()
-            .map(|session| session.entry.name.as_str())
-            .collect();
-        let active_name = self
-            .sessions
-            .active()
-            .map(|session| session.entry.name.as_str());
+        let connected_names: std::collections::HashSet<&str> =
+            self.sessions.iter().map(|session| session.entry.name.as_str()).collect();
+        let active_name = self.sessions.active().map(|session| session.entry.name.as_str());
         connections_list::render_connections_list(
             frame,
             area,
@@ -141,14 +116,9 @@ impl App {
 
     fn render_status(&self, frame: &mut Frame, area: Rect) {
         let (text, style) = match self.notifications.current() {
-            Some(notification) => (
-                notification.message.clone(),
-                notification_style(notification.severity),
-            ),
+            Some(notification) => (notification.message.clone(), notification_style(notification.severity)),
             None => match &self.planning {
-                Some((_, display_name)) => {
-                    (format!("Scanning {display_name}\u{2026}"), Style::default())
-                }
+                Some((_, display_name)) => (format!("Scanning {display_name}\u{2026}"), Style::default()),
                 None => match self.transfers.active() {
                     Some(job) => (self.transfer_status_text(job), Style::default()),
                     None => (build_hint_text(&self.key_bindings), Style::default()),
@@ -165,11 +135,7 @@ impl App {
             Direction::Download => "Downloading",
         };
         let queued = self.transfers.queued_count();
-        let suffix = if queued > 0 {
-            format!(" ({queued} queued)")
-        } else {
-            String::new()
-        };
+        let suffix = if queued > 0 { format!(" ({queued} queued)") } else { String::new() };
 
         match job.batch_id {
             Some(batch_id) => {
@@ -177,19 +143,14 @@ impl App {
                 let percent = if progress.total_bytes == 0 {
                     100
                 } else {
-                    ((progress.transferred_bytes as f64 / progress.total_bytes as f64) * 100.0)
-                        as u8
+                    ((progress.transferred_bytes as f64 / progress.total_bytes as f64) * 100.0) as u8
                 };
                 format!(
                     "{verb} {}: {}/{} files, {percent}%{suffix}",
                     job.display_name, progress.completed_files, progress.total_files
                 )
             }
-            None => format!(
-                "{verb} {}: {}%{suffix}",
-                job.display_name,
-                job.progress_percent()
-            ),
+            None => format!("{verb} {}: {}%{suffix}", job.display_name, job.progress_percent()),
         }
     }
 }
@@ -205,18 +166,12 @@ fn notification_style(severity: Severity) -> Style {
 /// Builds the key-hint line from the live bindings, so a remapped action
 /// shows its new key instead of a hardcoded default.
 fn build_hint_text(bindings: &input::KeyBindings) -> String {
-    let entries = [
-        (Action::Help, "Help"),
-        (Action::OpenConnections, "Connections"),
-        (Action::Quit, "Quit"),
-    ];
+    let entries = [(Action::Help, "Help"), (Action::OpenConnections, "Connections"), (Action::Quit, "Quit")];
 
     entries
         .into_iter()
         .filter_map(|(action, label)| {
-            bindings
-                .key_for(action)
-                .map(|spec| format!("{} {label}", input::format_key_spec(spec)))
+            bindings.key_for(action).map(|spec| format!("{} {label}", input::format_key_spec(spec)))
         })
         .collect::<Vec<_>>()
         .join("  ")

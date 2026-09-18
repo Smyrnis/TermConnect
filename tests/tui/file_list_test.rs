@@ -14,17 +14,9 @@ fn renders_entry_names() {
 
     let backend = TestBackend::new(30, 5);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|frame| render_file_list(frame, frame.area(), &panel, true))
-        .unwrap();
+    terminal.draw(|frame| render_file_list(frame, frame.area(), &panel, true)).unwrap();
 
-    let content: String = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
+    let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
 
     assert!(content.contains("readme.txt"));
 }
@@ -71,17 +63,9 @@ fn wide_panel_shows_size_and_permissions_columns() {
 
     let backend = TestBackend::new(60, 5);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|frame| render_file_list(frame, frame.area(), &panel, true))
-        .unwrap();
+    terminal.draw(|frame| render_file_list(frame, frame.area(), &panel, true)).unwrap();
 
-    let content: String = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
+    let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
 
     assert!(content.contains('5')); // the 5-byte size
     assert!(content.contains('r') || content.contains('-')); // permissions column present
@@ -95,17 +79,9 @@ fn narrow_panel_hides_size_and_permissions_columns() {
 
     let backend = TestBackend::new(20, 5);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal
-        .draw(|frame| render_file_list(frame, frame.area(), &panel, true))
-        .unwrap();
+    terminal.draw(|frame| render_file_list(frame, frame.area(), &panel, true)).unwrap();
 
-    let content: String = terminal
-        .backend()
-        .buffer()
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
+    let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
 
     assert!(content.contains("a.txt"));
     assert!(!content.contains("120.6K")); // the size string must not appear

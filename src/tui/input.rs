@@ -228,44 +228,16 @@ impl KeyBindings {
         bind(Action::Delete, KeyCode::F(8), KeyModifiers::NONE);
         bind(Action::OpenConnections, KeyCode::F(9), KeyModifiers::NONE);
         bind(Action::AddConnection, KeyCode::F(6), KeyModifiers::NONE);
-        bind(
-            Action::DeleteConnection,
-            KeyCode::Delete,
-            KeyModifiers::NONE,
-        );
+        bind(Action::DeleteConnection, KeyCode::Delete, KeyModifiers::NONE);
         bind(Action::Back, KeyCode::Esc, KeyModifiers::NONE);
         bind(Action::Refresh, KeyCode::Char('r'), KeyModifiers::CONTROL);
-        bind(
-            Action::CancelTransfer,
-            KeyCode::Char('c'),
-            KeyModifiers::CONTROL,
-        );
-        bind(
-            Action::ToggleHidden,
-            KeyCode::Char('h'),
-            KeyModifiers::CONTROL,
-        );
+        bind(Action::CancelTransfer, KeyCode::Char('c'), KeyModifiers::CONTROL);
+        bind(Action::ToggleHidden, KeyCode::Char('h'), KeyModifiers::CONTROL);
         bind(Action::CycleSort, KeyCode::Char('s'), KeyModifiers::CONTROL);
-        bind(
-            Action::BookmarkHere,
-            KeyCode::Char('d'),
-            KeyModifiers::CONTROL,
-        );
-        bind(
-            Action::OpenBookmarks,
-            KeyCode::Char('b'),
-            KeyModifiers::CONTROL,
-        );
-        bind(
-            Action::OpenSearch,
-            KeyCode::Char('f'),
-            KeyModifiers::CONTROL,
-        );
-        bind(
-            Action::CycleSession,
-            KeyCode::Char('n'),
-            KeyModifiers::CONTROL,
-        );
+        bind(Action::BookmarkHere, KeyCode::Char('d'), KeyModifiers::CONTROL);
+        bind(Action::OpenBookmarks, KeyCode::Char('b'), KeyModifiers::CONTROL);
+        bind(Action::OpenSearch, KeyCode::Char('f'), KeyModifiers::CONTROL);
+        bind(Action::CycleSession, KeyCode::Char('n'), KeyModifiers::CONTROL);
         bind(Action::Help, KeyCode::F(1), KeyModifiers::NONE);
 
         Self(map)
@@ -290,18 +262,12 @@ impl KeyBindings {
             let spec = match parse_key_spec(key_str) {
                 Ok(spec) => spec,
                 Err(err) => {
-                    warnings.push(format!(
-                        "invalid key \"{key_str}\" for \"{action_name}\": {err}"
-                    ));
+                    warnings.push(format!("invalid key \"{key_str}\" for \"{action_name}\": {err}"));
                     continue;
                 }
             };
 
-            if let Some((conflicting, _)) = bindings
-                .0
-                .iter()
-                .find(|(a, s)| **a != action && **s == spec)
-            {
+            if let Some((conflicting, _)) = bindings.0.iter().find(|(a, s)| **a != action && **s == spec) {
                 warnings.push(format!(
                     "key \"{key_str}\" is already bound to \"{}\"; \"{action_name}\" now overrides it",
                     conflicting.name()
@@ -312,9 +278,7 @@ impl KeyBindings {
             // action currently bound to the same key before inserting the
             // override, so `map_key` can't land on a nondeterministic choice
             // between two actions sharing an identical `KeySpec`.
-            bindings.0.retain(|existing_action, existing_spec| {
-                *existing_action == action || *existing_spec != spec
-            });
+            bindings.0.retain(|existing_action, existing_spec| *existing_action == action || *existing_spec != spec);
             bindings.0.insert(action, spec);
         }
 
@@ -322,15 +286,8 @@ impl KeyBindings {
     }
 
     pub fn map_key(&self, key: KeyEvent) -> Action {
-        let spec = KeySpec {
-            code: key.code,
-            modifiers: key.modifiers,
-        };
-        self.0
-            .iter()
-            .find(|(_, bound)| **bound == spec)
-            .map(|(action, _)| *action)
-            .unwrap_or(Action::Noop)
+        let spec = KeySpec { code: key.code, modifiers: key.modifiers };
+        self.0.iter().find(|(_, bound)| **bound == spec).map(|(action, _)| *action).unwrap_or(Action::Noop)
     }
 
     /// The key currently bound to `action`, for the help overlay (Task 16)

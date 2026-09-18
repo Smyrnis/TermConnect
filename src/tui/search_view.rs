@@ -25,13 +25,7 @@ pub enum SearchOutcome {
 
 impl SearchView {
     pub fn new() -> Self {
-        Self {
-            pattern: String::new(),
-            cursor: 0,
-            results: Vec::new(),
-            selected: 0,
-            truncated: false,
-        }
+        Self { pattern: String::new(), cursor: 0, results: Vec::new(), selected: 0, truncated: false }
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> SearchOutcome {
@@ -112,11 +106,7 @@ impl SearchView {
     }
 
     fn byte_index_for(&self, char_index: usize) -> usize {
-        self.pattern
-            .char_indices()
-            .nth(char_index)
-            .map(|(byte, _)| byte)
-            .unwrap_or(self.pattern.len())
+        self.pattern.char_indices().nth(char_index).map(|(byte, _)| byte).unwrap_or(self.pattern.len())
     }
 }
 
@@ -134,38 +124,20 @@ pub fn render_search(frame: &mut Frame, area: Rect, view: &SearchView) {
         .iter()
         .enumerate()
         .map(|(i, ch)| {
-            let style = if i == view.cursor {
-                Style::default().add_modifier(Modifier::REVERSED)
-            } else {
-                Style::default()
-            };
+            let style =
+                if i == view.cursor { Style::default().add_modifier(Modifier::REVERSED) } else { Style::default() };
             Span::styled(ch.to_string(), style)
         })
         .collect();
     if view.cursor >= chars.len() {
-        spans.push(Span::styled(
-            " ",
-            Style::default().add_modifier(Modifier::REVERSED),
-        ));
+        spans.push(Span::styled(" ", Style::default().add_modifier(Modifier::REVERSED)));
     }
-    let pattern_block = Block::default()
-        .title("Search (Esc to close, Ctrl+C to cancel)")
-        .borders(Borders::ALL);
-    frame.render_widget(
-        Paragraph::new(Line::from(spans)).block(pattern_block),
-        rows[0],
-    );
+    let pattern_block = Block::default().title("Search (Esc to close, Ctrl+C to cancel)").borders(Borders::ALL);
+    frame.render_widget(Paragraph::new(Line::from(spans)).block(pattern_block), rows[0]);
 
-    let title = if view.truncated {
-        "Results (truncated)"
-    } else {
-        "Results"
-    };
-    let items: Vec<ListItem> = view
-        .results
-        .iter()
-        .map(|entry| ListItem::new(entry.path.display().to_string()))
-        .collect();
+    let title = if view.truncated { "Results (truncated)" } else { "Results" };
+    let items: Vec<ListItem> =
+        view.results.iter().map(|entry| ListItem::new(entry.path.display().to_string())).collect();
     let mut state = ListState::default();
     if !view.results.is_empty() {
         state.select(Some(view.selected));

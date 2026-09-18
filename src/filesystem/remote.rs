@@ -68,11 +68,7 @@ fn remove_dir_recursive<'a>(sftp: &'a SftpSession, path: &'a str) -> BoxFuture<'
 }
 
 pub(crate) fn join(parent: &str, name: &str) -> String {
-    if parent.ends_with('/') {
-        format!("{parent}{name}")
-    } else {
-        format!("{parent}/{name}")
-    }
+    if parent.ends_with('/') { format!("{parent}{name}") } else { format!("{parent}/{name}") }
 }
 
 #[cfg(test)]

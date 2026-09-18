@@ -21,12 +21,7 @@ pub enum ListOutcome {
 
 impl ListDialog {
     pub fn new(title: impl Into<String>, items: Vec<String>) -> Self {
-        Self {
-            title: title.into(),
-            items,
-            cursor: 0,
-            removable: false,
-        }
+        Self { title: title.into(), items, cursor: 0, removable: false }
     }
 
     /// Enables `F8`-to-remove — used for the bookmarks menu, not for a
@@ -49,9 +44,7 @@ impl ListDialog {
                 ListOutcome::Pending
             }
             KeyCode::Enter if !self.items.is_empty() => ListOutcome::Selected(self.cursor),
-            KeyCode::F(8) if self.removable && !self.items.is_empty() => {
-                ListOutcome::Removed(self.cursor)
-            }
+            KeyCode::F(8) if self.removable && !self.items.is_empty() => ListOutcome::Removed(self.cursor),
             KeyCode::Esc => ListOutcome::Cancelled,
             _ => ListOutcome::Pending,
         }
@@ -73,11 +66,7 @@ pub fn render_list(frame: &mut Frame, area: Rect, dialog: &ListDialog) {
     let items: Vec<ListItem> = if dialog.items.is_empty() {
         vec![ListItem::new("(empty)")]
     } else {
-        dialog
-            .items
-            .iter()
-            .map(|item| ListItem::new(item.as_str()))
-            .collect()
+        dialog.items.iter().map(|item| ListItem::new(item.as_str())).collect()
     };
 
     let mut state = ListState::default();
@@ -85,21 +74,15 @@ pub fn render_list(frame: &mut Frame, area: Rect, dialog: &ListDialog) {
         state.select(Some(dialog.cursor));
     }
 
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    let list = List::new(items).block(block).highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
     frame.render_widget(Clear, popup);
     frame.render_stateful_widget(list, popup, &mut state);
 }
 
 fn centered_popup(area: Rect, width: u16, height: u16) -> Rect {
-    let [popup] = Layout::vertical([Constraint::Length(height)])
-        .flex(Flex::Center)
-        .areas(area);
-    let [popup] = Layout::horizontal([Constraint::Length(width.min(area.width))])
-        .flex(Flex::Center)
-        .areas(popup);
+    let [popup] = Layout::vertical([Constraint::Length(height)]).flex(Flex::Center).areas(area);
+    let [popup] = Layout::horizontal([Constraint::Length(width.min(area.width))]).flex(Flex::Center).areas(popup);
     popup
 }
 

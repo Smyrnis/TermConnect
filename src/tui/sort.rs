@@ -22,10 +22,7 @@ pub struct SortSpec {
 
 impl Default for SortSpec {
     fn default() -> Self {
-        Self {
-            key: SortKey::Name,
-            order: SortOrder::Ascending,
-        }
+        Self { key: SortKey::Name, order: SortOrder::Ascending }
     }
 }
 
@@ -34,22 +31,10 @@ impl SortSpec {
     /// Size↓ → Name↑, used by `Ctrl+S`.
     pub fn cycled(self) -> SortSpec {
         match (self.key, self.order) {
-            (SortKey::Name, SortOrder::Ascending) => SortSpec {
-                key: SortKey::Name,
-                order: SortOrder::Descending,
-            },
-            (SortKey::Name, SortOrder::Descending) => SortSpec {
-                key: SortKey::Size,
-                order: SortOrder::Ascending,
-            },
-            (SortKey::Size, SortOrder::Ascending) => SortSpec {
-                key: SortKey::Size,
-                order: SortOrder::Descending,
-            },
-            (SortKey::Size, SortOrder::Descending) => SortSpec {
-                key: SortKey::Name,
-                order: SortOrder::Ascending,
-            },
+            (SortKey::Name, SortOrder::Ascending) => SortSpec { key: SortKey::Name, order: SortOrder::Descending },
+            (SortKey::Name, SortOrder::Descending) => SortSpec { key: SortKey::Size, order: SortOrder::Ascending },
+            (SortKey::Size, SortOrder::Ascending) => SortSpec { key: SortKey::Size, order: SortOrder::Descending },
+            (SortKey::Size, SortOrder::Descending) => SortSpec { key: SortKey::Name, order: SortOrder::Ascending },
         }
     }
 }

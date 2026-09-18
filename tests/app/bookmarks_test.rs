@@ -3,12 +3,7 @@ use crossterm::event::{KeyCode, KeyEventState, KeyModifiers};
 use std::fs;
 
 fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers: KeyModifiers::NONE,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
+    KeyEvent { code, modifiers: KeyModifiers::NONE, kind: KeyEventKind::Press, state: KeyEventState::NONE }
 }
 
 fn app_in_temp_dir() -> (tempfile::TempDir, App) {
@@ -66,11 +61,7 @@ fn selecting_a_local_bookmark_navigates_the_local_panel() {
     let child = dir.path().join("child");
     fs::create_dir(&child).unwrap();
     let mut app = App::at(dir.path().to_path_buf()).unwrap();
-    app.bookmarks.add(config::bookmarks::Bookmark {
-        label: "child".to_string(),
-        path: child.clone(),
-        host: None,
-    });
+    app.bookmarks.add(config::bookmarks::Bookmark { label: "child".to_string(), path: child.clone(), host: None });
     app.apply_action(Action::OpenBookmarks);
 
     app.apply_dialog_key(key(KeyCode::Enter));
@@ -90,20 +81,13 @@ fn selecting_a_remote_bookmark_without_a_connection_warns_instead_of_navigating(
 
     app.apply_dialog_key(key(KeyCode::Enter));
 
-    assert_eq!(
-        app.notifications.current().unwrap().message,
-        "Connect to production first"
-    );
+    assert_eq!(app.notifications.current().unwrap().message, "Connect to production first");
 }
 
 #[test]
 fn removing_a_bookmark_deletes_it_from_the_list() {
     let (_dir, mut app) = app_in_temp_dir();
-    app.bookmarks.add(config::bookmarks::Bookmark {
-        label: "a".to_string(),
-        path: PathBuf::from("/a"),
-        host: None,
-    });
+    app.bookmarks.add(config::bookmarks::Bookmark { label: "a".to_string(), path: PathBuf::from("/a"), host: None });
     app.apply_action(Action::OpenBookmarks);
 
     app.apply_dialog_key(key(KeyCode::F(8)));

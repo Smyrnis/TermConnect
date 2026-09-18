@@ -8,11 +8,8 @@ use crate::tui::panels::{PanelState, Row};
 pub fn render_file_list(frame: &mut Frame, area: Rect, panel: &PanelState, is_active: bool) {
     let columns = Columns::for_width(area.width);
 
-    let items: Vec<ListItem> = panel
-        .rows()
-        .iter()
-        .map(|row| ListItem::new(row_label(row, is_selected(panel, row), columns)))
-        .collect();
+    let items: Vec<ListItem> =
+        panel.rows().iter().map(|row| ListItem::new(row_label(row, is_selected(panel, row), columns))).collect();
 
     let mut highlight_style = Style::default().add_modifier(Modifier::REVERSED);
     if !is_active {
@@ -57,11 +54,7 @@ impl Columns {
             overhead += 1 + PERMISSIONS_WIDTH;
         }
 
-        Columns {
-            name_width: width.saturating_sub(overhead).max(4),
-            show_size,
-            show_permissions,
-        }
+        Columns { name_width: width.saturating_sub(overhead).max(4), show_size, show_permissions }
     }
 }
 
@@ -145,9 +138,7 @@ pub fn format_permissions(mode: Option<u32>) -> String {
         (0o001, 'x'),
     ];
 
-    BITS.iter()
-        .map(|(bit, ch)| if mode & bit != 0 { *ch } else { '-' })
-        .collect()
+    BITS.iter().map(|(bit, ch)| if mode & bit != 0 { *ch } else { '-' }).collect()
 }
 
 #[cfg(test)]

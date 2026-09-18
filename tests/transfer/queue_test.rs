@@ -12,12 +12,7 @@ fn queue_with_one_job(queue: &mut TransferQueue) -> u64 {
     )
 }
 
-fn queue_with_a_batch_job(
-    queue: &mut TransferQueue,
-    batch_id: u64,
-    name: &str,
-    total_bytes: u64,
-) -> u64 {
+fn queue_with_a_batch_job(queue: &mut TransferQueue, batch_id: u64, name: &str, total_bytes: u64) -> u64 {
     queue.enqueue(
         1,
         Direction::Upload,
@@ -125,22 +120,13 @@ fn fail_queued_for_session_marks_only_that_sessions_queued_jobs() {
     let count = queue.fail_queued_for_session(1, "session disconnected");
 
     assert_eq!(count, 2);
-    assert_eq!(
-        queue.get(a1).unwrap().status,
-        JobStatus::Failed("session disconnected".to_string())
-    );
-    assert_eq!(
-        queue.get(a2).unwrap().status,
-        JobStatus::Failed("session disconnected".to_string())
-    );
+    assert_eq!(queue.get(a1).unwrap().status, JobStatus::Failed("session disconnected".to_string()));
+    assert_eq!(queue.get(a2).unwrap().status, JobStatus::Failed("session disconnected".to_string()));
     // Session 2's job is untouched.
     assert_eq!(queue.get(other).unwrap().status, JobStatus::Queued);
     // The in-progress job for session 1 is left for the caller to
     // cancel separately, not force-failed here.
-    assert_eq!(
-        queue.get(in_progress).unwrap().status,
-        JobStatus::InProgress
-    );
+    assert_eq!(queue.get(in_progress).unwrap().status, JobStatus::InProgress);
 }
 
 #[test]
@@ -179,10 +165,7 @@ fn cancel_batch_marks_only_queued_jobs_in_that_batch() {
     let count = queue.cancel_batch(batch_id);
 
     assert_eq!(count, 1);
-    assert_eq!(
-        queue.get(in_progress).unwrap().status,
-        JobStatus::InProgress
-    );
+    assert_eq!(queue.get(in_progress).unwrap().status, JobStatus::InProgress);
     assert_eq!(queue.get(queued).unwrap().status, JobStatus::Cancelled);
     assert_eq!(queue.get(other).unwrap().status, JobStatus::Queued);
 }

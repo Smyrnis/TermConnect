@@ -3,12 +3,7 @@ use crossterm::event::{KeyCode, KeyEventState, KeyModifiers};
 use std::fs;
 
 fn key(code: KeyCode) -> KeyEvent {
-    KeyEvent {
-        code,
-        modifiers: KeyModifiers::NONE,
-        kind: KeyEventKind::Press,
-        state: KeyEventState::NONE,
-    }
+    KeyEvent { code, modifiers: KeyModifiers::NONE, kind: KeyEventKind::Press, state: KeyEventState::NONE }
 }
 
 fn app_in_temp_dir() -> (tempfile::TempDir, App) {
