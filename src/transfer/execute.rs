@@ -111,14 +111,16 @@ async fn finalize_local(result: &Result<TransferOutcome>, part_path: &Path, fina
 }
 
 /// The remote counterpart of `finalize_local`: renamed to `final_path` on
-/// success via `sftp.rename`, otherwise removed via `sftp.remove_file`
-/// (best-effort — an already-gone part file is not an error).
+/// success (overwriting an existing file there, e.g. a re-upload of an
+/// edited file — see `filesystem::remote::rename_overwriting`), otherwise
+/// removed via `sftp.remove_file` (best-effort — an already-gone part file
+/// is not an error).
 async fn finalize_remote(
     result: &Result<TransferOutcome>, sftp: &SftpSession, part_path: &str, final_path: &str,
 ) -> Result<()> {
     match result {
         Ok(TransferOutcome::Completed) => {
-            sftp.rename(part_path, final_path).await?;
+            crate::filesystem::remote::rename_overwriting(sftp, part_path, final_path).await?;
         }
         _ => {
             let _ = sftp.remove_file(part_path).await;
