@@ -25,7 +25,13 @@ pub async fn list(sftp: &SftpSession, path: &str) -> Result<Vec<Entry>> {
             metadata.is_dir()
         };
 
-        entries.push(Entry { path: PathBuf::from(entry_path), name, is_dir, size: metadata.len(), permissions: metadata.permissions });
+        entries.push(Entry {
+            path: PathBuf::from(entry_path),
+            name,
+            is_dir,
+            size: metadata.len(),
+            permissions: metadata.permissions,
+        });
     }
 
     Ok(entries)

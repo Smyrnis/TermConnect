@@ -48,6 +48,33 @@ fn save_then_load_round_trips_including_a_remote_bookmark() {
 }
 
 #[test]
+fn save_to_leaves_the_original_file_untouched_if_the_write_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("bookmarks.toml");
+    let mut original = Bookmarks::default();
+    original.add(sample());
+    save_to(&path, &original).unwrap();
+
+    // Read-only directory: creating a new temp file inside it fails,
+    // simulating a crash/disk-full partway through a write.
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = fs::metadata(dir.path()).unwrap().permissions();
+    perms.set_mode(0o500);
+    fs::set_permissions(dir.path(), perms.clone()).unwrap();
+
+    let mut updated = original.clone();
+    updated.add(Bookmark { label: "extra".to_string(), path: PathBuf::from("/tmp"), host: None });
+    let result = save_to(&path, &updated);
+
+    perms.set_mode(0o700);
+    fs::set_permissions(dir.path(), perms).unwrap();
+
+    assert!(result.is_err());
+    let (loaded, _) = load_from(&path).unwrap();
+    assert_eq!(loaded.len(), 1);
+}
+
+#[test]
 fn load_from_recovers_to_empty_on_malformed_toml() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("bookmarks.toml");

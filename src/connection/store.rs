@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -74,25 +74,31 @@ fn read_config_file(path: &Path) -> Result<ConfigFile> {
     }
 }
 
-/// Rewrites the whole file — small and human-editable, so there's no need
-/// for incremental writes — then restricts it to owner read/write only,
-/// since a profile may now carry a plaintext password.
+/// Writes the whole file atomically — small and human-editable, so
+/// there's no need for incremental writes — by writing to a temp file in
+/// the same directory and renaming it into place, so a crash or full disk
+/// mid-write leaves the previous, still-intact file at `path` rather than
+/// a truncated or empty one. Restricted to owner read/write only, since a
+/// profile may now carry a plaintext password.
 fn write_config_file(path: &Path, file: &ConfigFile) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    // Open (or create) with 0600 from the very first `open(2)` call, so a
-    // freshly-created file — which may carry a plaintext password — is
-    // never briefly readable at the process umask (e.g. 0644) before the
-    // permissions get locked down below.
-    let mut handle = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
+    let temp_path = {
+        let mut name = path.as_os_str().to_owned();
+        name.push(".tmp");
+        PathBuf::from(name)
+    };
+    // Open (or create) with 0600 from the very first `open(2)` call, so
+    // the temp file — which may carry a plaintext password — is never
+    // briefly readable at the process umask (e.g. 0644) before the
+    // permissions get locked down. `rename` below carries this file's
+    // permissions to the final path, so no separate `set_permissions`
+    // step is needed afterward.
+    let mut handle = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&temp_path)?;
     handle.write_all(toml::to_string_pretty(file)?.as_bytes())?;
-    // Still needed for a file that already existed at looser permissions
-    // (e.g. from before this fix, or manual editing) — `.mode(0o600)` above
-    // only governs the permissions used at creation time.
-    let mut permissions = fs::metadata(path)?.permissions();
-    permissions.set_mode(0o600);
-    fs::set_permissions(path, permissions)?;
+    drop(handle);
+    fs::rename(&temp_path, path)?;
     Ok(())
 }
 

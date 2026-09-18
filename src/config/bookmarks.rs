@@ -80,14 +80,23 @@ fn load_from(path: &Path) -> Result<(Bookmarks, Vec<super::StartupWarning>)> {
     }
 }
 
-/// Rewrites the whole file — small and human-editable, so there's no need
-/// for incremental writes.
+/// Writes the whole file atomically — small and human-editable, so
+/// there's no need for incremental writes — by writing to a temp file in
+/// the same directory and renaming it into place, so a crash or full disk
+/// mid-write leaves the previous, still-intact file rather than a
+/// truncated or empty one.
 pub(crate) fn save_to(path: &Path, bookmarks: &Bookmarks) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
+    let temp_path = {
+        let mut name = path.as_os_str().to_owned();
+        name.push(".tmp");
+        PathBuf::from(name)
+    };
     let file = BookmarksFile { bookmark: bookmarks.0.clone() };
-    fs::write(path, toml::to_string_pretty(&file)?)?;
+    fs::write(&temp_path, toml::to_string_pretty(&file)?)?;
+    fs::rename(&temp_path, path)?;
     Ok(())
 }
 
