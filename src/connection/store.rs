@@ -4,8 +4,10 @@ use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
+
+use crate::config;
 
 use super::profile::ConnectionProfile;
 
@@ -15,12 +17,13 @@ struct ConfigFile {
     connections: BTreeMap<String, ConnectionProfile>,
 }
 
+/// Connections live in their own file, separate from `config.toml`'s
+/// `[panel]`/`[keys]` settings — `write_config_file` below rewrites this
+/// file wholesale on every save/delete, which would silently drop those
+/// sections if they shared a file. Resolved via `config::config_dir` so
+/// profiles and settings always land under the same directory.
 pub fn config_path() -> Result<PathBuf> {
-    let home = std::env::var("HOME").context("HOME environment variable is not set")?;
-    Ok(PathBuf::from(home)
-        .join(".config")
-        .join("termconnect")
-        .join("config.toml"))
+    Ok(config::config_dir()?.join("connections.toml"))
 }
 
 /// Loads saved connection profiles. A missing config file is not an error —

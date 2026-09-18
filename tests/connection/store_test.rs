@@ -1,5 +1,19 @@
 use super::*;
 
+/// Connections must live in their own file, resolved the same way
+/// `config::config_dir` resolves everything else (honoring
+/// `XDG_CONFIG_HOME`) — otherwise every profile save/delete rewrites
+/// whatever file `config::load` reads settings from, silently dropping
+/// `[panel]`/`[keys]`, and a machine with `XDG_CONFIG_HOME` set ends up
+/// with profiles and settings in two different directories.
+#[test]
+fn config_path_is_connections_toml_under_config_dir() {
+    let path = config_path().unwrap();
+    let expected = crate::config::config_dir().unwrap().join("connections.toml");
+
+    assert_eq!(path, expected);
+}
+
 #[test]
 fn load_from_a_missing_file_returns_an_empty_list() {
     let dir = tempfile::tempdir().unwrap();
