@@ -145,9 +145,14 @@ impl App {
                 notification.message.clone(),
                 notification_style(notification.severity),
             ),
-            None => match self.transfers.active() {
-                Some(job) => (self.transfer_status_text(job), Style::default()),
-                None => (build_hint_text(&self.key_bindings), Style::default()),
+            None => match &self.planning {
+                Some((_, display_name)) => {
+                    (format!("Scanning {display_name}\u{2026}"), Style::default())
+                }
+                None => match self.transfers.active() {
+                    Some(job) => (self.transfer_status_text(job), Style::default()),
+                    None => (build_hint_text(&self.key_bindings), Style::default()),
+                },
             },
         };
 
@@ -165,11 +170,27 @@ impl App {
         } else {
             String::new()
         };
-        format!(
-            "{verb} {}: {}%{suffix}",
-            job.display_name,
-            job.progress_percent()
-        )
+
+        match job.batch_id {
+            Some(batch_id) => {
+                let progress = self.transfers.batch_progress(batch_id);
+                let percent = if progress.total_bytes == 0 {
+                    100
+                } else {
+                    ((progress.transferred_bytes as f64 / progress.total_bytes as f64) * 100.0)
+                        as u8
+                };
+                format!(
+                    "{verb} {}: {}/{} files, {percent}%{suffix}",
+                    job.display_name, progress.completed_files, progress.total_files
+                )
+            }
+            None => format!(
+                "{verb} {}: {}%{suffix}",
+                job.display_name,
+                job.progress_percent()
+            ),
+        }
     }
 }
 

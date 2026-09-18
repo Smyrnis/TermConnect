@@ -20,6 +20,24 @@ fn sample_connection_entry() -> ConnectionEntry {
     }
 }
 
+fn render_status_text(app: &App) -> String {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    let backend = TestBackend::new(60, 1);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal
+        .draw(|frame| app.render_status(frame, frame.area()))
+        .unwrap();
+    terminal
+        .backend()
+        .buffer()
+        .content()
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect()
+}
+
 #[test]
 fn failed_status_does_not_clobber_the_title_when_a_session_is_active() {
     use ratatui::Terminal;
@@ -73,4 +91,70 @@ fn failed_status_still_shows_when_there_is_no_active_session() {
         .collect();
 
     assert!(content.contains("Connection failed"));
+}
+
+#[test]
+fn render_status_shows_scanning_while_planning() {
+    let (_dir, mut app) = app_in_temp_dir();
+    app.planning = Some((1, "myfolder".to_string()));
+
+    assert!(render_status_text(&app).contains("Scanning myfolder"));
+}
+
+#[test]
+fn transfer_status_text_shows_batch_progress_for_a_batch_job() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let batch_id = app.transfers.start_batch();
+    let active = app.transfers.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from("/local/a.txt"),
+        "/remote/a.txt".to_string(),
+        "a.txt".to_string(),
+        100,
+        Some(batch_id),
+    );
+    app.transfers.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from("/local/b.txt"),
+        "/remote/b.txt".to_string(),
+        "b.txt".to_string(),
+        100,
+        Some(batch_id),
+    );
+    {
+        let job = app.transfers.get_mut(active).unwrap();
+        job.status = JobStatus::InProgress;
+        job.transferred_bytes = 50;
+    }
+
+    let text = render_status_text(&app);
+
+    assert!(text.contains("0/2 files"));
+    assert!(text.contains("25%"));
+}
+
+#[test]
+fn transfer_status_text_is_unchanged_for_a_non_batch_job() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let active = app.transfers.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from("/local/a.txt"),
+        "/remote/a.txt".to_string(),
+        "a.txt".to_string(),
+        100,
+        None,
+    );
+    {
+        let job = app.transfers.get_mut(active).unwrap();
+        job.status = JobStatus::InProgress;
+        job.transferred_bytes = 50;
+    }
+
+    let text = render_status_text(&app);
+
+    assert!(text.contains("a.txt: 50%"));
+    assert!(!text.contains("files"));
 }
