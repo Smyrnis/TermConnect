@@ -287,6 +287,11 @@ impl App {
         if let Some(cancel) = &self.active_transfer_cancel {
             cancel.store(true, Ordering::Relaxed);
         }
+        if let Some(job) = self.transfers.active()
+            && let Some(batch_id) = job.batch_id
+        {
+            self.transfers.cancel_batch(batch_id);
+        }
     }
 }
 

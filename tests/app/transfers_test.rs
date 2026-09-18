@@ -1,6 +1,8 @@
 use super::*;
 use crate::connection::ConnectionSource;
 use crate::transfer::plan::{DirectoryPlan, PlannedFile};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 fn app_in_temp_dir() -> (tempfile::TempDir, App) {
     let dir = tempfile::tempdir().unwrap();
@@ -152,4 +154,67 @@ fn plan_failed_clears_planning_and_shows_an_error() {
     let notification = app.notifications.current().unwrap();
     assert_eq!(notification.severity, Severity::Error);
     assert_eq!(notification.message, "Copy failed: permission denied");
+}
+
+#[test]
+fn cancel_active_transfer_cancels_every_other_queued_job_in_the_same_batch() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let batch_id = app.transfers.start_batch();
+    let active = app.transfers.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from("/local/a.txt"),
+        "/remote/a.txt".to_string(),
+        "a.txt".to_string(),
+        10,
+        Some(batch_id),
+    );
+    let queued = app.transfers.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from("/local/b.txt"),
+        "/remote/b.txt".to_string(),
+        "b.txt".to_string(),
+        10,
+        Some(batch_id),
+    );
+    app.transfers.get_mut(active).unwrap().status = JobStatus::InProgress;
+    let cancel = Arc::new(AtomicBool::new(false));
+    app.active_transfer_cancel = Some(cancel.clone());
+
+    app.cancel_active_transfer();
+
+    assert!(cancel.load(Ordering::Relaxed));
+    assert_eq!(
+        app.transfers.get(queued).unwrap().status,
+        JobStatus::Cancelled
+    );
+    // The in-flight job is untouched here — it finishes cancelling
+    // through the normal TransferEvent::Finished path once its own
+    // AtomicBool is observed, not by having its status flipped directly.
+    assert_eq!(
+        app.transfers.get(active).unwrap().status,
+        JobStatus::InProgress
+    );
+}
+
+#[test]
+fn cancel_active_transfer_is_a_plain_cancel_for_a_non_batch_job() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let active = app.transfers.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from("/local/a.txt"),
+        "/remote/a.txt".to_string(),
+        "a.txt".to_string(),
+        10,
+        None,
+    );
+    app.transfers.get_mut(active).unwrap().status = JobStatus::InProgress;
+    let cancel = Arc::new(AtomicBool::new(false));
+    app.active_transfer_cancel = Some(cancel.clone());
+
+    app.cancel_active_transfer();
+
+    assert!(cancel.load(Ordering::Relaxed));
 }
