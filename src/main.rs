@@ -1,5 +1,12 @@
 use anyhow::Result;
 
+// File permissions (connection/store.rs, config/bookmarks.rs) and the F4
+// terminal handoff (terminal.rs) both use std::os::unix APIs directly, so
+// this only builds on Unix-like platforms — fail early with a clear
+// message rather than a wall of missing-type errors on Windows.
+#[cfg(not(unix))]
+compile_error!("termconnect only supports Unix-like platforms (Linux/macOS)");
+
 mod app;
 mod config;
 mod connection;
