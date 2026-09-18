@@ -12,6 +12,23 @@ fn queue_with_one_job(queue: &mut TransferQueue) -> u64 {
     )
 }
 
+fn queue_with_a_batch_job(
+    queue: &mut TransferQueue,
+    batch_id: u64,
+    name: &str,
+    total_bytes: u64,
+) -> u64 {
+    queue.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from(format!("/local/{name}")),
+        format!("/remote/{name}"),
+        name.to_string(),
+        total_bytes,
+        Some(batch_id),
+    )
+}
+
 #[test]
 fn enqueue_assigns_increasing_ids() {
     let mut queue = TransferQueue::new();
@@ -124,4 +141,48 @@ fn fail_queued_for_session_marks_only_that_sessions_queued_jobs() {
         queue.get(in_progress).unwrap().status,
         JobStatus::InProgress
     );
+}
+
+#[test]
+fn batch_progress_aggregates_across_every_job_in_the_batch() {
+    let mut queue = TransferQueue::new();
+    let batch_id = queue.start_batch();
+    let first = queue_with_a_batch_job(&mut queue, batch_id, "a.txt", 100);
+    let second = queue_with_a_batch_job(&mut queue, batch_id, "b.txt", 200);
+    // A job in a different batch must not be counted.
+    let other_batch = queue.start_batch();
+    queue_with_a_batch_job(&mut queue, other_batch, "c.txt", 999);
+
+    queue.get_mut(first).unwrap().status = JobStatus::Completed;
+    queue.get_mut(first).unwrap().transferred_bytes = 100;
+    queue.get_mut(second).unwrap().status = JobStatus::InProgress;
+    queue.get_mut(second).unwrap().transferred_bytes = 50;
+
+    let progress = queue.batch_progress(batch_id);
+
+    assert_eq!(progress.total_files, 2);
+    assert_eq!(progress.completed_files, 1);
+    assert_eq!(progress.total_bytes, 300);
+    assert_eq!(progress.transferred_bytes, 150);
+}
+
+#[test]
+fn cancel_batch_marks_only_queued_jobs_in_that_batch() {
+    let mut queue = TransferQueue::new();
+    let batch_id = queue.start_batch();
+    let in_progress = queue_with_a_batch_job(&mut queue, batch_id, "a.txt", 100);
+    let queued = queue_with_a_batch_job(&mut queue, batch_id, "b.txt", 100);
+    let other_batch = queue.start_batch();
+    let other = queue_with_a_batch_job(&mut queue, other_batch, "c.txt", 100);
+    queue.get_mut(in_progress).unwrap().status = JobStatus::InProgress;
+
+    let count = queue.cancel_batch(batch_id);
+
+    assert_eq!(count, 1);
+    assert_eq!(
+        queue.get(in_progress).unwrap().status,
+        JobStatus::InProgress
+    );
+    assert_eq!(queue.get(queued).unwrap().status, JobStatus::Cancelled);
+    assert_eq!(queue.get(other).unwrap().status, JobStatus::Queued);
 }

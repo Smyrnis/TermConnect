@@ -5,6 +5,13 @@ use super::job::{Direction, JobStatus, TransferJob};
 /// Retries a failed job this many additional times before giving up.
 const MAX_ATTEMPTS: u32 = 3;
 
+pub struct BatchProgress {
+    pub total_files: usize,
+    pub completed_files: usize,
+    pub total_bytes: u64,
+    pub transferred_bytes: u64,
+}
+
 /// A sequential queue of transfers: at most one job runs at a time, and
 /// each finished job (successfully or not) makes room for the next queued
 /// one. Completed and permanently-failed jobs stay in the list as history
@@ -135,6 +142,44 @@ impl TransferQueue {
         } else {
             false
         }
+    }
+
+    /// Aggregates every job sharing `batch_id` — used to show combined
+    /// progress for a directory copy in the status line.
+    pub fn batch_progress(&self, batch_id: u64) -> BatchProgress {
+        let mut progress = BatchProgress {
+            total_files: 0,
+            completed_files: 0,
+            total_bytes: 0,
+            transferred_bytes: 0,
+        };
+
+        for job in self.jobs.iter().filter(|job| job.batch_id == Some(batch_id)) {
+            progress.total_files += 1;
+            progress.total_bytes += job.total_bytes;
+            progress.transferred_bytes += job.transferred_bytes;
+            if job.status == JobStatus::Completed {
+                progress.completed_files += 1;
+            }
+        }
+
+        progress
+    }
+
+    /// Marks every still-`Queued` job in `batch_id` as `Cancelled`, in the
+    /// same style as `fail_queued_for_session`. Leaves any `InProgress` job
+    /// alone — the caller cancels that one separately via its own
+    /// `AtomicBool`, exactly like a single-file transfer already does.
+    /// Returns how many jobs were cancelled.
+    pub fn cancel_batch(&mut self, batch_id: u64) -> usize {
+        let mut count = 0;
+        for job in self.jobs.iter_mut() {
+            if job.batch_id == Some(batch_id) && job.status == JobStatus::Queued {
+                job.status = JobStatus::Cancelled;
+                count += 1;
+            }
+        }
+        count
     }
 }
 
