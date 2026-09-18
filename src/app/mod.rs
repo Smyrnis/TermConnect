@@ -319,9 +319,10 @@ impl App {
 
 /// SFTP paths are always POSIX-style strings; since TermConnect targets
 /// Linux only, a `PathBuf`'s own `Display` already produces exactly that.
-fn path_to_remote_string(path: &std::path::Path) -> String {
-    path.to_string_lossy().into_owned()
-}
+/// Lives in `filesystem` (used by `transfer::plan` too, which can't
+/// depend back on `app`); re-exported here so every existing call site
+/// in this module tree keeps working unchanged.
+use crate::filesystem::path_to_remote_string;
 
 /// How long a search waits, idle, before actually dispatching — coalesces a
 /// burst of pattern-changing keystrokes into a single search per pause.

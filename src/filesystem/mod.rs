@@ -12,3 +12,9 @@ pub struct Entry {
     pub size: u64,
     pub permissions: Option<u32>,
 }
+
+/// SFTP paths are always POSIX-style strings; since TermConnect targets
+/// Linux only, a `PathBuf`'s own `Display` already produces exactly that.
+pub fn path_to_remote_string(path: &std::path::Path) -> String {
+    path.to_string_lossy().into_owned()
+}
