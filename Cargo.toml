@@ -2,6 +2,9 @@
 name = "termconnect"
 version = "0.1.0"
 edition = "2024"
+description = "A terminal file manager for browsing local files alongside SSH/SFTP connections"
+license = "MIT"
+repository = "https://github.com/Smyrnis/TermConnect"
 
 [dependencies]
 anyhow = "1.0.104"
