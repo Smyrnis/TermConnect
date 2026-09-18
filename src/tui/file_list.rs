@@ -2,6 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{List, ListItem, ListState};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::tui::panels::{PanelState, Row};
 
@@ -72,8 +73,12 @@ fn row_label(row: &Row, selected: bool, columns: Columns) -> String {
             let marker = if selected { '*' } else { ' ' };
             let suffix = if entry.is_dir { "/" } else { "" };
             let name = truncate_name(&format!("{}{suffix}", entry.name), columns.name_width);
+            // `{:<width$}` pads by char count, not terminal display width,
+            // so a CJK or emoji name would misalign every column after
+            // it — pad manually using the name's actual display width.
+            let padding = " ".repeat(columns.name_width.saturating_sub(UnicodeWidthStr::width(name.as_str())));
 
-            let mut label = format!("{marker} {name:<width$}", width = columns.name_width);
+            let mut label = format!("{marker} {name}{padding}");
             if columns.show_size {
                 let size = format_size(entry.size, entry.is_dir);
                 label = format!("{label} {size:>width$}", width = SIZE_WIDTH);
@@ -86,14 +91,27 @@ fn row_label(row: &Row, selected: bool, columns: Columns) -> String {
     }
 }
 
+/// Truncates `name` to fit within `max_width` terminal columns (not
+/// characters — a CJK or emoji character occupies 2 columns), appending
+/// an ellipsis when it doesn't fit.
 fn truncate_name(name: &str, max_width: usize) -> String {
-    if name.chars().count() <= max_width {
+    if UnicodeWidthStr::width(name) <= max_width {
         return name.to_string();
     }
     if max_width <= 1 {
         return "\u{2026}".to_string();
     }
-    let head: String = name.chars().take(max_width - 1).collect();
+
+    let mut head = String::new();
+    let mut width = 0;
+    for ch in name.chars() {
+        let ch_width = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width + ch_width > max_width - 1 {
+            break;
+        }
+        head.push(ch);
+        width += ch_width;
+    }
     format!("{head}\u{2026}")
 }
 
