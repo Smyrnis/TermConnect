@@ -1,6 +1,6 @@
 use super::*;
-use std::path::PathBuf;
 use crate::connection::ConnectionSource;
+use std::path::PathBuf;
 
 fn entry(name: &str) -> ConnectionEntry {
     ConnectionEntry {

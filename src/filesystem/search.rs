@@ -168,6 +168,10 @@ pub async fn search_remote(
     .await;
 }
 
+/// `search_remote`'s inner implementation, parameterized on `max_depth`/
+/// `max_results` so tests can exercise the truncation/depth-limit behavior
+/// without waiting on the real (much larger) `MAX_DEPTH`/`MAX_RESULTS`.
+#[allow(clippy::too_many_arguments)]
 async fn search_remote_with_limits(
     handle: &Handle<TermConnectHandler>,
     sftp: &SftpSession,

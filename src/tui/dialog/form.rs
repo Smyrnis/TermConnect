@@ -148,8 +148,7 @@ pub fn render_form(frame: &mut Frame, area: Rect, dialog: &FormDialog) {
         width_lines.push(error.as_str());
     }
     let width = super::content_width(&width_lines);
-    let height =
-        1 + dialog.fields.len() as u16 + if dialog.error.is_some() { 1 } else { 0 } + 2;
+    let height = 1 + dialog.fields.len() as u16 + if dialog.error.is_some() { 1 } else { 0 } + 2;
 
     let popup = centered_popup(area, width, height);
 

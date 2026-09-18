@@ -193,6 +193,7 @@ impl App {
         Ok(app)
     }
 
+    #[cfg(test)]
     fn at(path: PathBuf) -> Result<Self> {
         Self::at_with(
             path,

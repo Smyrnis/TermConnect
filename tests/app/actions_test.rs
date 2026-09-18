@@ -1,6 +1,6 @@
 use super::*;
-use std::fs;
 use crate::connection::ConnectionSource;
+use std::fs;
 
 fn app_in_temp_dir() -> (tempfile::TempDir, App) {
     let dir = tempfile::tempdir().unwrap();

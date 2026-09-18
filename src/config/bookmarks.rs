@@ -20,10 +20,15 @@ impl Bookmarks {
         self.0.iter()
     }
 
+    // Exercised by tests only for now; kept as normal collection API
+    // rather than test-gated, since a caller with a `Bookmarks` in hand
+    // reasonably expects `len`/`is_empty` alongside `iter`/`get`.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -84,10 +89,6 @@ fn load_from(path: &Path) -> Result<(Bookmarks, Vec<super::StartupWarning>)> {
 
 /// Rewrites the whole file — small and human-editable, so there's no need
 /// for incremental writes.
-pub fn save(bookmarks: &Bookmarks) -> Result<()> {
-    save_to(&bookmarks_path()?, bookmarks)
-}
-
 pub(crate) fn save_to(path: &Path, bookmarks: &Bookmarks) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;

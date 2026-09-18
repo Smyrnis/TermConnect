@@ -139,6 +139,9 @@ impl PanelState {
         self.sort_spec
     }
 
+    // Exercised by tests only for now; kept alongside `set_show_hidden`
+    // as normal accessor API rather than test-gated.
+    #[allow(dead_code)]
     pub fn show_hidden(&self) -> bool {
         self.show_hidden
     }

@@ -9,7 +9,9 @@ use super::*;
 #[test]
 fn config_path_is_connections_toml_under_config_dir() {
     let path = config_path().unwrap();
-    let expected = crate::config::config_dir().unwrap().join("connections.toml");
+    let expected = crate::config::config_dir()
+        .unwrap()
+        .join("connections.toml");
 
     assert_eq!(path, expected);
 }
