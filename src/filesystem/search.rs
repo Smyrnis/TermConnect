@@ -33,14 +33,38 @@ pub fn glob_match(pattern: &str, name: &str) -> bool {
     match_from(&pattern, &name)
 }
 
+/// Iterative two-pointer wildcard match: on a mismatch after a `*`,
+/// backtracks by remembering the most recent `*` and how much of `name`
+/// it had already consumed, rather than exploring both "consume" and
+/// "don't consume" branches recursively. That naive recursive form is
+/// exponential on adversarial patterns (many `*`s followed by a
+/// non-matching tail); this form is a single pass with O(1) backtrack
+/// state, linear in practice.
 fn match_from(pattern: &[char], name: &[char]) -> bool {
-    match (pattern.first(), name.first()) {
-        (None, None) => true,
-        (Some('*'), _) => match_from(&pattern[1..], name) || (!name.is_empty() && match_from(pattern, &name[1..])),
-        (Some('?'), Some(_)) => match_from(&pattern[1..], &name[1..]),
-        (Some(p), Some(n)) if p == n => match_from(&pattern[1..], &name[1..]),
-        _ => false,
+    let (mut p, mut n) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+
+    while n < name.len() {
+        if p < pattern.len() && (pattern[p] == '?' || pattern[p] == name[n]) {
+            p += 1;
+            n += 1;
+        } else if p < pattern.len() && pattern[p] == '*' {
+            star = Some((p, n));
+            p += 1;
+        } else if let Some((star_p, star_n)) = star {
+            p = star_p + 1;
+            n = star_n + 1;
+            star = Some((star_p, n));
+        } else {
+            return false;
+        }
     }
+
+    while pattern.get(p) == Some(&'*') {
+        p += 1;
+    }
+
+    p == pattern.len()
 }
 
 pub async fn search_local(

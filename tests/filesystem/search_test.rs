@@ -17,6 +17,26 @@ fn glob_match_supports_star_and_question_wildcards() {
 }
 
 #[test]
+fn glob_match_does_not_blow_up_on_pathological_backtracking_patterns() {
+    // A naive recursive backtracking matcher is exponential on patterns
+    // like this against a name with no matching suffix (each `*` can
+    // either consume the next character or not, so there are ~2^30
+    // ways to fail before the final mismatch is found). This test exists
+    // to catch a regression to that implementation: a reintroduced
+    // exponential matcher blows well past the bound below, rather than
+    // just returning the (correct either way) `false`.
+    let pattern = "*a".repeat(30) + "*b";
+    let name = "a".repeat(40);
+
+    let start = std::time::Instant::now();
+    let matched = glob_match(&pattern, &name);
+    let elapsed = start.elapsed();
+
+    assert!(!matched);
+    assert!(elapsed < std::time::Duration::from_secs(5), "took {elapsed:?}");
+}
+
+#[test]
 fn glob_match_is_case_insensitive() {
     assert!(glob_match("*.LOG", "error.log"));
     assert!(glob_match("*.log", "ERROR.LOG"));
