@@ -12,7 +12,7 @@ use tokio::{
 
 use super::Direction;
 
-const CHUNK_SIZE: usize = 32 * 1024;
+const CHUNK_SIZE: usize = 256 * 1024;
 const PROGRESS_STEP_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]

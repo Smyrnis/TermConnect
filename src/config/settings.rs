@@ -15,10 +15,24 @@ impl Default for PanelSettings {
     }
 }
 
+pub const MAX_PARALLEL_CAP: usize = 16;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TransferSettings {
+    pub max_parallel: usize,
+}
+
+impl Default for TransferSettings {
+    fn default() -> Self {
+        Self { max_parallel: 4 }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Settings {
     pub panel: PanelSettings,
     pub keys: HashMap<String, String>,
+    pub transfers: TransferSettings,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -27,6 +41,13 @@ pub(crate) struct SettingsFile {
     pub panel: PanelSettingsFile,
     #[serde(default)]
     pub keys: HashMap<String, String>,
+    #[serde(default)]
+    pub transfers: TransferSettingsFile,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub(crate) struct TransferSettingsFile {
+    pub max_parallel: Option<i64>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -60,7 +81,20 @@ pub(crate) fn settings_from_file(file: SettingsFile) -> (Settings, Vec<String>) 
         None => defaults.sort_order.clone(),
     };
 
-    (Settings { panel: PanelSettings { show_hidden, sort_key, sort_order }, keys: file.keys }, warnings)
+    let max_parallel = match file.transfers.max_parallel {
+        Some(value) if value > MAX_PARALLEL_CAP as i64 => {
+            warnings.push(format!("transfers.max_parallel is capped at {MAX_PARALLEL_CAP}, using {MAX_PARALLEL_CAP}"));
+            MAX_PARALLEL_CAP
+        }
+        Some(value) if value >= 1 => value as usize,
+        Some(_) => {
+            warnings.push("transfers.max_parallel must be at least 1, using 1".to_string());
+            1
+        }
+        None => TransferSettings::default().max_parallel,
+    };
+
+    (Settings { panel: PanelSettings { show_hidden, sort_key, sort_order }, keys: file.keys, transfers: TransferSettings { max_parallel } }, warnings)
 }
 
 #[cfg(test)]

@@ -28,15 +28,15 @@ fn sample_connection_entry() -> ConnectionEntry {
 }
 
 fn planning_scan(batch_id: u64, name: &str) -> PlanningScan {
-    PlanningScan { batch_id, display_name: name.to_string(), cancel: Arc::new(AtomicBool::new(false)) }
+    PlanningScan { batch_id, session_id: 1, display_name: name.to_string(), cancel: Arc::new(AtomicBool::new(false)) }
 }
 
 #[test]
-fn maybe_start_next_transfer_notifies_when_the_jobs_session_has_disconnected() {
+fn fill_transfer_slots_notifies_when_the_jobs_session_has_disconnected() {
     let (_dir, mut app) = app_in_temp_dir();
     app.transfers.enqueue(999, Direction::Upload, PathBuf::from("/local/file.txt"), "/remote/file.txt".to_string(), "file.txt".to_string(), 100, None);
 
-    app.maybe_start_next_transfer();
+    app.fill_transfer_slots();
 
     let notification = app.notifications.current().unwrap();
     assert_eq!(notification.severity, Severity::Error);
@@ -55,7 +55,7 @@ fn copying_a_directory_with_a_disconnected_session_fails_without_spawning() {
     let notification = app.notifications.current().unwrap();
     assert_eq!(notification.severity, Severity::Error);
     assert!(notification.message.contains("disconnected"));
-    assert!(app.transfers.next_to_run().is_none());
+    assert_eq!(app.transfers.queued_count(), 0);
 }
 
 #[test]
@@ -115,42 +115,13 @@ fn plan_failed_clears_planning_and_shows_an_error() {
 }
 
 #[test]
-fn cancel_active_transfer_cancels_every_other_queued_job_in_the_same_batch() {
-    let (_dir, mut app) = app_in_temp_dir();
-    let batch_id = app.transfers.start_batch();
-    let active = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 10, Some(batch_id));
-    let queued = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/b.txt"), "/remote/b.txt".to_string(), "b.txt".to_string(), 10, Some(batch_id));
-    app.transfers.get_mut(active).unwrap().status = JobStatus::InProgress;
-    let cancel = Arc::new(AtomicBool::new(false));
-    app.active_transfer_cancel = Some(cancel.clone());
-
-    app.cancel_active_transfer();
-
-    assert!(cancel.load(Ordering::Relaxed));
-    assert_eq!(app.transfers.get(queued).unwrap().status, JobStatus::Cancelled);
-    assert_eq!(app.transfers.get(active).unwrap().status, JobStatus::InProgress);
-}
-
-#[test]
-fn cancel_active_transfer_is_a_plain_cancel_for_a_non_batch_job() {
-    let (_dir, mut app) = app_in_temp_dir();
-    let active = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 10, None);
-    app.transfers.get_mut(active).unwrap().status = JobStatus::InProgress;
-    let cancel = Arc::new(AtomicBool::new(false));
-    app.active_transfer_cancel = Some(cancel.clone());
-
-    app.cancel_active_transfer();
-
-    assert!(cancel.load(Ordering::Relaxed));
-}
-
-#[test]
 fn plan_cancelled_clears_planning_and_shows_an_info_notification() {
     let (_dir, mut app) = app_in_temp_dir();
+    let session_id = app.sessions.insert(sample_connection_entry(), PanelState::from_listing(PathBuf::from("/remote"), Vec::new()));
     let batch_id = app.transfers.start_batch();
     app.planning.push(planning_scan(batch_id, "myfolder"));
 
-    app.apply_transfer_event(TransferEvent::PlanCancelled { batch_id, session_id: 1, direction: Direction::Upload });
+    app.apply_transfer_event(TransferEvent::PlanCancelled { batch_id, session_id, direction: Direction::Upload });
 
     assert!(app.planning.is_empty());
     let notification = app.notifications.current().unwrap();
@@ -194,23 +165,13 @@ fn cancel_all_copies_stops_scans_and_the_active_batch_together() {
     let queued = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/b.txt"), "/remote/b.txt".to_string(), "b.txt".to_string(), 10, Some(batch_id));
     app.transfers.get_mut(active).unwrap().status = JobStatus::InProgress;
     let transfer_cancel = Arc::new(AtomicBool::new(false));
-    app.active_transfer_cancel = Some(transfer_cancel.clone());
+    app.transfer_cancels.insert(active, transfer_cancel.clone());
 
     app.cancel_all_copies();
 
     assert!(app.planning[0].cancel.load(Ordering::Relaxed));
     assert!(transfer_cancel.load(Ordering::Relaxed));
     assert_eq!(app.transfers.get(queued).unwrap().status, JobStatus::Cancelled);
-}
-
-#[test]
-fn cancel_active_transfer_leaves_running_scans_alone() {
-    let (_dir, mut app) = app_in_temp_dir();
-    app.planning.push(planning_scan(0, "other session's folder"));
-
-    app.cancel_active_transfer();
-
-    assert!(!app.planning[0].cancel.load(Ordering::Relaxed));
 }
 
 #[test]
@@ -221,4 +182,207 @@ fn cancel_all_copies_with_nothing_running_is_a_no_op() {
 
     assert!(app.planning.is_empty());
     assert!(app.notifications.current().is_none());
+}
+
+fn enqueue_job(app: &mut App, session_id: u64, name: &str, batch_id: Option<u64>) -> u64 {
+    app.transfers.enqueue(session_id, Direction::Upload, PathBuf::from(format!("/local/{name}")), format!("/remote/{name}"), name.to_string(), 10, batch_id)
+}
+
+fn mark_active(app: &mut App, id: u64) -> Arc<AtomicBool> {
+    app.transfers.get_mut(id).unwrap().status = JobStatus::InProgress;
+    let cancel = Arc::new(AtomicBool::new(false));
+    app.transfer_cancels.insert(id, cancel.clone());
+    cancel
+}
+
+#[test]
+fn fill_transfer_slots_fails_every_job_whose_session_is_gone_without_starting_any() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let jobs: Vec<u64> = (0..6).map(|n| enqueue_job(&mut app, 999, &format!("{n}.txt"), None)).collect();
+
+    app.fill_transfer_slots();
+
+    assert!(jobs.iter().all(|id| matches!(app.transfers.get(*id).unwrap().status, JobStatus::Failed(_))));
+    assert!(app.transfer_cancels.is_empty());
+    assert_eq!(app.transfers.active_count(), 0);
+}
+
+#[test]
+fn cancel_all_copies_flags_every_active_job_and_cancels_every_queued_job() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let batch_id = app.transfers.start_batch();
+    let first_active = enqueue_job(&mut app, 1, "a.txt", Some(batch_id));
+    let second_active = enqueue_job(&mut app, 1, "b.txt", None);
+    let queued_in_batch = enqueue_job(&mut app, 1, "c.txt", Some(batch_id));
+    let queued_loose = enqueue_job(&mut app, 2, "d.txt", None);
+    let first_cancel = mark_active(&mut app, first_active);
+    let second_cancel = mark_active(&mut app, second_active);
+
+    app.cancel_all_copies();
+
+    assert!(first_cancel.load(Ordering::Relaxed));
+    assert!(second_cancel.load(Ordering::Relaxed));
+    assert_eq!(app.transfers.get(queued_in_batch).unwrap().status, JobStatus::Cancelled);
+    assert_eq!(app.transfers.get(queued_loose).unwrap().status, JobStatus::Cancelled);
+    assert_eq!(app.transfers.get(first_active).unwrap().status, JobStatus::InProgress);
+}
+
+#[test]
+fn nothing_is_startable_after_cancel_all_copies() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let active = enqueue_job(&mut app, 1, "a.txt", None);
+    enqueue_job(&mut app, 1, "b.txt", None);
+    mark_active(&mut app, active);
+
+    app.cancel_all_copies();
+    app.apply_transfer_event(TransferEvent::Finished { id: active, outcome: TransferOutcome::Cancelled });
+
+    assert!(app.transfers.startable(app.max_parallel).is_empty());
+    assert!(app.notifications.current().is_none());
+}
+
+#[test]
+fn cancel_session_transfers_flags_only_that_sessions_jobs_and_scans() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let mine = enqueue_job(&mut app, 1, "a.txt", None);
+    let my_cancel = mark_active(&mut app, mine);
+    app.planning.push(PlanningScan { batch_id: 7, session_id: 1, display_name: "mine".to_string(), cancel: Arc::new(AtomicBool::new(false)) });
+
+    let flagged = app.cancel_session_transfers(1);
+
+    assert_eq!(flagged, 2);
+    assert!(my_cancel.load(Ordering::Relaxed));
+    assert!(app.planning[0].cancel.load(Ordering::Relaxed));
+}
+
+#[test]
+fn cancel_session_transfers_leaves_other_sessions_alone() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let theirs = enqueue_job(&mut app, 2, "a.txt", None);
+    let their_cancel = mark_active(&mut app, theirs);
+    app.planning.push(PlanningScan { batch_id: 7, session_id: 2, display_name: "theirs".to_string(), cancel: Arc::new(AtomicBool::new(false)) });
+
+    let flagged = app.cancel_session_transfers(1);
+
+    assert_eq!(flagged, 0);
+    assert!(!their_cancel.load(Ordering::Relaxed));
+    assert!(!app.planning[0].cancel.load(Ordering::Relaxed));
+}
+
+#[test]
+fn a_finished_event_removes_only_its_own_cancel_flag() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let first = enqueue_job(&mut app, 1, "a.txt", None);
+    let second = enqueue_job(&mut app, 1, "b.txt", None);
+    mark_active(&mut app, first);
+    mark_active(&mut app, second);
+
+    app.apply_transfer_event(TransferEvent::Finished { id: first, outcome: TransferOutcome::Completed });
+
+    assert!(!app.transfer_cancels.contains_key(&first));
+    assert!(app.transfer_cancels.contains_key(&second));
+}
+
+#[test]
+fn a_failed_event_removes_its_cancel_flag_and_requeues_within_the_retry_limit() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let job = enqueue_job(&mut app, 999, "a.txt", None);
+    mark_active(&mut app, job);
+    app.transfers.get_mut(job).unwrap().attempts = 1;
+
+    app.apply_transfer_event(TransferEvent::Failed { id: job, message: "Transfer failed: a.txt".to_string() });
+
+    assert!(!app.transfer_cancels.contains_key(&job));
+    assert!(matches!(app.transfers.get(job).unwrap().status, JobStatus::Failed(ref reason) if reason == "session disconnected"));
+}
+
+#[test]
+fn a_cancelled_job_that_ends_in_an_error_is_not_retried() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let job = enqueue_job(&mut app, 999, "a.txt", None);
+    let cancel = mark_active(&mut app, job);
+    cancel.store(true, Ordering::Relaxed);
+
+    app.apply_transfer_event(TransferEvent::Failed { id: job, message: "Transfer failed: a.txt".to_string() });
+
+    assert_eq!(app.transfers.get(job).unwrap().status, JobStatus::Cancelled);
+    assert!(app.notifications.current().is_none());
+}
+
+#[test]
+fn a_permanent_failure_of_the_last_pending_job_refreshes_the_destination() {
+    let (dir, mut app) = app_in_temp_dir();
+    let done = app.transfers.enqueue(1, Direction::Download, dir.path().join("done.txt"), "/remote/done.txt".to_string(), "done.txt".to_string(), 10, None);
+    app.transfers.get_mut(done).unwrap().status = JobStatus::Completed;
+    std::fs::write(dir.path().join("done.txt"), b"x").unwrap();
+    let failing = app.transfers.enqueue(1, Direction::Download, dir.path().join("bad.txt"), "/remote/bad.txt".to_string(), "bad.txt".to_string(), 10, None);
+    mark_active(&mut app, failing);
+    app.transfers.get_mut(failing).unwrap().attempts = 3;
+
+    app.apply_transfer_event(TransferEvent::Failed { id: failing, message: "Transfer failed: bad.txt".to_string() });
+
+    assert!(app.local.rows().iter().any(|row| matches!(row, crate::tui::panels::Row::Entry(entry) if entry.name == "done.txt")));
+}
+
+#[test]
+fn a_job_that_fails_to_start_refreshes_the_destination_once_nothing_is_pending() {
+    let (dir, mut app) = app_in_temp_dir();
+    let done = app.transfers.enqueue(999, Direction::Download, dir.path().join("done.txt"), "/remote/done.txt".to_string(), "done.txt".to_string(), 10, None);
+    app.transfers.get_mut(done).unwrap().status = JobStatus::Completed;
+    std::fs::write(dir.path().join("done.txt"), b"x").unwrap();
+    app.transfers.enqueue(999, Direction::Download, dir.path().join("bad.txt"), "/remote/bad.txt".to_string(), "bad.txt".to_string(), 10, None);
+
+    app.fill_transfer_slots();
+
+    assert!(app.local.rows().iter().any(|row| matches!(row, crate::tui::panels::Row::Entry(entry) if entry.name == "done.txt")));
+}
+
+#[test]
+fn plan_cancelled_for_a_disconnected_session_is_silent() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let batch_id = app.transfers.start_batch();
+    app.planning.push(planning_scan(batch_id, "myfolder"));
+
+    app.apply_transfer_event(TransferEvent::PlanCancelled { batch_id, session_id: 1, direction: Direction::Upload });
+
+    assert!(app.planning.is_empty());
+    assert!(app.notifications.current().is_none());
+}
+
+fn download_job(app: &mut App, dir: &std::path::Path, session_id: u64, name: &str) -> u64 {
+    app.transfers.enqueue(session_id, Direction::Download, dir.join(name), format!("/remote/{name}"), name.to_string(), 10, None)
+}
+
+fn local_panel_shows(app: &App, name: &str) -> bool {
+    app.local.rows().iter().any(|row| matches!(row, crate::tui::panels::Row::Entry(entry) if entry.name == name))
+}
+
+#[test]
+fn a_finished_download_waits_to_refresh_while_another_download_of_that_session_runs() {
+    let (dir, mut app) = app_in_temp_dir();
+    let finished = download_job(&mut app, dir.path(), 1, "a.txt");
+    let still_running = download_job(&mut app, dir.path(), 1, "b.txt");
+    mark_active(&mut app, finished);
+    mark_active(&mut app, still_running);
+    std::fs::write(dir.path().join("a.txt"), b"x").unwrap();
+
+    app.apply_transfer_event(TransferEvent::Finished { id: finished, outcome: TransferOutcome::Completed });
+
+    assert!(!local_panel_shows(&app, "a.txt"));
+}
+
+#[test]
+fn a_finished_download_refreshes_despite_other_sessions_and_upload_jobs() {
+    let (dir, mut app) = app_in_temp_dir();
+    let finished = download_job(&mut app, dir.path(), 1, "a.txt");
+    mark_active(&mut app, finished);
+    let other_session_download = download_job(&mut app, dir.path(), 2, "b.txt");
+    mark_active(&mut app, other_session_download);
+    let same_session_upload = enqueue_job(&mut app, 1, "c.txt", None);
+    mark_active(&mut app, same_session_upload);
+    std::fs::write(dir.path().join("a.txt"), b"x").unwrap();
+
+    app.apply_transfer_event(TransferEvent::Finished { id: finished, outcome: TransferOutcome::Completed });
+
+    assert!(local_panel_shows(&app, "a.txt"));
 }

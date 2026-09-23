@@ -96,10 +96,10 @@ impl App {
             Some(notification) => (notification.message.clone(), notification_style(notification.severity)),
             None => match self.planning_status_text() {
                 Some(text) => (text, Style::default()),
-                None => match self.transfers.active() {
-                    Some(job) => (self.transfer_status_text(job), Style::default()),
-                    None => (build_hint_text(&self.key_bindings), Style::default()),
-                },
+                None => {
+                    let active: Vec<&transfer::TransferJob> = self.transfers.active_jobs().collect();
+                    if active.is_empty() { (build_hint_text(&self.key_bindings), Style::default()) } else { (self.transfer_status_text(&active), Style::default()) }
+                }
             },
         };
 
@@ -114,23 +114,51 @@ impl App {
         }
     }
 
-    fn transfer_status_text(&self, job: &transfer::TransferJob) -> String {
-        let verb = match job.direction {
-            Direction::Upload => "Uploading",
-            Direction::Download => "Downloading",
-        };
+    fn transfer_status_text(&self, active: &[&transfer::TransferJob]) -> String {
+        let verb = transfer_verb(active);
         let queued = self.transfers.queued_count();
         let suffix = if queued > 0 { format!(" ({queued} queued)") } else { String::new() };
 
-        match job.batch_id {
+        if let [job] = active {
+            return match job.batch_id {
+                Some(batch_id) => {
+                    let progress = self.transfers.batch_progress(batch_id);
+                    let percent = percent_of(progress.transferred_bytes, progress.total_bytes);
+                    format!("{verb} {}: {}/{} files, {percent}%{suffix}", job.display_name, progress.completed_files, progress.total_files)
+                }
+                None => format!("{verb} {}: {}%{suffix}", job.display_name, job.progress_percent()),
+            };
+        }
+
+        let count = active.len();
+        let shared_batch = active.first().and_then(|first| first.batch_id).filter(|batch_id| active.iter().all(|job| job.batch_id == Some(*batch_id)));
+        match shared_batch {
             Some(batch_id) => {
                 let progress = self.transfers.batch_progress(batch_id);
-                let percent = if progress.total_bytes == 0 { 100 } else { ((progress.transferred_bytes as f64 / progress.total_bytes as f64) * 100.0) as u8 };
-                format!("{verb} {}: {}/{} files, {percent}%{suffix}", job.display_name, progress.completed_files, progress.total_files)
+                let percent = percent_of(progress.transferred_bytes, progress.total_bytes);
+                format!("{verb} {count} files: {}/{} files, {percent}%{suffix}", progress.completed_files, progress.total_files)
             }
-            None => format!("{verb} {}: {}%{suffix}", job.display_name, job.progress_percent()),
+            None => {
+                let transferred: u64 = active.iter().map(|job| job.transferred_bytes).sum();
+                let total: u64 = active.iter().map(|job| job.total_bytes).sum();
+                format!("{verb} {count} files: {}%{suffix}", percent_of(transferred, total))
+            }
         }
     }
+}
+
+fn transfer_verb(active: &[&transfer::TransferJob]) -> &'static str {
+    if active.iter().all(|job| job.direction == Direction::Upload) {
+        "Uploading"
+    } else if active.iter().all(|job| job.direction == Direction::Download) {
+        "Downloading"
+    } else {
+        "Transferring"
+    }
+}
+
+fn percent_of(transferred: u64, total: u64) -> u8 {
+    if total == 0 { 100 } else { ((transferred as f64 / total as f64) * 100.0) as u8 }
 }
 
 fn notification_style(severity: Severity) -> Style {

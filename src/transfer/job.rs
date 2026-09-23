@@ -15,6 +15,12 @@ pub enum JobStatus {
     Cancelled,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Destination {
+    Local(PathBuf),
+    Remote { session_id: u64, path: String },
+}
+
 #[derive(Debug, Clone)]
 pub struct TransferJob {
     pub id: u64,
@@ -31,6 +37,13 @@ pub struct TransferJob {
 }
 
 impl TransferJob {
+    pub fn destination(&self) -> Destination {
+        match self.direction {
+            Direction::Upload => Destination::Remote { session_id: self.session_id, path: self.remote_path.clone() },
+            Direction::Download => Destination::Local(self.local_path.clone()),
+        }
+    }
+
     pub fn progress_percent(&self) -> u8 {
         if self.total_bytes == 0 {
             return 100;

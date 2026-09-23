@@ -11,7 +11,7 @@ impl App {
             ActivePanel::Remote => self.enqueue_downloads(),
         }
 
-        self.maybe_start_next_transfer();
+        self.fill_transfer_slots();
     }
 
     fn enqueue_uploads(&mut self) {
@@ -68,7 +68,7 @@ impl App {
             _ => format!("{} items", entries.len()),
         };
         let cancel = Arc::new(AtomicBool::new(false));
-        self.planning.push(PlanningScan { batch_id, display_name, cancel: cancel.clone() });
+        self.planning.push(PlanningScan { batch_id, session_id, display_name, cancel: cancel.clone() });
 
         let tx = self.transfer_tx.clone();
         tokio::spawn(async move {
@@ -85,10 +85,19 @@ impl App {
         });
     }
 
-    pub(super) fn maybe_start_next_transfer(&mut self) {
-        let Some(id) = self.transfers.next_to_run() else {
-            return;
-        };
+    pub(super) fn fill_transfer_slots(&mut self) {
+        loop {
+            let startable = self.transfers.startable(self.max_parallel);
+            if startable.is_empty() {
+                return;
+            }
+            for id in startable {
+                self.start_transfer(id);
+            }
+        }
+    }
+
+    fn start_transfer(&mut self, id: u64) {
         let Some(job) = self.transfers.get(id) else {
             return;
         };
@@ -100,7 +109,7 @@ impl App {
                 job.status = JobStatus::Failed("session disconnected".to_string());
             }
             self.notifications.push(Severity::Error, format!("Transfer failed: {display_name} \u{2014} session disconnected"));
-            self.maybe_start_next_transfer();
+            self.refresh_transfer_destination(id);
             return;
         };
         let sftp = resources.sftp.clone();
@@ -113,10 +122,9 @@ impl App {
         let direction = job.direction;
         let local_path = job.local_path.clone();
         let remote_path = job.remote_path.clone();
-        let display_name = job.display_name.clone();
 
         let cancel = Arc::new(AtomicBool::new(false));
-        self.active_transfer_cancel = Some(cancel.clone());
+        self.transfer_cancels.insert(id, cancel.clone());
 
         let tx = self.transfer_tx.clone();
         tokio::spawn(async move {
@@ -145,7 +153,7 @@ impl App {
                 }
             }
             TransferEvent::Finished { id, outcome } => {
-                self.active_transfer_cancel = None;
+                self.transfer_cancels.remove(&id);
                 if let Some(job) = self.transfers.get_mut(id) {
                     job.status = match outcome {
                         TransferOutcome::Completed => JobStatus::Completed,
@@ -153,17 +161,21 @@ impl App {
                     };
                 }
                 self.refresh_transfer_destination(id);
-                self.maybe_start_next_transfer();
+                self.fill_transfer_slots();
             }
             TransferEvent::Failed { id, message } => {
-                self.active_transfer_cancel = None;
+                let cancelled = self.transfer_cancels.remove(&id).is_some_and(|cancel| cancel.load(Ordering::Relaxed));
                 if let Some(job) = self.transfers.get_mut(id) {
-                    job.status = JobStatus::Failed(message.clone());
+                    job.status = if cancelled { JobStatus::Cancelled } else { JobStatus::Failed(message.clone()) };
                 }
-                if !self.transfers.retry_or_give_up(id) {
-                    self.notifications.push(Severity::Error, message);
+                let retried = !cancelled && self.transfers.retry_or_give_up(id);
+                if !retried {
+                    if !cancelled {
+                        self.notifications.push(Severity::Error, message);
+                    }
+                    self.refresh_transfer_destination(id);
                 }
-                self.maybe_start_next_transfer();
+                self.fill_transfer_slots();
             }
             TransferEvent::PlanReady { batch_id, session_id, direction, plan } => {
                 self.clear_planning(batch_id);
@@ -181,7 +193,10 @@ impl App {
             }
             TransferEvent::PlanCancelled { batch_id, session_id, direction } => {
                 self.clear_planning(batch_id);
-                self.notifications.push(Severity::Info, "Copy cancelled");
+                let session_still_connected = self.sessions.iter().any(|session| session.id == session_id);
+                if session_still_connected {
+                    self.notifications.push(Severity::Info, "Copy cancelled");
+                }
                 self.refresh_destination_panel(session_id, direction);
             }
         }
@@ -199,7 +214,7 @@ impl App {
             let plural = if plan.skipped_symlinks == 1 { "" } else { "s" };
             self.notifications.push(Severity::Warning, format!("Skipped {} symlink{plural}", plan.skipped_symlinks));
         }
-        self.maybe_start_next_transfer();
+        self.fill_transfer_slots();
     }
 
     fn clear_planning(&mut self, batch_id: u64) {
@@ -213,11 +228,8 @@ impl App {
         let session_id = job.session_id;
         let direction = job.direction;
 
-        if let Some(batch_id) = job.batch_id {
-            let batch_still_running = self.transfers.next_to_run().and_then(|next_id| self.transfers.get(next_id)).is_some_and(|next_job| next_job.batch_id == Some(batch_id));
-            if batch_still_running {
-                return;
-            }
+        if self.transfers.has_pending(session_id, direction) {
+            return;
         }
 
         self.refresh_destination_panel(session_id, direction);
@@ -241,18 +253,24 @@ impl App {
         for scan in &self.planning {
             scan.cancel.store(true, Ordering::Relaxed);
         }
-        self.cancel_active_transfer();
-    }
-
-    pub(super) fn cancel_active_transfer(&mut self) {
-        if let Some(cancel) = &self.active_transfer_cancel {
+        for cancel in self.transfer_cancels.values() {
             cancel.store(true, Ordering::Relaxed);
         }
-        if let Some(job) = self.transfers.active()
-            && let Some(batch_id) = job.batch_id
-        {
-            self.transfers.cancel_batch(batch_id);
+        self.transfers.cancel_all_queued();
+    }
+
+    pub(super) fn cancel_session_transfers(&mut self, session_id: u64) -> usize {
+        let session_scans: Vec<&PlanningScan> = self.planning.iter().filter(|scan| scan.session_id == session_id).collect();
+        for scan in &session_scans {
+            scan.cancel.store(true, Ordering::Relaxed);
         }
+        let active_ids = self.transfers.active_ids_for_session(session_id);
+        for id in &active_ids {
+            if let Some(cancel) = self.transfer_cancels.get(id) {
+                cancel.store(true, Ordering::Relaxed);
+            }
+        }
+        session_scans.len() + active_ids.len()
     }
 }
 

@@ -164,6 +164,46 @@ fn disconnecting_a_session_fails_its_queued_jobs_with_one_aggregated_notificatio
 }
 
 #[test]
+fn disconnecting_a_session_counts_its_active_jobs_in_the_aggregated_notification() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let entry = sample_connection_entry();
+    let id = app.sessions.insert(entry.clone(), PanelState::from_listing(PathBuf::from("/"), Vec::new()));
+    app.connections = vec![entry];
+    app.connections_cursor = 0;
+    app.screen = Screen::Connections;
+    let active = app.transfers.enqueue(id, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 10, None);
+    app.transfers.get_mut(active).unwrap().status = JobStatus::InProgress;
+    let cancel = Arc::new(AtomicBool::new(false));
+    app.transfer_cancels.insert(active, cancel.clone());
+    app.transfers.enqueue(id, Direction::Upload, PathBuf::from("/local/b.txt"), "/remote/b.txt".to_string(), "b.txt".to_string(), 10, None);
+
+    app.disconnect_selected();
+
+    assert!(cancel.load(Ordering::Relaxed));
+    let first = app.notifications.current().unwrap().message.clone();
+    assert!(first.contains("2 transfers cancelled"), "got {first}");
+}
+
+#[test]
+fn disconnecting_a_session_counts_its_scans_in_the_aggregated_notification() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let entry = sample_connection_entry();
+    let id = app.sessions.insert(entry.clone(), PanelState::from_listing(PathBuf::from("/"), Vec::new()));
+    app.connections = vec![entry];
+    app.connections_cursor = 0;
+    app.screen = Screen::Connections;
+    let scan_cancel = Arc::new(AtomicBool::new(false));
+    app.planning.push(PlanningScan { batch_id: 0, session_id: id, display_name: "myfolder".to_string(), cancel: scan_cancel.clone() });
+    app.transfers.enqueue(id, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 10, None);
+
+    app.disconnect_selected();
+
+    assert!(scan_cancel.load(Ordering::Relaxed));
+    let first = app.notifications.current().unwrap().message.clone();
+    assert!(first.contains("2 transfers cancelled"), "got {first}");
+}
+
+#[test]
 fn add_connection_dialog_saves_a_new_profile_on_submit() {
     let (_dir, _guard, mut app) = app_with_isolated_home();
     app.screen = Screen::Connections;

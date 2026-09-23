@@ -13,6 +13,9 @@ use russh::{
 
 use super::ConnectionEntry;
 
+const SFTP_REQUEST_TIMEOUT_SECS: u64 = 60;
+const SFTP_MAX_CONCURRENT_READS: usize = 8;
+
 pub struct TermConnectHandler {
     host: String,
     port: u16,
@@ -38,7 +41,8 @@ impl client::Handler for TermConnectHandler {
 pub async fn open_sftp(handle: &Handle<TermConnectHandler>) -> Result<russh_sftp::client::SftpSession> {
     let channel = handle.channel_open_session().await?;
     channel.request_subsystem(true, "sftp").await?;
-    let sftp = russh_sftp::client::SftpSession::new(channel.into_stream()).await?;
+    let config = russh_sftp::client::Config { request_timeout_secs: SFTP_REQUEST_TIMEOUT_SECS, max_concurrent_reads: SFTP_MAX_CONCURRENT_READS, ..russh_sftp::client::Config::default() };
+    let sftp = russh_sftp::client::SftpSession::new_with_config(channel.into_stream(), config).await?;
     Ok(sftp)
 }
 

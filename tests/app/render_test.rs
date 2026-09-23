@@ -14,7 +14,7 @@ fn sample_connection_entry() -> ConnectionEntry {
 }
 
 fn planning_scan(batch_id: u64, name: &str) -> PlanningScan {
-    PlanningScan { batch_id, display_name: name.to_string(), cancel: Arc::new(AtomicBool::new(false)) }
+    PlanningScan { batch_id, session_id: 1, display_name: name.to_string(), cancel: Arc::new(AtomicBool::new(false)) }
 }
 
 fn render_status_text(app: &App) -> String {
@@ -124,4 +124,55 @@ fn planning_status_text_counts_several_scans() {
     app.planning.push(planning_scan(2, "two"));
 
     assert_eq!(app.planning_status_text(), Some("Scanning 2 copies\u{2026}".to_string()));
+}
+
+fn active_job(app: &mut App, direction: Direction, name: &str, total_bytes: u64, transferred_bytes: u64, batch_id: Option<u64>) -> u64 {
+    let id = app.transfers.enqueue(1, direction, PathBuf::from(format!("/local/{name}")), format!("/remote/{name}"), name.to_string(), total_bytes, batch_id);
+    let job = app.transfers.get_mut(id).unwrap();
+    job.status = JobStatus::InProgress;
+    job.transferred_bytes = transferred_bytes;
+    id
+}
+
+fn status_of_active_jobs(app: &App) -> String {
+    let active: Vec<&transfer::TransferJob> = app.transfers.active_jobs().collect();
+    app.transfer_status_text(&active)
+}
+
+#[test]
+fn transfer_status_text_summarizes_several_jobs_from_one_batch() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let batch_id = app.transfers.start_batch();
+    active_job(&mut app, Direction::Upload, "a.txt", 100, 50, Some(batch_id));
+    active_job(&mut app, Direction::Upload, "b.txt", 100, 50, Some(batch_id));
+    app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/c.txt"), "/remote/c.txt".to_string(), "c.txt".to_string(), 200, Some(batch_id));
+
+    assert_eq!(status_of_active_jobs(&app), "Uploading 2 files: 0/3 files, 25% (1 queued)");
+}
+
+#[test]
+fn transfer_status_text_summarizes_several_unrelated_jobs() {
+    let (_dir, mut app) = app_in_temp_dir();
+    active_job(&mut app, Direction::Download, "a.txt", 100, 100, None);
+    active_job(&mut app, Direction::Download, "b.txt", 300, 0, None);
+
+    assert_eq!(status_of_active_jobs(&app), "Downloading 2 files: 25%");
+}
+
+#[test]
+fn transfer_status_text_says_transferring_for_mixed_directions() {
+    let (_dir, mut app) = app_in_temp_dir();
+    active_job(&mut app, Direction::Upload, "a.txt", 100, 50, None);
+    active_job(&mut app, Direction::Download, "b.txt", 100, 50, None);
+
+    assert_eq!(status_of_active_jobs(&app), "Transferring 2 files: 50%");
+}
+
+#[test]
+fn transfer_status_text_is_one_hundred_percent_for_several_empty_files() {
+    let (_dir, mut app) = app_in_temp_dir();
+    active_job(&mut app, Direction::Upload, "a.txt", 0, 0, None);
+    active_job(&mut app, Direction::Upload, "b.txt", 0, 0, None);
+
+    assert_eq!(status_of_active_jobs(&app), "Uploading 2 files: 100%");
 }

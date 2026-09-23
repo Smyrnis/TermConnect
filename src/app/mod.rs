@@ -109,6 +109,7 @@ enum TransferEvent {
 
 struct PlanningScan {
     batch_id: u64,
+    session_id: u64,
     display_name: String,
     cancel: Arc<AtomicBool>,
 }
@@ -141,7 +142,8 @@ pub struct App {
     panel_tx: mpsc::UnboundedSender<PanelEvent>,
     panel_rx: mpsc::UnboundedReceiver<PanelEvent>,
     transfers: TransferQueue,
-    active_transfer_cancel: Option<Arc<AtomicBool>>,
+    max_parallel: usize,
+    transfer_cancels: HashMap<u64, Arc<AtomicBool>>,
     transfer_tx: mpsc::UnboundedSender<TransferEvent>,
     transfer_rx: mpsc::UnboundedReceiver<TransferEvent>,
     planning: Vec<PlanningScan>,
@@ -158,6 +160,7 @@ impl App {
         let bookmarks_path = config::bookmarks::bookmarks_path()?;
 
         let mut app = Self::at_with(std::env::current_dir()?, &settings.panel, key_bindings, bookmarks, Some(bookmarks_path))?;
+        app.max_parallel = settings.transfers.max_parallel;
 
         for warning in config_warnings {
             app.notifications.push(Severity::Warning, warning.0);
@@ -210,7 +213,8 @@ impl App {
             panel_tx,
             panel_rx,
             transfers: TransferQueue::new(),
-            active_transfer_cancel: None,
+            max_parallel: config::settings::TransferSettings::default().max_parallel,
+            transfer_cancels: HashMap::new(),
             transfer_tx,
             transfer_rx,
             planning: Vec::new(),

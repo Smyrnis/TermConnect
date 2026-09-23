@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
-use super::job::{Direction, JobStatus, TransferJob};
+use std::collections::HashSet;
+
+use super::job::{Destination, Direction, JobStatus, TransferJob};
 
 const MAX_ATTEMPTS: u32 = 3;
 
@@ -40,30 +42,55 @@ impl TransferQueue {
     }
 
     pub fn get(&self, id: u64) -> Option<&TransferJob> {
-        self.jobs.iter().find(|job| job.id == id)
+        usize::try_from(id).ok().and_then(|index| self.jobs.get(index)).filter(|job| job.id == id)
     }
 
     pub fn get_mut(&mut self, id: u64) -> Option<&mut TransferJob> {
-        self.jobs.iter_mut().find(|job| job.id == id)
+        usize::try_from(id).ok().and_then(|index| self.jobs.get_mut(index)).filter(|job| job.id == id)
     }
 
-    pub fn is_active(&self) -> bool {
-        self.jobs.iter().any(|job| job.status == JobStatus::InProgress)
+    pub fn active_jobs(&self) -> impl Iterator<Item = &TransferJob> {
+        self.jobs.iter().filter(|job| job.status == JobStatus::InProgress)
     }
 
-    pub fn active(&self) -> Option<&TransferJob> {
-        self.jobs.iter().find(|job| job.status == JobStatus::InProgress)
+    pub fn active_count(&self) -> usize {
+        self.active_jobs().count()
+    }
+
+    pub fn startable(&self, limit: usize) -> Vec<u64> {
+        let free_slots = limit.saturating_sub(self.active_count());
+        let mut busy_destinations: HashSet<Destination> = self.active_jobs().map(TransferJob::destination).collect();
+        let mut startable = Vec::new();
+        for job in self.jobs.iter().filter(|job| job.status == JobStatus::Queued) {
+            if startable.len() == free_slots {
+                break;
+            }
+            if busy_destinations.insert(job.destination()) {
+                startable.push(job.id);
+            }
+        }
+        startable
+    }
+
+    pub fn active_ids_for_session(&self, session_id: u64) -> Vec<u64> {
+        self.active_jobs().filter(|job| job.session_id == session_id).map(|job| job.id).collect()
+    }
+
+    pub fn has_pending(&self, session_id: u64, direction: Direction) -> bool {
+        self.jobs.iter().any(|job| job.session_id == session_id && job.direction == direction && matches!(job.status, JobStatus::Queued | JobStatus::InProgress))
+    }
+
+    pub fn cancel_all_queued(&mut self) -> usize {
+        let mut count = 0;
+        for job in self.jobs.iter_mut().filter(|job| job.status == JobStatus::Queued) {
+            job.status = JobStatus::Cancelled;
+            count += 1;
+        }
+        count
     }
 
     pub fn queued_count(&self) -> usize {
         self.jobs.iter().filter(|job| job.status == JobStatus::Queued).count()
-    }
-
-    pub fn next_to_run(&self) -> Option<u64> {
-        if self.is_active() {
-            return None;
-        }
-        self.jobs.iter().find(|job| job.status == JobStatus::Queued).map(|job| job.id)
     }
 
     pub fn fail_queued_for_session(&mut self, session_id: u64, reason: &str) -> usize {
@@ -104,17 +131,6 @@ impl TransferQueue {
         }
 
         progress
-    }
-
-    pub fn cancel_batch(&mut self, batch_id: u64) -> usize {
-        let mut count = 0;
-        for job in self.jobs.iter_mut() {
-            if job.batch_id == Some(batch_id) && job.status == JobStatus::Queued {
-                job.status = JobStatus::Cancelled;
-                count += 1;
-            }
-        }
-        count
     }
 }
 
