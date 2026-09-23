@@ -8,7 +8,17 @@ fn key(code: KeyCode) -> KeyEvent {
 }
 
 fn dialog(is_dir: bool, index: usize, total: usize) -> ConflictDialog {
-    ConflictDialog { file_name: "report.pdf".to_string(), existing: ExistingFile { size: 2_200_000, modified: Some(1_000_000 - 3 * 86_400), is_dir }, new_size: 2_500_000, new_modified: Some(1_000_000 - 120), index, total, apply_to_rest: false, now: 1_000_000 }
+    ConflictDialog {
+        file_name: "report.pdf".to_string(),
+        existing: Some(ExistingFile { size: 2_200_000, modified: Some(1_000_000 - 3 * 86_400), is_dir }),
+        partial: None,
+        new_size: 2_500_000,
+        new_modified: Some(1_000_000 - 120),
+        index,
+        total,
+        apply_to_rest: false,
+        now: 1_000_000,
+    }
 }
 
 fn resolved(resolution: Option<Resolution>, apply_to_rest: bool) -> ConflictOutcome {
@@ -96,4 +106,56 @@ fn ctrl_shortcuts_do_not_answer_except_ctrl_c() {
     assert_eq!(dialog(false, 0, 3).handle_key(ctrl(KeyCode::Char('o'))), ConflictOutcome::Pending);
     assert_eq!(dialog(false, 0, 3).handle_key(ctrl(KeyCode::Char('a'))), ConflictOutcome::Pending);
     assert_eq!(dialog(false, 0, 3).handle_key(ctrl(KeyCode::Char('c'))), resolved(None, false));
+}
+
+fn partial_dialog(with_existing: bool) -> ConflictDialog {
+    let mut conflict = dialog(false, 0, 1);
+    if !with_existing {
+        conflict.existing = None;
+    }
+    conflict.partial = Some(ExistingFile { size: 1_300_000, modified: Some(1_000_000 - 300), is_dir: false });
+    conflict
+}
+
+#[test]
+fn u_resumes_only_when_there_is_a_partial() {
+    assert_eq!(partial_dialog(false).handle_key(key(KeyCode::Char('u'))), resolved(Some(Resolution::Resume), false));
+    assert_eq!(dialog(false, 0, 1).handle_key(key(KeyCode::Char('u'))), ConflictOutcome::Pending);
+}
+
+#[test]
+fn r_renames_only_when_something_exists() {
+    assert_eq!(partial_dialog(false).handle_key(key(KeyCode::Char('r'))), ConflictOutcome::Pending);
+    assert_eq!(partial_dialog(true).handle_key(key(KeyCode::Char('r'))), resolved(Some(Resolution::Rename), false));
+}
+
+#[test]
+fn a_partial_only_prompt_offers_resume_and_start_over() {
+    let content = render(&partial_dialog(false));
+
+    assert!(content.contains("\"report.pdf\" was partly copied before (1 of 1)"));
+    assert!(content.contains("Partial"));
+    assert!(content.contains("Res[u]me"));
+    assert!(content.contains("Start [o]ver"));
+    assert!(!content.contains("[R]ename"));
+    assert!(!content.contains("Existing"));
+}
+
+#[test]
+fn a_prompt_with_both_offers_everything() {
+    let content = render(&partial_dialog(true));
+
+    assert!(content.contains("already exists"));
+    assert!(content.contains("Res[u]me"));
+    assert!(content.contains("[O]verwrite"));
+    assert!(content.contains("[R]ename"));
+}
+
+#[test]
+fn resume_is_not_offered_when_a_folder_is_in_the_way() {
+    let mut conflict = partial_dialog(true);
+    conflict.existing = Some(ExistingFile { size: 0, modified: None, is_dir: true });
+
+    assert_eq!(conflict.handle_key(key(KeyCode::Char('u'))), ConflictOutcome::Pending);
+    assert!(!render(&conflict).contains("Res[u]me"));
 }

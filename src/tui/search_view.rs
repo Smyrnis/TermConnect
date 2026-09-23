@@ -125,7 +125,8 @@ pub fn render_search(frame: &mut Frame, area: Rect, view: &SearchView) {
         .iter()
         .enumerate()
         .map(|(i, ch)| {
-            let style = if i == view.cursor { Style::default().add_modifier(Modifier::REVERSED) } else { Style::default() };
+            let style =
+                if i == view.cursor { Style::default().add_modifier(Modifier::REVERSED) } else { Style::default() };
             Span::styled(ch.to_string(), style)
         })
         .collect();
@@ -136,12 +137,15 @@ pub fn render_search(frame: &mut Frame, area: Rect, view: &SearchView) {
     frame.render_widget(Paragraph::new(Line::from(spans)).block(pattern_block), rows[0]);
 
     let title = if view.truncated { "Results (truncated)" } else { "Results" };
-    let items: Vec<ListItem> = view.results.iter().map(|entry| ListItem::new(entry.path.display().to_string())).collect();
+    let items: Vec<ListItem> =
+        view.results.iter().map(|entry| ListItem::new(entry.path.display().to_string())).collect();
     let mut state = ListState::default();
     if !view.results.is_empty() {
         state.select(Some(view.selected));
     }
-    let list = List::new(items).block(Block::default().title(title).borders(Borders::ALL)).highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    let list = List::new(items)
+        .block(Block::default().title(title).borders(Borders::ALL))
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
     frame.render_stateful_widget(list, rows[1], &mut state);
 }
 

@@ -4,7 +4,16 @@ use super::*;
 use crate::connection::ConnectionSource;
 
 fn entry(name: &str) -> ConnectionEntry {
-    ConnectionEntry { name: name.to_string(), host: format!("{name}.example.com"), port: 22, username: "user".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }
+    ConnectionEntry {
+        name: name.to_string(),
+        host: format!("{name}.example.com"),
+        port: 22,
+        username: "user".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
+    }
 }
 
 fn panel() -> PanelState {

@@ -78,7 +78,13 @@ fn truncate_name_leaves_a_wide_name_that_already_fits_untouched() {
 
 #[test]
 fn row_label_pads_a_wide_name_to_the_correct_display_width() {
-    let entry = Entry { name: THREE_CHARS_SIX_COLUMNS.to_string(), path: PathBuf::from("/tmp/entry"), is_dir: false, size: 0, permissions: None };
+    let entry = Entry {
+        name: THREE_CHARS_SIX_COLUMNS.to_string(),
+        path: PathBuf::from("/tmp/entry"),
+        is_dir: false,
+        size: 0,
+        permissions: None,
+    };
     let columns = Columns { name_width: 10, show_size: false, show_permissions: false };
 
     let label = row_label(&Row::Entry(entry), false, columns);

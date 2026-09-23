@@ -28,11 +28,30 @@ impl TransferQueue {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn enqueue(&mut self, session_id: u64, direction: Direction, local_path: PathBuf, remote_path: String, display_name: String, total_bytes: u64, batch_id: Option<u64>) -> u64 {
+    pub fn enqueue(
+        &mut self, session_id: u64, direction: Direction, local_path: PathBuf, remote_path: String,
+        display_name: String, total_bytes: u64, batch_id: Option<u64>,
+    ) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
 
-        self.jobs.insert(id, TransferJob { id, session_id, direction, local_path, remote_path, display_name, total_bytes, transferred_bytes: 0, status: JobStatus::Queued, attempts: 0, batch_id });
+        self.jobs.insert(
+            id,
+            TransferJob {
+                id,
+                session_id,
+                direction,
+                local_path,
+                remote_path,
+                display_name,
+                total_bytes,
+                transferred_bytes: 0,
+                status: JobStatus::Queued,
+                attempts: 0,
+                batch_id,
+                resume: false,
+            },
+        );
 
         id
     }
@@ -64,9 +83,9 @@ impl TransferQueue {
             if let Some(job) = self.jobs.get_mut(id)
                 && matches!(job.status, JobStatus::Failed(_) | JobStatus::Cancelled)
             {
+                job.resume = job.attempts > 0;
                 job.status = JobStatus::Queued;
                 job.attempts = 0;
-                job.transferred_bytes = 0;
                 count += 1;
             }
         }
@@ -74,7 +93,8 @@ impl TransferQueue {
     }
 
     pub fn remove_jobs(&mut self, ids: &[u64]) {
-        let touched_batches: HashSet<u64> = ids.iter().filter_map(|id| self.jobs.remove(id)).filter_map(|job| job.batch_id).collect();
+        let touched_batches: HashSet<u64> =
+            ids.iter().filter_map(|id| self.jobs.remove(id)).filter_map(|job| job.batch_id).collect();
         for batch_id in touched_batches {
             self.forget_batch_if_empty(batch_id);
         }
@@ -116,7 +136,11 @@ impl TransferQueue {
     }
 
     pub fn has_pending(&self, session_id: u64, direction: Direction) -> bool {
-        self.jobs.values().any(|job| job.session_id == session_id && job.direction == direction && matches!(job.status, JobStatus::Queued | JobStatus::InProgress))
+        self.jobs.values().any(|job| {
+            job.session_id == session_id
+                && job.direction == direction
+                && matches!(job.status, JobStatus::Queued | JobStatus::InProgress)
+        })
     }
 
     pub fn cancel_all_queued(&mut self) -> usize {
@@ -150,7 +174,7 @@ impl TransferQueue {
 
         if job.attempts < MAX_ATTEMPTS {
             job.status = JobStatus::Queued;
-            job.transferred_bytes = 0;
+            job.resume = true;
             true
         } else {
             false

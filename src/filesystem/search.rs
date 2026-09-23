@@ -55,11 +55,16 @@ fn match_from(pattern: &[char], name: &[char]) -> bool {
     p == pattern.len()
 }
 
-pub async fn search_local(root: PathBuf, pattern: String, tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>) {
+pub async fn search_local(
+    root: PathBuf, pattern: String, tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>,
+) {
     search_local_with_limits(root, pattern, tx, cancel, MAX_DEPTH, MAX_RESULTS).await;
 }
 
-async fn search_local_with_limits(root: PathBuf, pattern: String, tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>, max_depth: usize, max_results: usize) {
+async fn search_local_with_limits(
+    root: PathBuf, pattern: String, tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>, max_depth: usize,
+    max_results: usize,
+) {
     let mut found = 0usize;
     let mut truncated = false;
     let mut stack: Vec<(PathBuf, usize)> = vec![(root, 0)];
@@ -107,7 +112,8 @@ async fn search_local_with_limits(root: PathBuf, pattern: String, tx: mpsc::Unbo
 
             if glob_match(&pattern, &name) {
                 let size = dir_entry.metadata().await.map(|m| m.len()).unwrap_or(0);
-                let _ = tx.send(SearchEvent::Found(Entry { name, path: path.clone(), is_dir, size, permissions: None }));
+                let _ =
+                    tx.send(SearchEvent::Found(Entry { name, path: path.clone(), is_dir, size, permissions: None }));
                 found += 1;
             }
 
@@ -129,12 +135,18 @@ fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
 
-pub async fn search_remote(handle: &Handle<TermConnectHandler>, sftp: &SftpSession, root: String, pattern: String, tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>) {
+pub async fn search_remote(
+    handle: &Handle<TermConnectHandler>, sftp: &SftpSession, root: String, pattern: String,
+    tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>,
+) {
     search_remote_with_limits(handle, sftp, root, pattern, tx, cancel, MAX_DEPTH, MAX_RESULTS).await;
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn search_remote_with_limits(handle: &Handle<TermConnectHandler>, sftp: &SftpSession, root: String, pattern: String, tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>, max_depth: usize, max_results: usize) {
+async fn search_remote_with_limits(
+    handle: &Handle<TermConnectHandler>, sftp: &SftpSession, root: String, pattern: String,
+    tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>, max_depth: usize, max_results: usize,
+) {
     match run_find(handle, &root, &pattern, max_depth, &cancel).await {
         Some(paths) => {
             let mut found = 0usize;
@@ -151,7 +163,13 @@ async fn search_remote_with_limits(handle: &Handle<TermConnectHandler>, sftp: &S
 
                 if let Ok(metadata) = sftp.metadata(&path).await {
                     let name = path.rsplit('/').next().unwrap_or(&path).to_string();
-                    let _ = tx.send(SearchEvent::Found(Entry { name, path: PathBuf::from(&path), is_dir: metadata.is_dir(), size: metadata.len(), permissions: metadata.permissions }));
+                    let _ = tx.send(SearchEvent::Found(Entry {
+                        name,
+                        path: PathBuf::from(&path),
+                        is_dir: metadata.is_dir(),
+                        size: metadata.len(),
+                        permissions: metadata.permissions,
+                    }));
                     found += 1;
                 }
             }
@@ -164,7 +182,9 @@ async fn search_remote_with_limits(handle: &Handle<TermConnectHandler>, sftp: &S
     }
 }
 
-async fn run_find(handle: &Handle<TermConnectHandler>, root: &str, pattern: &str, max_depth: usize, cancel: &Arc<AtomicBool>) -> Option<Vec<String>> {
+async fn run_find(
+    handle: &Handle<TermConnectHandler>, root: &str, pattern: &str, max_depth: usize, cancel: &Arc<AtomicBool>,
+) -> Option<Vec<String>> {
     let mut channel = handle.channel_open_session().await.ok()?;
     let command = format!("find {} -maxdepth {max_depth} -iname {}", shell_quote(root), shell_quote(pattern));
     channel.exec(true, command.into_bytes()).await.ok()?;
@@ -199,7 +219,10 @@ async fn run_find(handle: &Handle<TermConnectHandler>, root: &str, pattern: &str
     Some(text.lines().filter(|line| !line.is_empty()).map(str::to_string).collect())
 }
 
-async fn search_remote_walk(sftp: &SftpSession, root: String, pattern: String, tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>, max_depth: usize, max_results: usize) {
+async fn search_remote_walk(
+    sftp: &SftpSession, root: String, pattern: String, tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>,
+    max_depth: usize, max_results: usize,
+) {
     let mut found = 0usize;
     let mut truncated = false;
     let mut stack: Vec<(String, usize)> = vec![(root, 0)];
@@ -231,7 +254,13 @@ async fn search_remote_walk(sftp: &SftpSession, root: String, pattern: String, t
             let path = join(&dir, &name);
 
             if glob_match(&pattern, &name) {
-                let _ = tx.send(SearchEvent::Found(Entry { name: name.clone(), path: PathBuf::from(&path), is_dir: metadata.is_dir(), size: metadata.len(), permissions: metadata.permissions }));
+                let _ = tx.send(SearchEvent::Found(Entry {
+                    name: name.clone(),
+                    path: PathBuf::from(&path),
+                    is_dir: metadata.is_dir(),
+                    size: metadata.len(),
+                    permissions: metadata.permissions,
+                }));
                 found += 1;
             }
 

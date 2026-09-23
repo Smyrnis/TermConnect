@@ -1,11 +1,27 @@
 use super::*;
 
 fn queue_with_one_job(queue: &mut TransferQueue) -> u64 {
-    queue.enqueue(1, Direction::Upload, PathBuf::from("/local/file.txt"), "/remote/file.txt".to_string(), "file.txt".to_string(), 100, None)
+    queue.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from("/local/file.txt"),
+        "/remote/file.txt".to_string(),
+        "file.txt".to_string(),
+        100,
+        None,
+    )
 }
 
 fn queue_with_a_batch_job(queue: &mut TransferQueue, batch_id: u64, name: &str, total_bytes: u64) -> u64 {
-    queue.enqueue(1, Direction::Upload, PathBuf::from(format!("/local/{name}")), format!("/remote/{name}"), name.to_string(), total_bytes, Some(batch_id))
+    queue.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from(format!("/local/{name}")),
+        format!("/remote/{name}"),
+        name.to_string(),
+        total_bytes,
+        Some(batch_id),
+    )
 }
 
 #[test]
@@ -36,7 +52,7 @@ fn retry_or_give_up_requeues_within_the_attempt_limit() {
     assert!(queue.retry_or_give_up(id));
     let job = queue.get(id).unwrap();
     assert_eq!(job.status, JobStatus::Queued);
-    assert_eq!(job.transferred_bytes, 0);
+    assert_eq!(job.transferred_bytes, 50);
 }
 
 #[test]
@@ -53,11 +69,35 @@ fn retry_or_give_up_stops_after_max_attempts() {
 #[test]
 fn fail_queued_for_session_marks_only_that_sessions_queued_jobs() {
     let mut queue = TransferQueue::new();
-    let a1 = queue.enqueue(1, Direction::Upload, PathBuf::from("/local/a1.txt"), "/remote/a1.txt".to_string(), "a1.txt".to_string(), 10, None);
-    let a2 = queue.enqueue(1, Direction::Upload, PathBuf::from("/local/a2.txt"), "/remote/a2.txt".to_string(), "a2.txt".to_string(), 10, None);
+    let a1 = queue.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from("/local/a1.txt"),
+        "/remote/a1.txt".to_string(),
+        "a1.txt".to_string(),
+        10,
+        None,
+    );
+    let a2 = queue.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from("/local/a2.txt"),
+        "/remote/a2.txt".to_string(),
+        "a2.txt".to_string(),
+        10,
+        None,
+    );
     let other = queue_with_one_job(&mut queue);
     queue.get_mut(other).unwrap().session_id = 2;
-    let in_progress = queue.enqueue(1, Direction::Upload, PathBuf::from("/local/a3.txt"), "/remote/a3.txt".to_string(), "a3.txt".to_string(), 10, None);
+    let in_progress = queue.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from("/local/a3.txt"),
+        "/remote/a3.txt".to_string(),
+        "a3.txt".to_string(),
+        10,
+        None,
+    );
     queue.get_mut(in_progress).unwrap().status = JobStatus::InProgress;
 
     let count = queue.fail_queued_for_session(1, "session disconnected");
@@ -92,7 +132,15 @@ fn batch_progress_aggregates_across_every_job_in_the_batch() {
 }
 
 fn enqueue_for(queue: &mut TransferQueue, session_id: u64, direction: Direction, name: &str) -> u64 {
-    queue.enqueue(session_id, direction, PathBuf::from(format!("/local/{name}")), format!("/remote/{name}"), name.to_string(), 10, None)
+    queue.enqueue(
+        session_id,
+        direction,
+        PathBuf::from(format!("/local/{name}")),
+        format!("/remote/{name}"),
+        name.to_string(),
+        10,
+        None,
+    )
 }
 
 #[test]
@@ -294,7 +342,7 @@ fn retry_jobs_requeues_only_failed_and_cancelled_jobs_and_resets_them() {
 
     assert_eq!(count, 2);
     let job = queue.get(failed).unwrap();
-    assert_eq!((job.status.clone(), job.attempts, job.transferred_bytes), (JobStatus::Queued, 0, 0));
+    assert_eq!((job.status.clone(), job.attempts, job.transferred_bytes), (JobStatus::Queued, 0, 5));
     assert_eq!(queue.get(cancelled).unwrap().status, JobStatus::Queued);
     assert_eq!(queue.get(completed).unwrap().status, JobStatus::Completed);
     assert_eq!(queue.get(running).unwrap().status, JobStatus::InProgress);
@@ -349,4 +397,47 @@ fn forget_batch_if_empty_drops_only_an_unused_label() {
 
     assert_eq!(queue.batch_label(unused), None);
     assert_eq!(queue.batch_label(used), Some("photos"));
+}
+
+#[test]
+fn new_jobs_do_not_resume() {
+    let mut queue = TransferQueue::new();
+    let id = queue_with_one_job(&mut queue);
+
+    assert!(!queue.get(id).unwrap().resume);
+}
+
+#[test]
+fn an_automatic_retry_resumes() {
+    let mut queue = TransferQueue::new();
+    let id = queue_with_one_job(&mut queue);
+    queue.get_mut(id).unwrap().status = JobStatus::Failed("boom".to_string());
+    queue.get_mut(id).unwrap().attempts = 1;
+
+    assert!(queue.retry_or_give_up(id));
+
+    assert!(queue.get(id).unwrap().resume);
+}
+
+#[test]
+fn a_manual_retry_resumes() {
+    let mut queue = TransferQueue::new();
+    let id = queue_with_one_job(&mut queue);
+    queue.get_mut(id).unwrap().status = JobStatus::Cancelled;
+    queue.get_mut(id).unwrap().attempts = 1;
+
+    queue.retry_jobs(&[id]);
+
+    assert!(queue.get(id).unwrap().resume);
+}
+
+#[test]
+fn a_manual_retry_of_a_job_that_never_started_does_not_resume() {
+    let mut queue = TransferQueue::new();
+    let id = queue_with_one_job(&mut queue);
+    queue.get_mut(id).unwrap().status = JobStatus::Cancelled;
+
+    queue.retry_jobs(&[id]);
+
+    assert!(!queue.get(id).unwrap().resume);
 }

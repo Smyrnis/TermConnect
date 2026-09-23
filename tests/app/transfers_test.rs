@@ -27,17 +27,40 @@ fn app_with_a_local_directory_selected() -> (tempfile::TempDir, App) {
 }
 
 fn sample_connection_entry() -> ConnectionEntry {
-    ConnectionEntry { name: "test".to_string(), host: "test.example.com".to_string(), port: 22, username: "user".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }
+    ConnectionEntry {
+        name: "test".to_string(),
+        host: "test.example.com".to_string(),
+        port: 22,
+        username: "user".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
+    }
 }
 
 fn planning_scan(batch_id: u64, name: &str) -> PlanningScan {
-    PlanningScan { batch_id, session_id: 1, direction: Direction::Upload, display_name: name.to_string(), cancel: Arc::new(AtomicBool::new(false)) }
+    PlanningScan {
+        batch_id,
+        session_id: 1,
+        direction: Direction::Upload,
+        display_name: name.to_string(),
+        cancel: Arc::new(AtomicBool::new(false)),
+    }
 }
 
 #[test]
 fn fill_transfer_slots_notifies_when_the_jobs_session_has_disconnected() {
     let (_dir, mut app) = app_in_temp_dir();
-    app.transfers.enqueue(999, Direction::Upload, PathBuf::from("/local/file.txt"), "/remote/file.txt".to_string(), "file.txt".to_string(), 100, None);
+    app.transfers.enqueue(
+        999,
+        Direction::Upload,
+        PathBuf::from("/local/file.txt"),
+        "/remote/file.txt".to_string(),
+        "file.txt".to_string(),
+        100,
+        None,
+    );
 
     app.fill_transfer_slots();
 
@@ -65,7 +88,32 @@ fn copying_a_directory_with_a_disconnected_session_fails_without_spawning() {
 fn plan_ready_enqueues_every_planned_file_under_the_batch_id() {
     let (_dir, mut app) = app_in_temp_dir();
     let batch_id = app.transfers.start_batch("batch".to_string());
-    let plan = DirectoryPlan { files: vec![PlannedFile { local_path: PathBuf::from("/local/a.txt"), remote_path: "/remote/a.txt".to_string(), display_name: "a.txt".to_string(), size: 10, existing: None, source_modified: None }, PlannedFile { local_path: PathBuf::from("/local/b.txt"), remote_path: "/remote/b.txt".to_string(), display_name: "b.txt".to_string(), size: 20, existing: None, source_modified: None }], skipped_symlinks: 0, taken_names: HashMap::new() };
+    let plan = DirectoryPlan {
+        files: vec![
+            PlannedFile {
+                local_path: PathBuf::from("/local/a.txt"),
+                remote_path: "/remote/a.txt".to_string(),
+                display_name: "a.txt".to_string(),
+                size: 10,
+                existing: None,
+                source_modified: None,
+                partial: None,
+                resume: false,
+            },
+            PlannedFile {
+                local_path: PathBuf::from("/local/b.txt"),
+                remote_path: "/remote/b.txt".to_string(),
+                display_name: "b.txt".to_string(),
+                size: 20,
+                existing: None,
+                source_modified: None,
+                partial: None,
+                resume: false,
+            },
+        ],
+        skipped_symlinks: 0,
+        taken_names: HashMap::new(),
+    };
 
     app.apply_plan_ready(batch_id, 1, Direction::Upload, plan, &[]);
 
@@ -92,7 +140,20 @@ fn plan_ready_fails_without_enqueueing_when_the_session_has_disconnected() {
     let (_dir, mut app) = app_in_temp_dir();
     let batch_id = app.transfers.start_batch("batch".to_string());
     app.planning.push(planning_scan(batch_id, "myfolder"));
-    let plan = DirectoryPlan { files: vec![PlannedFile { local_path: PathBuf::from("/local/a.txt"), remote_path: "/remote/a.txt".to_string(), display_name: "a.txt".to_string(), size: 10, existing: None, source_modified: None }], skipped_symlinks: 0, taken_names: HashMap::new() };
+    let plan = DirectoryPlan {
+        files: vec![PlannedFile {
+            local_path: PathBuf::from("/local/a.txt"),
+            remote_path: "/remote/a.txt".to_string(),
+            display_name: "a.txt".to_string(),
+            size: 10,
+            existing: None,
+            source_modified: None,
+            partial: None,
+            resume: false,
+        }],
+        skipped_symlinks: 0,
+        taken_names: HashMap::new(),
+    };
 
     app.apply_transfer_event(TransferEvent::PlanReady { batch_id, session_id: 1, direction: Direction::Upload, plan });
 
@@ -109,7 +170,10 @@ fn plan_failed_clears_planning_and_shows_an_error() {
     let batch_id = app.transfers.start_batch("batch".to_string());
     app.planning.push(planning_scan(batch_id, "myfolder"));
 
-    app.apply_transfer_event(TransferEvent::PlanFailed { batch_id, message: "Copy failed: permission denied".to_string() });
+    app.apply_transfer_event(TransferEvent::PlanFailed {
+        batch_id,
+        message: "Copy failed: permission denied".to_string(),
+    });
 
     assert!(app.planning.is_empty());
     let notification = app.notifications.current().unwrap();
@@ -120,7 +184,8 @@ fn plan_failed_clears_planning_and_shows_an_error() {
 #[test]
 fn plan_cancelled_clears_planning_and_shows_an_info_notification() {
     let (_dir, mut app) = app_in_temp_dir();
-    let session_id = app.sessions.insert(sample_connection_entry(), PanelState::from_listing(PathBuf::from("/remote"), Vec::new()));
+    let session_id =
+        app.sessions.insert(sample_connection_entry(), PanelState::from_listing(PathBuf::from("/remote"), Vec::new()));
     let batch_id = app.transfers.start_batch("batch".to_string());
     app.planning.push(planning_scan(batch_id, "myfolder"));
 
@@ -141,7 +206,11 @@ fn plan_cancelled_only_clears_its_own_scan() {
     app.planning.push(planning_scan(first, "one"));
     app.planning.push(planning_scan(second, "two"));
 
-    app.apply_transfer_event(TransferEvent::PlanCancelled { batch_id: first, session_id: 1, direction: Direction::Upload });
+    app.apply_transfer_event(TransferEvent::PlanCancelled {
+        batch_id: first,
+        session_id: 1,
+        direction: Direction::Upload,
+    });
 
     let remaining: Vec<u64> = app.planning.iter().map(|scan| scan.batch_id).collect();
     assert_eq!(remaining, vec![second]);
@@ -164,8 +233,24 @@ fn cancel_all_copies_stops_scans_and_the_active_batch_together() {
     let (_dir, mut app) = app_in_temp_dir();
     app.planning.push(planning_scan(100, "scanning"));
     let batch_id = app.transfers.start_batch("batch".to_string());
-    let active = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 10, Some(batch_id));
-    let queued = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/b.txt"), "/remote/b.txt".to_string(), "b.txt".to_string(), 10, Some(batch_id));
+    let active = app.transfers.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from("/local/a.txt"),
+        "/remote/a.txt".to_string(),
+        "a.txt".to_string(),
+        10,
+        Some(batch_id),
+    );
+    let queued = app.transfers.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from("/local/b.txt"),
+        "/remote/b.txt".to_string(),
+        "b.txt".to_string(),
+        10,
+        Some(batch_id),
+    );
     app.transfers.get_mut(active).unwrap().status = JobStatus::InProgress;
     let transfer_cancel = Arc::new(AtomicBool::new(false));
     app.transfer_cancels.insert(active, transfer_cancel.clone());
@@ -188,7 +273,15 @@ fn cancel_all_copies_with_nothing_running_is_a_no_op() {
 }
 
 fn enqueue_job(app: &mut App, session_id: u64, name: &str, batch_id: Option<u64>) -> u64 {
-    app.transfers.enqueue(session_id, Direction::Upload, PathBuf::from(format!("/local/{name}")), format!("/remote/{name}"), name.to_string(), 10, batch_id)
+    app.transfers.enqueue(
+        session_id,
+        Direction::Upload,
+        PathBuf::from(format!("/local/{name}")),
+        format!("/remote/{name}"),
+        name.to_string(),
+        10,
+        batch_id,
+    )
 }
 
 fn mark_active(app: &mut App, id: u64) -> Arc<AtomicBool> {
@@ -249,7 +342,13 @@ fn cancel_session_transfers_flags_only_that_sessions_jobs_and_scans() {
     let (_dir, mut app) = app_in_temp_dir();
     let mine = enqueue_job(&mut app, 1, "a.txt", None);
     let my_cancel = mark_active(&mut app, mine);
-    app.planning.push(PlanningScan { batch_id: 7, session_id: 1, direction: Direction::Upload, display_name: "mine".to_string(), cancel: Arc::new(AtomicBool::new(false)) });
+    app.planning.push(PlanningScan {
+        batch_id: 7,
+        session_id: 1,
+        direction: Direction::Upload,
+        display_name: "mine".to_string(),
+        cancel: Arc::new(AtomicBool::new(false)),
+    });
 
     let flagged = app.cancel_session_transfers(1);
 
@@ -263,7 +362,13 @@ fn cancel_session_transfers_leaves_other_sessions_alone() {
     let (_dir, mut app) = app_in_temp_dir();
     let theirs = enqueue_job(&mut app, 2, "a.txt", None);
     let their_cancel = mark_active(&mut app, theirs);
-    app.planning.push(PlanningScan { batch_id: 7, session_id: 2, direction: Direction::Upload, display_name: "theirs".to_string(), cancel: Arc::new(AtomicBool::new(false)) });
+    app.planning.push(PlanningScan {
+        batch_id: 7,
+        session_id: 2,
+        direction: Direction::Upload,
+        display_name: "theirs".to_string(),
+        cancel: Arc::new(AtomicBool::new(false)),
+    });
 
     let flagged = app.cancel_session_transfers(1);
 
@@ -296,7 +401,9 @@ fn a_failed_event_removes_its_cancel_flag_and_requeues_within_the_retry_limit() 
     app.apply_transfer_event(TransferEvent::Failed { id: job, message: "Transfer failed: a.txt".to_string() });
 
     assert!(!app.transfer_cancels.contains_key(&job));
-    assert!(matches!(app.transfers.get(job).unwrap().status, JobStatus::Failed(ref reason) if reason == "session disconnected"));
+    assert!(
+        matches!(app.transfers.get(job).unwrap().status, JobStatus::Failed(ref reason) if reason == "session disconnected")
+    );
 }
 
 #[test]
@@ -315,29 +422,71 @@ fn a_cancelled_job_that_ends_in_an_error_is_not_retried() {
 #[test]
 fn a_permanent_failure_of_the_last_pending_job_refreshes_the_destination() {
     let (dir, mut app) = app_in_temp_dir();
-    let done = app.transfers.enqueue(1, Direction::Download, dir.path().join("done.txt"), "/remote/done.txt".to_string(), "done.txt".to_string(), 10, None);
+    let done = app.transfers.enqueue(
+        1,
+        Direction::Download,
+        dir.path().join("done.txt"),
+        "/remote/done.txt".to_string(),
+        "done.txt".to_string(),
+        10,
+        None,
+    );
     app.transfers.get_mut(done).unwrap().status = JobStatus::Completed;
     std::fs::write(dir.path().join("done.txt"), b"x").unwrap();
-    let failing = app.transfers.enqueue(1, Direction::Download, dir.path().join("bad.txt"), "/remote/bad.txt".to_string(), "bad.txt".to_string(), 10, None);
+    let failing = app.transfers.enqueue(
+        1,
+        Direction::Download,
+        dir.path().join("bad.txt"),
+        "/remote/bad.txt".to_string(),
+        "bad.txt".to_string(),
+        10,
+        None,
+    );
     mark_active(&mut app, failing);
     app.transfers.get_mut(failing).unwrap().attempts = 3;
 
     app.apply_transfer_event(TransferEvent::Failed { id: failing, message: "Transfer failed: bad.txt".to_string() });
 
-    assert!(app.local.rows().iter().any(|row| matches!(row, crate::tui::panels::Row::Entry(entry) if entry.name == "done.txt")));
+    assert!(
+        app.local
+            .rows()
+            .iter()
+            .any(|row| matches!(row, crate::tui::panels::Row::Entry(entry) if entry.name == "done.txt"))
+    );
 }
 
 #[test]
 fn a_job_that_fails_to_start_refreshes_the_destination_once_nothing_is_pending() {
     let (dir, mut app) = app_in_temp_dir();
-    let done = app.transfers.enqueue(999, Direction::Download, dir.path().join("done.txt"), "/remote/done.txt".to_string(), "done.txt".to_string(), 10, None);
+    let done = app.transfers.enqueue(
+        999,
+        Direction::Download,
+        dir.path().join("done.txt"),
+        "/remote/done.txt".to_string(),
+        "done.txt".to_string(),
+        10,
+        None,
+    );
     app.transfers.get_mut(done).unwrap().status = JobStatus::Completed;
     std::fs::write(dir.path().join("done.txt"), b"x").unwrap();
-    app.transfers.enqueue(999, Direction::Download, dir.path().join("bad.txt"), "/remote/bad.txt".to_string(), "bad.txt".to_string(), 10, None);
+    app.transfers.enqueue(
+        999,
+        Direction::Download,
+        dir.path().join("bad.txt"),
+        "/remote/bad.txt".to_string(),
+        "bad.txt".to_string(),
+        10,
+        None,
+    );
 
     app.fill_transfer_slots();
 
-    assert!(app.local.rows().iter().any(|row| matches!(row, crate::tui::panels::Row::Entry(entry) if entry.name == "done.txt")));
+    assert!(
+        app.local
+            .rows()
+            .iter()
+            .any(|row| matches!(row, crate::tui::panels::Row::Entry(entry) if entry.name == "done.txt"))
+    );
 }
 
 #[test]
@@ -353,7 +502,15 @@ fn plan_cancelled_for_a_disconnected_session_is_silent() {
 }
 
 fn download_job(app: &mut App, dir: &std::path::Path, session_id: u64, name: &str) -> u64 {
-    app.transfers.enqueue(session_id, Direction::Download, dir.join(name), format!("/remote/{name}"), name.to_string(), 10, None)
+    app.transfers.enqueue(
+        session_id,
+        Direction::Download,
+        dir.join(name),
+        format!("/remote/{name}"),
+        name.to_string(),
+        10,
+        None,
+    )
 }
 
 fn local_panel_shows(app: &App, name: &str) -> bool {
@@ -410,7 +567,11 @@ fn plan_failed_and_cancelled_forget_the_batch_label() {
     let cancelled = app.transfers.start_batch("two".to_string());
 
     app.apply_transfer_event(TransferEvent::PlanFailed { batch_id: failed, message: "Copy failed: boom".to_string() });
-    app.apply_transfer_event(TransferEvent::PlanCancelled { batch_id: cancelled, session_id: 1, direction: Direction::Upload });
+    app.apply_transfer_event(TransferEvent::PlanCancelled {
+        batch_id: cancelled,
+        session_id: 1,
+        direction: Direction::Upload,
+    });
 
     assert_eq!(app.transfers.batch_label(failed), None);
     assert_eq!(app.transfers.batch_label(cancelled), None);
@@ -432,10 +593,31 @@ fn a_ready_plan_keeps_its_label_only_when_it_has_files() {
     let (_dir, mut app) = app_in_temp_dir();
     let with_files = app.transfers.start_batch("photos".to_string());
     let empty = app.transfers.start_batch("empty".to_string());
-    let file = PlannedFile { local_path: PathBuf::from("/local/a.txt"), remote_path: "/remote/a.txt".to_string(), display_name: "a.txt".to_string(), size: 10, existing: None, source_modified: None };
+    let file = PlannedFile {
+        local_path: PathBuf::from("/local/a.txt"),
+        remote_path: "/remote/a.txt".to_string(),
+        display_name: "a.txt".to_string(),
+        size: 10,
+        existing: None,
+        source_modified: None,
+        partial: None,
+        resume: false,
+    };
 
-    app.apply_plan_ready(with_files, 1, Direction::Upload, DirectoryPlan { files: vec![file], skipped_symlinks: 0, taken_names: HashMap::new() }, &[]);
-    app.apply_plan_ready(empty, 1, Direction::Upload, DirectoryPlan { files: Vec::new(), skipped_symlinks: 0, taken_names: HashMap::new() }, &[]);
+    app.apply_plan_ready(
+        with_files,
+        1,
+        Direction::Upload,
+        DirectoryPlan { files: vec![file], skipped_symlinks: 0, taken_names: HashMap::new() },
+        &[],
+    );
+    app.apply_plan_ready(
+        empty,
+        1,
+        Direction::Upload,
+        DirectoryPlan { files: Vec::new(), skipped_symlinks: 0, taken_names: HashMap::new() },
+        &[],
+    );
 
     assert_eq!(app.transfers.batch_label(with_files), Some("photos"));
     assert_eq!(app.transfers.batch_label(empty), None);

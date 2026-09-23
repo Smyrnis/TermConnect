@@ -18,7 +18,16 @@ pub fn list_all() -> Result<Vec<ConnectionEntry>> {
             continue;
         }
 
-        entries.push(ConnectionEntry { name: host.name, host: host.host_name.unwrap_or_default(), port: host.port.unwrap_or(22), username: host.user.unwrap_or_else(default_username), identity_file: host.identity_file, remote_path: None, password: None, source: ConnectionSource::SshConfig });
+        entries.push(ConnectionEntry {
+            name: host.name,
+            host: host.host_name.unwrap_or_default(),
+            port: host.port.unwrap_or(22),
+            username: host.user.unwrap_or_else(default_username),
+            identity_file: host.identity_file,
+            remote_path: None,
+            password: None,
+            source: ConnectionSource::SshConfig,
+        });
     }
 
     entries.sort_by_key(|entry| entry.name.to_lowercase());

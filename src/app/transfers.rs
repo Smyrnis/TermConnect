@@ -64,8 +64,12 @@ impl App {
         tokio::spawn(async move {
             let result = transfer::plan::plan_copy(direction, entries, &dest_dir, &sftp, &cancel).await;
             let event = match result {
-                Ok(transfer::plan::PlanOutcome::Ready(plan)) => TransferEvent::PlanReady { batch_id, session_id, direction, plan },
-                Ok(transfer::plan::PlanOutcome::Cancelled) => TransferEvent::PlanCancelled { batch_id, session_id, direction },
+                Ok(transfer::plan::PlanOutcome::Ready(plan)) => {
+                    TransferEvent::PlanReady { batch_id, session_id, direction, plan }
+                }
+                Ok(transfer::plan::PlanOutcome::Cancelled) => {
+                    TransferEvent::PlanCancelled { batch_id, session_id, direction }
+                }
                 Err(err) => {
                     tracing::debug!("{err:?}");
                     TransferEvent::PlanFailed { batch_id, message: errors::user_message("Copy failed", &err) }
@@ -98,7 +102,8 @@ impl App {
             if let Some(job) = self.transfers.get_mut(id) {
                 job.status = JobStatus::Failed("session disconnected".to_string());
             }
-            self.notifications.push(Severity::Error, format!("Transfer failed: {display_name} \u{2014} session disconnected"));
+            self.notifications
+                .push(Severity::Error, format!("Transfer failed: {display_name} \u{2014} session disconnected"));
             self.refresh_transfer_destination(id);
             return;
         };
@@ -112,6 +117,7 @@ impl App {
         let direction = job.direction;
         let local_path = job.local_path.clone();
         let remote_path = job.remote_path.clone();
+        let resume = job.resume;
 
         let cancel = Arc::new(AtomicBool::new(false));
         self.transfer_cancels.insert(id, cancel.clone());
@@ -119,16 +125,20 @@ impl App {
         let tx = self.transfer_tx.clone();
         tokio::spawn(async move {
             let progress_tx = tx.clone();
-            let result = transfer::run(direction, &local_path, &remote_path, &sftp, &cancel, move |transferred| {
-                let _ = progress_tx.send(TransferEvent::Progress { id, transferred });
-            })
-            .await;
+            let result =
+                transfer::run(direction, &local_path, &remote_path, &sftp, &cancel, resume, move |transferred| {
+                    let _ = progress_tx.send(TransferEvent::Progress { id, transferred });
+                })
+                .await;
 
             let event = match result {
                 Ok(outcome) => TransferEvent::Finished { id, outcome },
                 Err(err) => {
                     tracing::debug!("{err:?}");
-                    TransferEvent::Failed { id, message: errors::user_message(format!("Transfer failed: {display_name}"), &err) }
+                    TransferEvent::Failed {
+                        id,
+                        message: errors::user_message(format!("Transfer failed: {display_name}"), &err),
+                    }
                 }
             };
             let _ = tx.send(event);
@@ -192,6 +202,9 @@ impl App {
                 self.transfers.forget_batch_if_empty(batch_id);
                 self.notifications.push(Severity::Error, message);
             }
+            TransferEvent::PartialsRemoved { session_id } => {
+                self.refresh_destination_panel(session_id, Direction::Upload)
+            }
             TransferEvent::PlanCancelled { batch_id, session_id, direction } => {
                 self.clear_planning(batch_id);
                 self.transfers.forget_batch_if_empty(batch_id);
@@ -204,7 +217,10 @@ impl App {
         }
     }
 
-    pub(super) fn apply_plan_ready(&mut self, batch_id: u64, session_id: u64, direction: Direction, plan: transfer::plan::DirectoryPlan, answers: &[transfer::conflicts::Resolution]) {
+    pub(super) fn apply_plan_ready(
+        &mut self, batch_id: u64, session_id: u64, direction: Direction, plan: transfer::plan::DirectoryPlan,
+        answers: &[transfer::conflicts::Resolution],
+    ) {
         let skipped_symlinks = plan.skipped_symlinks;
         let resolved = transfer::conflicts::resolve(plan, answers, direction);
         let files = resolved.files;
@@ -213,7 +229,19 @@ impl App {
         }
 
         for file in files {
-            self.transfers.enqueue(session_id, direction, file.local_path, file.remote_path, file.display_name, file.size, Some(batch_id));
+            let resume = file.resume;
+            let id = self.transfers.enqueue(
+                session_id,
+                direction,
+                file.local_path,
+                file.remote_path,
+                file.display_name,
+                file.size,
+                Some(batch_id),
+            );
+            if resume && let Some(job) = self.transfers.get_mut(id) {
+                job.resume = true;
+            }
         }
         if skipped_symlinks > 0 {
             let plural = if skipped_symlinks == 1 { "" } else { "s" };
@@ -223,8 +251,17 @@ impl App {
             let plural = if resolved.skipped == 1 { "" } else { "s" };
             self.notifications.push(Severity::Info, format!("Skipped {} existing file{plural}", resolved.skipped));
         }
+        if resolved.skipped_partials > 0 {
+            let plural = if resolved.skipped_partials == 1 { "" } else { "s" };
+            self.notifications
+                .push(Severity::Info, format!("Skipped {} partly copied file{plural}", resolved.skipped_partials));
+        }
         if resolved.blocked_by_folder > 0 {
-            let reason = if resolved.blocked_by_folder == 1 { "file because a folder with the same name exists" } else { "files because folders with the same names exist" };
+            let reason = if resolved.blocked_by_folder == 1 {
+                "file because a folder with the same name exists"
+            } else {
+                "files because folders with the same names exist"
+            };
             self.notifications.push(Severity::Warning, format!("Skipped {} {reason}", resolved.blocked_by_folder));
         }
         self.transfers.forget_batch_if_empty(batch_id);
@@ -291,7 +328,8 @@ impl App {
     }
 
     pub(super) fn cancel_session_transfers(&mut self, session_id: u64) -> usize {
-        let session_scans: Vec<&PlanningScan> = self.planning.iter().filter(|scan| scan.session_id == session_id).collect();
+        let session_scans: Vec<&PlanningScan> =
+            self.planning.iter().filter(|scan| scan.session_id == session_id).collect();
         for scan in &session_scans {
             scan.cancel.store(true, Ordering::Relaxed);
         }

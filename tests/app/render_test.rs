@@ -10,11 +10,26 @@ fn app_in_temp_dir() -> (tempfile::TempDir, App) {
 }
 
 fn sample_connection_entry() -> ConnectionEntry {
-    ConnectionEntry { name: "test".to_string(), host: "test.example.com".to_string(), port: 22, username: "user".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }
+    ConnectionEntry {
+        name: "test".to_string(),
+        host: "test.example.com".to_string(),
+        port: 22,
+        username: "user".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
+    }
 }
 
 fn planning_scan(batch_id: u64, name: &str) -> PlanningScan {
-    PlanningScan { batch_id, session_id: 1, direction: Direction::Upload, display_name: name.to_string(), cancel: Arc::new(AtomicBool::new(false)) }
+    PlanningScan {
+        batch_id,
+        session_id: 1,
+        direction: Direction::Upload,
+        display_name: name.to_string(),
+        cancel: Arc::new(AtomicBool::new(false)),
+    }
 }
 
 fn render_status_text(app: &App) -> String {
@@ -72,8 +87,24 @@ fn render_status_shows_scanning_while_planning() {
 fn transfer_status_text_shows_batch_progress_for_a_batch_job() {
     let (_dir, mut app) = app_in_temp_dir();
     let batch_id = app.transfers.start_batch("batch".to_string());
-    let active = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 100, Some(batch_id));
-    app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/b.txt"), "/remote/b.txt".to_string(), "b.txt".to_string(), 100, Some(batch_id));
+    let active = app.transfers.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from("/local/a.txt"),
+        "/remote/a.txt".to_string(),
+        "a.txt".to_string(),
+        100,
+        Some(batch_id),
+    );
+    app.transfers.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from("/local/b.txt"),
+        "/remote/b.txt".to_string(),
+        "b.txt".to_string(),
+        100,
+        Some(batch_id),
+    );
     {
         let job = app.transfers.get_mut(active).unwrap();
         job.status = JobStatus::InProgress;
@@ -89,7 +120,15 @@ fn transfer_status_text_shows_batch_progress_for_a_batch_job() {
 #[test]
 fn transfer_status_text_is_unchanged_for_a_non_batch_job() {
     let (_dir, mut app) = app_in_temp_dir();
-    let active = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 100, None);
+    let active = app.transfers.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from("/local/a.txt"),
+        "/remote/a.txt".to_string(),
+        "a.txt".to_string(),
+        100,
+        None,
+    );
     {
         let job = app.transfers.get_mut(active).unwrap();
         job.status = JobStatus::InProgress;
@@ -126,8 +165,18 @@ fn planning_status_text_counts_several_scans() {
     assert_eq!(app.planning_status_text(), Some("Scanning 2 copies\u{2026}".to_string()));
 }
 
-fn active_job(app: &mut App, direction: Direction, name: &str, total_bytes: u64, transferred_bytes: u64, batch_id: Option<u64>) -> u64 {
-    let id = app.transfers.enqueue(1, direction, PathBuf::from(format!("/local/{name}")), format!("/remote/{name}"), name.to_string(), total_bytes, batch_id);
+fn active_job(
+    app: &mut App, direction: Direction, name: &str, total_bytes: u64, transferred_bytes: u64, batch_id: Option<u64>,
+) -> u64 {
+    let id = app.transfers.enqueue(
+        1,
+        direction,
+        PathBuf::from(format!("/local/{name}")),
+        format!("/remote/{name}"),
+        name.to_string(),
+        total_bytes,
+        batch_id,
+    );
     let job = app.transfers.get_mut(id).unwrap();
     job.status = JobStatus::InProgress;
     job.transferred_bytes = transferred_bytes;
@@ -145,7 +194,15 @@ fn transfer_status_text_summarizes_several_jobs_from_one_batch() {
     let batch_id = app.transfers.start_batch("batch".to_string());
     active_job(&mut app, Direction::Upload, "a.txt", 100, 50, Some(batch_id));
     active_job(&mut app, Direction::Upload, "b.txt", 100, 50, Some(batch_id));
-    app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/c.txt"), "/remote/c.txt".to_string(), "c.txt".to_string(), 200, Some(batch_id));
+    app.transfers.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from("/local/c.txt"),
+        "/remote/c.txt".to_string(),
+        "c.txt".to_string(),
+        200,
+        Some(batch_id),
+    );
 
     assert_eq!(status_of_active_jobs(&app), "Uploading 2 files: 0/3 files, 25% (1 queued)");
 }

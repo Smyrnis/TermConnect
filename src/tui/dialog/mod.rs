@@ -63,7 +63,9 @@ impl Dialog {
             },
             Dialog::Conflict(dialog) => match dialog.handle_key(key) {
                 conflict::ConflictOutcome::Pending => DialogOutcome::Pending,
-                conflict::ConflictOutcome::Resolved { resolution, apply_to_rest } => DialogOutcome::Resolved { resolution, apply_to_rest },
+                conflict::ConflictOutcome::Resolved { resolution, apply_to_rest } => {
+                    DialogOutcome::Resolved { resolution, apply_to_rest }
+                }
             },
         }
     }

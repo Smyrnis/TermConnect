@@ -15,7 +15,13 @@ fn toggle_switches_between_local_and_remote() {
 
 #[test]
 fn from_listing_builds_rows_from_provided_entries() {
-    let entries = vec![Entry { name: "remote_dir".to_string(), path: PathBuf::from("/home/user/remote_dir"), is_dir: true, size: 0, permissions: None }];
+    let entries = vec![Entry {
+        name: "remote_dir".to_string(),
+        path: PathBuf::from("/home/user/remote_dir"),
+        is_dir: true,
+        size: 0,
+        permissions: None,
+    }];
 
     let panel = PanelState::from_listing(PathBuf::from("/home/user"), entries);
 
@@ -33,7 +39,13 @@ fn from_listing_at_root_has_no_parent_row() {
 
 #[test]
 fn target_path_for_open_resolves_parent_and_directory_targets() {
-    let entries = vec![Entry { name: "child".to_string(), path: PathBuf::from("/home/user/child"), is_dir: true, size: 0, permissions: None }];
+    let entries = vec![Entry {
+        name: "child".to_string(),
+        path: PathBuf::from("/home/user/child"),
+        is_dir: true,
+        size: 0,
+        permissions: None,
+    }];
     let mut panel = PanelState::from_listing(PathBuf::from("/home/user"), entries);
 
     assert_eq!(panel.target_path_for_open(), Some(PathBuf::from("/home")));
@@ -290,6 +302,15 @@ fn set_sort_spec_and_set_show_hidden_apply_immediately() {
     assert!(panel.show_hidden());
     assert_eq!(panel.rows().len(), 2);
 
-    panel.set_sort_spec(crate::tui::sort::SortSpec { key: crate::tui::sort::SortKey::Size, order: crate::tui::sort::SortOrder::Descending });
-    assert_eq!(panel.sort_spec(), crate::tui::sort::SortSpec { key: crate::tui::sort::SortKey::Size, order: crate::tui::sort::SortOrder::Descending });
+    panel.set_sort_spec(crate::tui::sort::SortSpec {
+        key: crate::tui::sort::SortKey::Size,
+        order: crate::tui::sort::SortOrder::Descending,
+    });
+    assert_eq!(
+        panel.sort_spec(),
+        crate::tui::sort::SortSpec {
+            key: crate::tui::sort::SortKey::Size,
+            order: crate::tui::sort::SortOrder::Descending
+        }
+    );
 }

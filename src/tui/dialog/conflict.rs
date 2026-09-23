@@ -18,7 +18,8 @@ const DAY: i64 = 24 * HOUR;
 
 pub struct ConflictDialog {
     pub file_name: String,
-    pub existing: ExistingFile,
+    pub existing: Option<ExistingFile>,
+    pub partial: Option<ExistingFile>,
     pub new_size: u64,
     pub new_modified: Option<u64>,
     pub index: usize,
@@ -34,6 +35,14 @@ pub enum ConflictOutcome {
 }
 
 impl ConflictDialog {
+    fn offers_resume(&self) -> bool {
+        self.partial.is_some() && !self.existing_is_dir()
+    }
+
+    fn existing_is_dir(&self) -> bool {
+        self.existing.is_some_and(|existing| existing.is_dir)
+    }
+
     pub fn remaining_after_this(&self) -> usize {
         self.total.saturating_sub(self.index + 1)
     }
@@ -43,11 +52,14 @@ impl ConflictDialog {
         let answer = |resolution| ConflictOutcome::Resolved { resolution: Some(resolution), apply_to_rest };
         let with_shortcut_modifier = key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
         match key.code {
-            KeyCode::Char('c' | 'C') | KeyCode::Esc => ConflictOutcome::Resolved { resolution: None, apply_to_rest: false },
+            KeyCode::Char('c' | 'C') | KeyCode::Esc => {
+                ConflictOutcome::Resolved { resolution: None, apply_to_rest: false }
+            }
             _ if with_shortcut_modifier => ConflictOutcome::Pending,
-            KeyCode::Char('o' | 'O') if !self.existing.is_dir => answer(Resolution::Overwrite),
+            KeyCode::Char('u' | 'U') if self.offers_resume() => answer(Resolution::Resume),
+            KeyCode::Char('o' | 'O') if !self.existing_is_dir() => answer(Resolution::Overwrite),
             KeyCode::Char('s' | 'S') => answer(Resolution::Skip),
-            KeyCode::Char('r' | 'R') => answer(Resolution::Rename),
+            KeyCode::Char('r' | 'R') if self.existing.is_some() => answer(Resolution::Rename),
             KeyCode::Char('a' | 'A') if self.remaining_after_this() > 0 => {
                 self.apply_to_rest = !self.apply_to_rest;
                 ConflictOutcome::Pending
@@ -57,10 +69,45 @@ impl ConflictDialog {
     }
 
     fn lines(&self) -> Vec<String> {
-        let existing = if self.existing.is_dir { "Existing  folder".to_string() } else { format!("Existing  {:>8}   modified {}", format_size(self.existing.size, false), age_text(self.existing.modified, self.now)) };
-        let new = format!("New       {:>8}   modified {}", format_size(self.new_size, false), age_text(self.new_modified, self.now));
-        let options = if self.existing.is_dir { "[S]kip  [R]ename  [C]ancel copy" } else { "[O]verwrite  [S]kip  [R]ename  [C]ancel copy" };
-        let mut lines = vec![existing, new, String::new(), options.to_string()];
+        let mut lines = Vec::new();
+        if let Some(existing) = self.existing {
+            lines.push(if existing.is_dir {
+                "Existing  folder".to_string()
+            } else {
+                format!(
+                    "Existing  {:>8}   modified {}",
+                    format_size(existing.size, false),
+                    age_text(existing.modified, self.now)
+                )
+            });
+        }
+        if let Some(partial) = self.partial {
+            lines.push(format!(
+                "Partial   {:>8} of {}   modified {}",
+                format_size(partial.size, false),
+                format_size(self.new_size, false),
+                age_text(partial.modified, self.now)
+            ));
+        }
+        lines.push(format!(
+            "New       {:>8}   modified {}",
+            format_size(self.new_size, false),
+            age_text(self.new_modified, self.now)
+        ));
+        lines.push(String::new());
+        let mut options = Vec::new();
+        if self.offers_resume() {
+            options.push("Res[u]me");
+        }
+        if !self.existing_is_dir() {
+            options.push(if self.existing.is_some() { "[O]verwrite" } else { "Start [o]ver" });
+        }
+        options.push("[S]kip");
+        if self.existing.is_some() {
+            options.push("[R]ename");
+        }
+        options.push("[C]ancel copy");
+        lines.push(options.join("  "));
         let remaining = self.remaining_after_this();
         if remaining > 0 {
             let mark = if self.apply_to_rest { "x" } else { " " };
@@ -92,7 +139,8 @@ fn age_text(modified: Option<u64>, now: u64) -> String {
 }
 
 pub fn render_conflict(frame: &mut Frame, area: Rect, dialog: &ConflictDialog) {
-    let title = format!("\"{}\" already exists ({} of {})", dialog.file_name, dialog.index + 1, dialog.total);
+    let state = if dialog.existing.is_some() { "already exists" } else { "was partly copied before" };
+    let title = format!("\"{}\" {state} ({} of {})", dialog.file_name, dialog.index + 1, dialog.total);
     let lines = dialog.lines();
     let mut measured: Vec<&str> = lines.iter().map(String::as_str).collect();
     measured.push(&title);

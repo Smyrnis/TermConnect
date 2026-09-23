@@ -56,7 +56,13 @@ pub fn parse(contents: &str) -> Vec<SshConfigHost> {
                     if is_pattern(alias) {
                         continue;
                     }
-                    hosts.push(SshConfigHost { name: alias.to_string(), host_name: None, user: None, port: None, identity_file: None });
+                    hosts.push(SshConfigHost {
+                        name: alias.to_string(),
+                        host_name: None,
+                        user: None,
+                        port: None,
+                        identity_file: None,
+                    });
                 }
             }
             "hostname" => {

@@ -20,7 +20,15 @@ pub struct ConnectionProfile {
 
 impl std::fmt::Debug for ConnectionProfile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConnectionProfile").field("name", &self.name).field("host", &self.host).field("port", &self.port).field("username", &self.username).field("identity_file", &self.identity_file).field("remote_path", &self.remote_path).field("password", &self.password.as_ref().map(|_| "<redacted>")).finish()
+        f.debug_struct("ConnectionProfile")
+            .field("name", &self.name)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("identity_file", &self.identity_file)
+            .field("remote_path", &self.remote_path)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .finish()
     }
 }
 
@@ -48,13 +56,31 @@ pub struct ConnectionEntry {
 
 impl std::fmt::Debug for ConnectionEntry {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ConnectionEntry").field("name", &self.name).field("host", &self.host).field("port", &self.port).field("username", &self.username).field("identity_file", &self.identity_file).field("remote_path", &self.remote_path).field("password", &self.password.as_ref().map(|_| "<redacted>")).field("source", &self.source).finish()
+        f.debug_struct("ConnectionEntry")
+            .field("name", &self.name)
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("username", &self.username)
+            .field("identity_file", &self.identity_file)
+            .field("remote_path", &self.remote_path)
+            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("source", &self.source)
+            .finish()
     }
 }
 
 impl From<ConnectionProfile> for ConnectionEntry {
     fn from(profile: ConnectionProfile) -> Self {
-        Self { name: profile.name, host: profile.host, port: profile.port, username: profile.username, identity_file: profile.identity_file, remote_path: profile.remote_path, password: profile.password, source: ConnectionSource::Profile }
+        Self {
+            name: profile.name,
+            host: profile.host,
+            port: profile.port,
+            username: profile.username,
+            identity_file: profile.identity_file,
+            remote_path: profile.remote_path,
+            password: profile.password,
+            source: ConnectionSource::Profile,
+        }
     }
 }
 

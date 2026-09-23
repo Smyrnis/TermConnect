@@ -9,7 +9,10 @@ use ratatui::{
 
 use crate::connection::ConnectionEntry;
 
-pub fn render_connections_list(frame: &mut Frame, area: Rect, entries: &[ConnectionEntry], cursor: usize, connected_names: &HashSet<&str>, active_name: Option<&str>) {
+pub fn render_connections_list(
+    frame: &mut Frame, area: Rect, entries: &[ConnectionEntry], cursor: usize, connected_names: &HashSet<&str>,
+    active_name: Option<&str>,
+) {
     let block = Block::default().title("Connections").borders(Borders::ALL);
 
     let inner = block.inner(area);

@@ -56,10 +56,22 @@ pub fn render_confirm(frame: &mut Frame, area: Rect, dialog: &ConfirmDialog) {
 
     let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Yellow));
 
-    let yes_style = if dialog.focus == ConfirmFocus::Yes { Style::default().add_modifier(Modifier::REVERSED) } else { Style::default() };
-    let no_style = if dialog.focus == ConfirmFocus::No { Style::default().add_modifier(Modifier::REVERSED) } else { Style::default() };
+    let yes_style = if dialog.focus == ConfirmFocus::Yes {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default()
+    };
+    let no_style = if dialog.focus == ConfirmFocus::No {
+        Style::default().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::default()
+    };
 
-    let text = Text::from(vec![Line::from(dialog.message.as_str()), Line::from(""), Line::from(vec![Span::styled("[y] Yes", yes_style), Span::raw("   "), Span::styled("[n] No", no_style)])]);
+    let text = Text::from(vec![
+        Line::from(dialog.message.as_str()),
+        Line::from(""),
+        Line::from(vec![Span::styled("[y] Yes", yes_style), Span::raw("   "), Span::styled("[n] No", no_style)]),
+    ]);
 
     let paragraph = Paragraph::new(text).block(block).alignment(Alignment::Center);
 

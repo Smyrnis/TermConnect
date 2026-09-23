@@ -12,7 +12,13 @@ pub fn list(path: &Path) -> Result<Vec<Entry>> {
         let metadata = dir_entry.metadata()?;
         let name = dir_entry.file_name().to_string_lossy().into_owned();
 
-        entries.push(Entry { name, path: dir_entry.path(), is_dir: metadata.is_dir(), size: metadata.len(), permissions: Some(metadata.permissions().mode()) });
+        entries.push(Entry {
+            name,
+            path: dir_entry.path(),
+            is_dir: metadata.is_dir(),
+            size: metadata.len(),
+            permissions: Some(metadata.permissions().mode()),
+        });
     }
 
     Ok(entries)

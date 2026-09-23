@@ -70,7 +70,15 @@ use std::os::unix::fs::PermissionsExt;
 fn save_to_creates_a_new_entry() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
-    let profile = ConnectionProfile { name: "prod".to_string(), host: "server.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: Some("hunter2".to_string()) };
+    let profile = ConnectionProfile {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: Some("hunter2".to_string()),
+    };
 
     save_to(&path, &profile).unwrap();
     let loaded = load_from(&path).unwrap();
@@ -84,7 +92,15 @@ fn save_to_creates_a_new_entry() {
 fn save_to_overwrites_an_existing_entry_by_name() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
-    let mut profile = ConnectionProfile { name: "prod".to_string(), host: "old-host.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None };
+    let mut profile = ConnectionProfile {
+        name: "prod".to_string(),
+        host: "old-host.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+    };
     save_to(&path, &profile).unwrap();
 
     profile.host = "new-host.example.com".to_string();
@@ -99,8 +115,32 @@ fn save_to_overwrites_an_existing_entry_by_name() {
 fn delete_from_removes_one_entry_and_leaves_others() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
-    save_to(&path, &ConnectionProfile { name: "prod".to_string(), host: "a.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None }).unwrap();
-    save_to(&path, &ConnectionProfile { name: "staging".to_string(), host: "b.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None }).unwrap();
+    save_to(
+        &path,
+        &ConnectionProfile {
+            name: "prod".to_string(),
+            host: "a.example.com".to_string(),
+            port: 22,
+            username: "deploy".to_string(),
+            identity_file: None,
+            remote_path: None,
+            password: None,
+        },
+    )
+    .unwrap();
+    save_to(
+        &path,
+        &ConnectionProfile {
+            name: "staging".to_string(),
+            host: "b.example.com".to_string(),
+            port: 22,
+            username: "deploy".to_string(),
+            identity_file: None,
+            remote_path: None,
+            password: None,
+        },
+    )
+    .unwrap();
 
     delete_from(&path, "prod").unwrap();
 
@@ -113,7 +153,19 @@ fn delete_from_removes_one_entry_and_leaves_others() {
 fn save_to_sets_file_permissions_to_owner_read_write_only() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
-    save_to(&path, &ConnectionProfile { name: "prod".to_string(), host: "a.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: Some("hunter2".to_string()) }).unwrap();
+    save_to(
+        &path,
+        &ConnectionProfile {
+            name: "prod".to_string(),
+            host: "a.example.com".to_string(),
+            port: 22,
+            username: "deploy".to_string(),
+            identity_file: None,
+            remote_path: None,
+            password: Some("hunter2".to_string()),
+        },
+    )
+    .unwrap();
 
     let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
@@ -123,7 +175,15 @@ fn save_to_sets_file_permissions_to_owner_read_write_only() {
 fn save_to_leaves_the_original_file_untouched_if_the_write_fails() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
-    let original = ConnectionProfile { name: "prod".to_string(), host: "a.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None };
+    let original = ConnectionProfile {
+        name: "prod".to_string(),
+        host: "a.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+    };
     save_to(&path, &original).unwrap();
 
     let mut perms = fs::metadata(dir.path()).unwrap().permissions();
@@ -146,7 +206,19 @@ fn save_to_leaves_the_original_file_untouched_if_the_write_fails() {
 fn save_to_creates_the_parent_directory_if_missing() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("nested").join("config.toml");
-    save_to(&path, &ConnectionProfile { name: "prod".to_string(), host: "a.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None }).unwrap();
+    save_to(
+        &path,
+        &ConnectionProfile {
+            name: "prod".to_string(),
+            host: "a.example.com".to_string(),
+            port: 22,
+            username: "deploy".to_string(),
+            identity_file: None,
+            remote_path: None,
+            password: None,
+        },
+    )
+    .unwrap();
 
     assert!(path.exists());
 }

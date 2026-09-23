@@ -13,7 +13,15 @@ fn app_on_transfers_screen() -> (tempfile::TempDir, App) {
 }
 
 fn add_job(app: &mut App, name: &str, batch_id: Option<u64>, status: JobStatus) -> u64 {
-    let id = app.transfers.enqueue(999, Direction::Upload, PathBuf::from(format!("/local/{name}")), format!("/remote/{name}"), name.to_string(), 10, batch_id);
+    let id = app.transfers.enqueue(
+        999,
+        Direction::Upload,
+        PathBuf::from(format!("/local/{name}")),
+        format!("/remote/{name}"),
+        name.to_string(),
+        10,
+        batch_id,
+    );
     app.transfers.get_mut(id).unwrap().status = status;
     id
 }
@@ -25,7 +33,13 @@ fn flag(app: &mut App, id: u64) -> Arc<AtomicBool> {
 }
 
 fn scan(batch_id: u64, name: &str) -> PlanningScan {
-    PlanningScan { batch_id, session_id: 1, direction: Direction::Upload, display_name: name.to_string(), cancel: Arc::new(AtomicBool::new(false)) }
+    PlanningScan {
+        batch_id,
+        session_id: 1,
+        direction: Direction::Upload,
+        display_name: name.to_string(),
+        cancel: Arc::new(AtomicBool::new(false)),
+    }
 }
 
 #[test]
@@ -115,15 +129,36 @@ fn retry_on_a_disconnected_session_shows_one_warning_and_leaves_the_files() {
 #[test]
 fn cancelling_the_last_pending_row_refreshes_its_destination() {
     let (dir, mut app) = app_on_transfers_screen();
-    let done = app.transfers.enqueue(1, Direction::Download, dir.path().join("done.txt"), "/remote/done.txt".to_string(), "done.txt".to_string(), 10, None);
+    let done = app.transfers.enqueue(
+        1,
+        Direction::Download,
+        dir.path().join("done.txt"),
+        "/remote/done.txt".to_string(),
+        "done.txt".to_string(),
+        10,
+        None,
+    );
     app.transfers.get_mut(done).unwrap().status = JobStatus::Completed;
     std::fs::write(dir.path().join("done.txt"), b"x").unwrap();
-    app.transfers.enqueue(1, Direction::Download, dir.path().join("later.txt"), "/remote/later.txt".to_string(), "later.txt".to_string(), 10, None);
+    app.transfers.enqueue(
+        1,
+        Direction::Download,
+        dir.path().join("later.txt"),
+        "/remote/later.txt".to_string(),
+        "later.txt".to_string(),
+        10,
+        None,
+    );
     app.transfers_cursor = 1;
 
     app.apply_action(Action::Delete);
 
-    assert!(app.local.rows().iter().any(|row| matches!(row, crate::tui::panels::Row::Entry(entry) if entry.name == "done.txt")));
+    assert!(
+        app.local
+            .rows()
+            .iter()
+            .any(|row| matches!(row, crate::tui::panels::Row::Entry(entry) if entry.name == "done.txt"))
+    );
 }
 
 #[test]
@@ -239,4 +274,85 @@ fn clearing_keeps_the_cursor_on_the_same_row() {
     app.apply_action(Action::Refresh);
 
     assert_eq!(app.transfer_rows()[app.transfers_cursor].job_ids, vec![selected]);
+}
+
+#[test]
+fn clearing_removes_partials_only_of_cancelled_and_failed_downloads() {
+    let (dir, mut app) = app_on_transfers_screen();
+    let mut download = |name: &str, status: JobStatus| {
+        let id = app.transfers.enqueue(
+            999,
+            Direction::Download,
+            dir.path().join(name),
+            format!("/remote/{name}"),
+            name.to_string(),
+            10,
+            None,
+        );
+        app.transfers.get_mut(id).unwrap().status = status;
+        std::fs::write(dir.path().join(format!("{name}.part")), b"x").unwrap();
+    };
+    download("cancelled.bin", JobStatus::Cancelled);
+    download("failed.bin", JobStatus::Failed("boom".to_string()));
+    download("done.bin", JobStatus::Completed);
+    download("queued.bin", JobStatus::Queued);
+
+    app.apply_action(Action::Refresh);
+
+    assert!(!dir.path().join("cancelled.bin.part").exists());
+    assert!(!dir.path().join("failed.bin.part").exists());
+    assert!(dir.path().join("done.bin.part").exists());
+    assert!(dir.path().join("queued.bin.part").exists());
+}
+
+#[test]
+fn clearing_keeps_a_partial_that_a_queued_copy_of_the_same_file_uses() {
+    let (dir, mut app) = app_on_transfers_screen();
+    for status in [JobStatus::Cancelled, JobStatus::Queued] {
+        let id = app.transfers.enqueue(
+            999,
+            Direction::Download,
+            dir.path().join("big.iso"),
+            "/remote/big.iso".to_string(),
+            "big.iso".to_string(),
+            10,
+            None,
+        );
+        app.transfers.get_mut(id).unwrap().status = status;
+    }
+    std::fs::write(dir.path().join("big.iso.part"), b"x").unwrap();
+
+    app.apply_action(Action::Refresh);
+
+    assert!(dir.path().join("big.iso.part").exists());
+}
+
+#[test]
+fn clearing_never_deletes_a_completed_file_named_like_a_partial() {
+    let (dir, mut app) = app_on_transfers_screen();
+    let cancelled = app.transfers.enqueue(
+        999,
+        Direction::Download,
+        dir.path().join("foo"),
+        "/remote/foo".to_string(),
+        "foo".to_string(),
+        10,
+        None,
+    );
+    app.transfers.get_mut(cancelled).unwrap().status = JobStatus::Cancelled;
+    let completed = app.transfers.enqueue(
+        999,
+        Direction::Download,
+        dir.path().join("foo.part"),
+        "/remote/foo.part".to_string(),
+        "foo.part".to_string(),
+        10,
+        None,
+    );
+    app.transfers.get_mut(completed).unwrap().status = JobStatus::Completed;
+    std::fs::write(dir.path().join("foo.part"), b"a real file").unwrap();
+
+    app.apply_action(Action::Refresh);
+
+    assert!(dir.path().join("foo.part").exists());
 }

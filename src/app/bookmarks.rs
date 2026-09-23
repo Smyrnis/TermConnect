@@ -6,7 +6,8 @@ impl App {
             return;
         }
 
-        let default_label = self.active_panel_path().file_name().and_then(|name| name.to_str()).unwrap_or("bookmark").to_string();
+        let default_label =
+            self.active_panel_path().file_name().and_then(|name| name.to_str()).unwrap_or("bookmark").to_string();
 
         self.dialog = Some(Dialog::TextInput(TextInputDialog::new("Bookmark name", default_label)));
         self.pending_action = Some(PendingAction::AddBookmark);
@@ -15,7 +16,9 @@ impl App {
     fn active_panel_path(&self) -> PathBuf {
         match self.active_panel {
             ActivePanel::Local => self.local.path().to_path_buf(),
-            ActivePanel::Remote => self.sessions.active().map(|session| session.panel.path().to_path_buf()).unwrap_or_default(),
+            ActivePanel::Remote => {
+                self.sessions.active().map(|session| session.panel.path().to_path_buf()).unwrap_or_default()
+            }
         }
     }
 

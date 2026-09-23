@@ -3,7 +3,15 @@ use std::path::PathBuf;
 use super::*;
 
 fn job(queue: &mut TransferQueue, name: &str, batch_id: Option<u64>, status: JobStatus) -> u64 {
-    let id = queue.enqueue(1, Direction::Upload, PathBuf::from(format!("/local/{name}")), format!("/remote/{name}"), name.to_string(), 100, batch_id);
+    let id = queue.enqueue(
+        1,
+        Direction::Upload,
+        PathBuf::from(format!("/local/{name}")),
+        format!("/remote/{name}"),
+        name.to_string(),
+        100,
+        batch_id,
+    );
     let job = queue.get_mut(id).unwrap();
     if status == JobStatus::Completed {
         job.transferred_bytes = 100;
@@ -32,7 +40,10 @@ fn a_batch_is_one_row_and_singles_are_their_own_rows_in_queue_order() {
 
     let rows = queue_rows(&queue, &[]);
 
-    assert_eq!(rows.iter().map(|row| row.kind).collect::<Vec<_>>(), vec![RowKind::Single(single_before), RowKind::Batch(batch_id), RowKind::Single(single_between)]);
+    assert_eq!(
+        rows.iter().map(|row| row.kind).collect::<Vec<_>>(),
+        vec![RowKind::Single(single_before), RowKind::Batch(batch_id), RowKind::Single(single_between)]
+    );
     assert_eq!(rows[1].label, "photos");
     assert_eq!(rows[1].job_ids, vec![first_in_batch, second_in_batch]);
     assert_eq!((rows[1].files_done, rows[1].files_total, rows[1].bytes_done, rows[1].bytes_total), (1, 2, 100, 200));
@@ -63,7 +74,10 @@ fn row_state_follows_the_precedence_rules() {
     assert_eq!(state_of(vec![JobStatus::Completed, JobStatus::Completed]), RowState::Done);
     assert_eq!(state_of(vec![JobStatus::Cancelled, JobStatus::Cancelled]), RowState::Cancelled);
     assert_eq!(state_of(vec![JobStatus::Completed, JobStatus::Cancelled]), RowState::Cancelled);
-    assert_eq!(state_of(vec![JobStatus::Completed, failed(), failed(), JobStatus::Cancelled]), RowState::PartlyFailed(2));
+    assert_eq!(
+        state_of(vec![JobStatus::Completed, failed(), failed(), JobStatus::Cancelled]),
+        RowState::PartlyFailed(2)
+    );
     assert_eq!(state_of(vec![failed(), JobStatus::Cancelled]), RowState::Failed);
 }
 
@@ -102,7 +116,8 @@ fn percent_of_handles_zero_totals() {
 #[test]
 fn a_scan_info_carries_its_state_into_the_row() {
     let queue = TransferQueue::new();
-    let scans = [ScanInfo { batch_id: 3, label: "photos", direction: Direction::Upload, state: RowState::AwaitingAnswer }];
+    let scans =
+        [ScanInfo { batch_id: 3, label: "photos", direction: Direction::Upload, state: RowState::AwaitingAnswer }];
 
     let rows = queue_rows(&queue, &scans);
 

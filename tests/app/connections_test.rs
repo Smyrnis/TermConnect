@@ -26,7 +26,16 @@ fn app_with_isolated_home() -> (tempfile::TempDir, std::sync::MutexGuard<'static
 }
 
 fn sample_connection_entry() -> ConnectionEntry {
-    ConnectionEntry { name: "test".to_string(), host: "test.example.com".to_string(), port: 22, username: "user".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }
+    ConnectionEntry {
+        name: "test".to_string(),
+        host: "test.example.com".to_string(),
+        port: 22,
+        username: "user".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
+    }
 }
 
 const PORT_NOTHING_LISTENS_ON: u16 = 1;
@@ -41,7 +50,16 @@ fn open_connections_switches_screen_and_loads_entries() {
 async fn connecting_to_an_unreachable_host_reports_failure() {
     let (_dir, mut app) = app_in_temp_dir();
     app.screen = Screen::Connections;
-    app.connections = vec![ConnectionEntry { name: "unreachable".to_string(), host: "127.0.0.1".to_string(), port: PORT_NOTHING_LISTENS_ON, username: "user".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }];
+    app.connections = vec![ConnectionEntry {
+        name: "unreachable".to_string(),
+        host: "127.0.0.1".to_string(),
+        port: PORT_NOTHING_LISTENS_ON,
+        username: "user".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
+    }];
 
     app.connect_to_selected();
     assert_eq!(app.connection_status, ConnectionStatus::Connecting("unreachable".to_string()));
@@ -60,7 +78,11 @@ fn panel_event_listed_updates_the_matching_sessions_panel() {
     let (_dir, mut app) = app_in_temp_dir();
     let id = app.sessions.insert(sample_connection_entry(), PanelState::from_listing(PathBuf::from("/"), Vec::new()));
 
-    app.apply_panel_event(PanelEvent::Listed { session_id: id, path: PathBuf::from("/home/user"), entries: Vec::new() });
+    app.apply_panel_event(PanelEvent::Listed {
+        session_id: id,
+        path: PathBuf::from("/home/user"),
+        entries: Vec::new(),
+    });
 
     assert_eq!(app.sessions.active().unwrap().panel.path(), std::path::Path::new("/home/user"));
 }
@@ -127,7 +149,10 @@ fn disconnect_selected_reports_a_confirmation_notification() {
     })
     .collect();
 
-    assert!(messages.iter().any(|m| m.contains("Disconnected from")), "expected a disconnect confirmation notification, got {messages:?}");
+    assert!(
+        messages.iter().any(|m| m.contains("Disconnected from")),
+        "expected a disconnect confirmation notification, got {messages:?}"
+    );
 }
 
 #[test]
@@ -139,9 +164,33 @@ fn disconnecting_a_session_fails_its_queued_jobs_with_one_aggregated_notificatio
     app.connections_cursor = 0;
     app.screen = Screen::Connections;
 
-    let job_a = app.transfers.enqueue(id, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 10, None);
-    let job_b = app.transfers.enqueue(id, Direction::Upload, PathBuf::from("/local/b.txt"), "/remote/b.txt".to_string(), "b.txt".to_string(), 10, None);
-    let other_session_job = app.transfers.enqueue(999, Direction::Upload, PathBuf::from("/local/c.txt"), "/remote/c.txt".to_string(), "c.txt".to_string(), 10, None);
+    let job_a = app.transfers.enqueue(
+        id,
+        Direction::Upload,
+        PathBuf::from("/local/a.txt"),
+        "/remote/a.txt".to_string(),
+        "a.txt".to_string(),
+        10,
+        None,
+    );
+    let job_b = app.transfers.enqueue(
+        id,
+        Direction::Upload,
+        PathBuf::from("/local/b.txt"),
+        "/remote/b.txt".to_string(),
+        "b.txt".to_string(),
+        10,
+        None,
+    );
+    let other_session_job = app.transfers.enqueue(
+        999,
+        Direction::Upload,
+        PathBuf::from("/local/c.txt"),
+        "/remote/c.txt".to_string(),
+        "c.txt".to_string(),
+        10,
+        None,
+    );
 
     app.disconnect_selected();
 
@@ -158,7 +207,8 @@ fn disconnecting_a_session_fails_its_queued_jobs_with_one_aggregated_notificatio
     })
     .collect();
 
-    let transfer_messages: Vec<&String> = messages.iter().filter(|m| m.contains("transfer") && m.contains("disconnected")).collect();
+    let transfer_messages: Vec<&String> =
+        messages.iter().filter(|m| m.contains("transfer") && m.contains("disconnected")).collect();
     assert_eq!(transfer_messages.len(), 1, "expected exactly one aggregated transfer notification, got {messages:?}");
     assert!(transfer_messages[0].contains("2"));
 }
@@ -171,11 +221,27 @@ fn disconnecting_a_session_counts_its_active_jobs_in_the_aggregated_notification
     app.connections = vec![entry];
     app.connections_cursor = 0;
     app.screen = Screen::Connections;
-    let active = app.transfers.enqueue(id, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 10, None);
+    let active = app.transfers.enqueue(
+        id,
+        Direction::Upload,
+        PathBuf::from("/local/a.txt"),
+        "/remote/a.txt".to_string(),
+        "a.txt".to_string(),
+        10,
+        None,
+    );
     app.transfers.get_mut(active).unwrap().status = JobStatus::InProgress;
     let cancel = Arc::new(AtomicBool::new(false));
     app.transfer_cancels.insert(active, cancel.clone());
-    app.transfers.enqueue(id, Direction::Upload, PathBuf::from("/local/b.txt"), "/remote/b.txt".to_string(), "b.txt".to_string(), 10, None);
+    app.transfers.enqueue(
+        id,
+        Direction::Upload,
+        PathBuf::from("/local/b.txt"),
+        "/remote/b.txt".to_string(),
+        "b.txt".to_string(),
+        10,
+        None,
+    );
 
     app.disconnect_selected();
 
@@ -193,8 +259,22 @@ fn disconnecting_a_session_counts_its_scans_in_the_aggregated_notification() {
     app.connections_cursor = 0;
     app.screen = Screen::Connections;
     let scan_cancel = Arc::new(AtomicBool::new(false));
-    app.planning.push(PlanningScan { batch_id: 0, session_id: id, direction: Direction::Upload, display_name: "myfolder".to_string(), cancel: scan_cancel.clone() });
-    app.transfers.enqueue(id, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 10, None);
+    app.planning.push(PlanningScan {
+        batch_id: 0,
+        session_id: id,
+        direction: Direction::Upload,
+        display_name: "myfolder".to_string(),
+        cancel: scan_cancel.clone(),
+    });
+    app.transfers.enqueue(
+        id,
+        Direction::Upload,
+        PathBuf::from("/local/a.txt"),
+        "/remote/a.txt".to_string(),
+        "a.txt".to_string(),
+        10,
+        None,
+    );
 
     app.disconnect_selected();
 
@@ -272,7 +352,16 @@ fn add_connection_dialog_keeps_the_dialog_open_on_port_zero() {
 #[test]
 fn add_connection_dialog_rejects_a_name_that_already_exists() {
     let (_dir, _guard, mut app) = app_with_isolated_home();
-    crate::connection::store::save(&crate::connection::profile::ConnectionProfile { name: "prod".to_string(), host: "original.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None }).unwrap();
+    crate::connection::store::save(&crate::connection::profile::ConnectionProfile {
+        name: "prod".to_string(),
+        host: "original.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+    })
+    .unwrap();
 
     app.screen = Screen::Connections;
     app.apply_action(Action::AddConnection);
@@ -297,11 +386,38 @@ fn add_connection_dialog_rejects_a_name_that_already_exists() {
 #[test]
 fn edit_connection_rejects_renaming_onto_an_existing_name() {
     let (_dir, _guard, mut app) = app_with_isolated_home();
-    crate::connection::store::save(&crate::connection::profile::ConnectionProfile { name: "prod".to_string(), host: "prod.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None }).unwrap();
-    crate::connection::store::save(&crate::connection::profile::ConnectionProfile { name: "staging".to_string(), host: "staging.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None }).unwrap();
+    crate::connection::store::save(&crate::connection::profile::ConnectionProfile {
+        name: "prod".to_string(),
+        host: "prod.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+    })
+    .unwrap();
+    crate::connection::store::save(&crate::connection::profile::ConnectionProfile {
+        name: "staging".to_string(),
+        host: "staging.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+    })
+    .unwrap();
 
     app.screen = Screen::Connections;
-    app.connections = vec![ConnectionEntry { name: "prod".to_string(), host: "prod.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }];
+    app.connections = vec![ConnectionEntry {
+        name: "prod".to_string(),
+        host: "prod.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
+    }];
     app.connections_cursor = 0;
 
     app.apply_action(Action::Rename);
@@ -353,10 +469,28 @@ fn add_connection_dialog_stays_open_when_saving_fails() {
 #[test]
 fn edit_connection_preserves_identity_file_and_remote_path_not_shown_in_the_form() {
     let (_dir, _guard, mut app) = app_with_isolated_home();
-    crate::connection::store::save(&crate::connection::profile::ConnectionProfile { name: "prod".to_string(), host: "old.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: Some(std::path::PathBuf::from("/home/user/.ssh/id_ed25519")), remote_path: Some("/var/www".to_string()), password: None }).unwrap();
+    crate::connection::store::save(&crate::connection::profile::ConnectionProfile {
+        name: "prod".to_string(),
+        host: "old.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: Some(std::path::PathBuf::from("/home/user/.ssh/id_ed25519")),
+        remote_path: Some("/var/www".to_string()),
+        password: None,
+    })
+    .unwrap();
 
     app.screen = Screen::Connections;
-    app.connections = vec![ConnectionEntry { name: "prod".to_string(), host: "old.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: Some(std::path::PathBuf::from("/home/user/.ssh/id_ed25519")), remote_path: Some("/var/www".to_string()), password: None, source: ConnectionSource::Profile }];
+    app.connections = vec![ConnectionEntry {
+        name: "prod".to_string(),
+        host: "old.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: Some(std::path::PathBuf::from("/home/user/.ssh/id_ed25519")),
+        remote_path: Some("/var/www".to_string()),
+        password: None,
+        source: ConnectionSource::Profile,
+    }];
     app.connections_cursor = 0;
 
     app.apply_action(Action::Rename);
@@ -375,10 +509,28 @@ fn edit_connection_preserves_identity_file_and_remote_path_not_shown_in_the_form
 #[test]
 fn renaming_a_connection_to_a_new_name_deletes_the_old_profile() {
     let (_dir, _guard, mut app) = app_with_isolated_home();
-    crate::connection::store::save(&crate::connection::profile::ConnectionProfile { name: "prod".to_string(), host: "server.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None }).unwrap();
+    crate::connection::store::save(&crate::connection::profile::ConnectionProfile {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+    })
+    .unwrap();
 
     app.screen = Screen::Connections;
-    app.connections = vec![ConnectionEntry { name: "prod".to_string(), host: "server.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }];
+    app.connections = vec![ConnectionEntry {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
+    }];
     app.connections_cursor = 0;
 
     app.apply_action(Action::Rename);
@@ -396,7 +548,16 @@ fn renaming_a_connection_to_a_new_name_deletes_the_old_profile() {
 fn delete_connection_action_opens_a_confirm_dialog() {
     let (_dir, mut app) = app_in_temp_dir();
     app.screen = Screen::Connections;
-    app.connections = vec![ConnectionEntry { name: "prod".to_string(), host: "server.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }];
+    app.connections = vec![ConnectionEntry {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
+    }];
     app.connections_cursor = 0;
 
     app.apply_action(Action::DeleteConnection);
@@ -407,10 +568,28 @@ fn delete_connection_action_opens_a_confirm_dialog() {
 #[test]
 fn confirming_delete_connection_removes_the_saved_profile() {
     let (_dir, _guard, mut app) = app_with_isolated_home();
-    crate::connection::store::save(&crate::connection::profile::ConnectionProfile { name: "prod".to_string(), host: "server.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None }).unwrap();
+    crate::connection::store::save(&crate::connection::profile::ConnectionProfile {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+    })
+    .unwrap();
 
     app.screen = Screen::Connections;
-    app.connections = vec![ConnectionEntry { name: "prod".to_string(), host: "server.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }];
+    app.connections = vec![ConnectionEntry {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
+    }];
     app.connections_cursor = 0;
 
     app.apply_action(Action::DeleteConnection);
@@ -424,7 +603,16 @@ fn confirming_delete_connection_removes_the_saved_profile() {
 fn delete_connection_on_an_ssh_config_entry_does_not_open_a_dialog() {
     let (_dir, mut app) = app_in_temp_dir();
     app.screen = Screen::Connections;
-    app.connections = vec![ConnectionEntry { name: "prod".to_string(), host: "server.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::SshConfig }];
+    app.connections = vec![ConnectionEntry {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::SshConfig,
+    }];
     app.connections_cursor = 0;
 
     app.apply_action(Action::DeleteConnection);

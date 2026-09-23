@@ -138,7 +138,10 @@ pub fn render_form(frame: &mut Frame, area: Rect, dialog: &FormDialog) {
 
     let popup = centered_popup(area, width, height);
 
-    let block = Block::default().title(dialog.title.as_str()).borders(Borders::ALL).border_style(Style::default().fg(Color::Yellow));
+    let block = Block::default()
+        .title(dialog.title.as_str())
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
 
     let mut lines: Vec<Line> = vec![Line::from("Protocol: SFTP")];
     lines.extend(dialog.fields.iter().enumerate().map(|(i, field)| field_line(field, i == dialog.focused)));
@@ -163,7 +166,8 @@ fn field_line(field: &FormField, focused: bool) -> Line<'static> {
     if focused {
         let chars: Vec<char> = displayed.chars().collect();
         for (i, ch) in chars.iter().enumerate() {
-            let style = if i == field.cursor { Style::default().add_modifier(Modifier::REVERSED) } else { Style::default() };
+            let style =
+                if i == field.cursor { Style::default().add_modifier(Modifier::REVERSED) } else { Style::default() };
             spans.push(Span::styled(ch.to_string(), style));
         }
         if field.cursor >= chars.len() {

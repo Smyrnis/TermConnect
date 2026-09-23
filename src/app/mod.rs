@@ -110,6 +110,7 @@ enum TransferEvent {
     PlanReady { batch_id: u64, session_id: u64, direction: Direction, plan: transfer::plan::DirectoryPlan },
     PlanFailed { batch_id: u64, message: String },
     PlanCancelled { batch_id: u64, session_id: u64, direction: Direction },
+    PartialsRemoved { session_id: u64 },
 }
 
 struct PlanningScan {
@@ -126,7 +127,7 @@ struct ConflictReview {
     direction: Direction,
     plan: transfer::plan::DirectoryPlan,
     conflicts: Vec<usize>,
-    answers: Vec<transfer::conflicts::Resolution>,
+    answers: Vec<Option<transfer::conflicts::Resolution>>,
 }
 
 struct SessionResources {
@@ -177,7 +178,8 @@ impl App {
         let (bookmarks, bookmark_warnings) = config::bookmarks::load()?;
         let bookmarks_path = config::bookmarks::bookmarks_path()?;
 
-        let mut app = Self::at_with(std::env::current_dir()?, &settings.panel, key_bindings, bookmarks, Some(bookmarks_path))?;
+        let mut app =
+            Self::at_with(std::env::current_dir()?, &settings.panel, key_bindings, bookmarks, Some(bookmarks_path))?;
         app.max_parallel = settings.transfers.max_parallel;
         app.on_conflict = settings.transfers.on_conflict;
 
@@ -196,10 +198,19 @@ impl App {
 
     #[cfg(test)]
     fn at(path: PathBuf) -> Result<Self> {
-        Self::at_with(path, &config::settings::PanelSettings::default(), input::KeyBindings::defaults(), config::bookmarks::Bookmarks::default(), None)
+        Self::at_with(
+            path,
+            &config::settings::PanelSettings::default(),
+            input::KeyBindings::defaults(),
+            config::bookmarks::Bookmarks::default(),
+            None,
+        )
     }
 
-    fn at_with(path: PathBuf, panel_settings: &config::settings::PanelSettings, key_bindings: input::KeyBindings, bookmarks: config::bookmarks::Bookmarks, bookmarks_path: Option<PathBuf>) -> Result<Self> {
+    fn at_with(
+        path: PathBuf, panel_settings: &config::settings::PanelSettings, key_bindings: input::KeyBindings,
+        bookmarks: config::bookmarks::Bookmarks, bookmarks_path: Option<PathBuf>,
+    ) -> Result<Self> {
         let (connect_tx, connect_rx) = mpsc::unbounded_channel();
         let (panel_tx, panel_rx) = mpsc::unbounded_channel();
         let (transfer_tx, transfer_rx) = mpsc::unbounded_channel();

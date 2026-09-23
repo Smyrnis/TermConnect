@@ -1,5 +1,5 @@
 edition = "2024"
-max_width = 520
+max_width = 120
 group_imports = "StdExternalCrate"
 imports_granularity = "Crate"
 format_code_in_doc_comments = false

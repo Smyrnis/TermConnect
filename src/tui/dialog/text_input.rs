@@ -94,14 +94,18 @@ pub fn render_text_input(frame: &mut Frame, area: Rect, dialog: &TextInputDialog
 
     let popup = centered_popup(area, super::content_width(&[dialog.title.as_str(), displayed_value.as_str()]), 4);
 
-    let block = Block::default().title(dialog.title.as_str()).borders(Borders::ALL).border_style(Style::default().fg(Color::Yellow));
+    let block = Block::default()
+        .title(dialog.title.as_str())
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
 
     let chars: Vec<char> = displayed_value.chars().collect();
     let mut spans: Vec<Span> = chars
         .iter()
         .enumerate()
         .map(|(i, ch)| {
-            let style = if i == dialog.cursor { Style::default().add_modifier(Modifier::REVERSED) } else { Style::default() };
+            let style =
+                if i == dialog.cursor { Style::default().add_modifier(Modifier::REVERSED) } else { Style::default() };
             Span::styled(ch.to_string(), style)
         })
         .collect();

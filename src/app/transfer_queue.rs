@@ -1,5 +1,10 @@
+use std::collections::HashSet;
+
 use super::*;
-use crate::transfer::rows::{QueueRow, RowKind, RowState, ScanInfo, queue_rows};
+use crate::transfer::{
+    job::Destination,
+    rows::{QueueRow, RowKind, RowState, ScanInfo, queue_rows},
+};
 
 impl App {
     pub(super) fn open_transfers_screen(&mut self) {
@@ -8,7 +13,22 @@ impl App {
     }
 
     pub(super) fn transfer_rows(&self) -> Vec<QueueRow> {
-        let scans: Vec<ScanInfo> = self.planning.iter().map(|scan| ScanInfo { batch_id: scan.batch_id, label: &scan.display_name, direction: scan.direction, state: RowState::Scanning }).chain(self.conflict_reviews.iter().map(|review| ScanInfo { batch_id: review.batch_id, label: self.transfers.batch_label(review.batch_id).unwrap_or("copy"), direction: review.direction, state: RowState::AwaitingAnswer })).collect();
+        let scans: Vec<ScanInfo> = self
+            .planning
+            .iter()
+            .map(|scan| ScanInfo {
+                batch_id: scan.batch_id,
+                label: &scan.display_name,
+                direction: scan.direction,
+                state: RowState::Scanning,
+            })
+            .chain(self.conflict_reviews.iter().map(|review| ScanInfo {
+                batch_id: review.batch_id,
+                label: self.transfers.batch_label(review.batch_id).unwrap_or("copy"),
+                direction: review.direction,
+                state: RowState::AwaitingAnswer,
+            }))
+            .collect();
         queue_rows(&self.transfers, &scans)
     }
 
@@ -64,7 +84,12 @@ impl App {
         let Some(row) = self.selected_transfer_row() else {
             return;
         };
-        let retryable: Vec<&transfer::TransferJob> = row.job_ids.iter().filter_map(|id| self.transfers.get(*id)).filter(|job| matches!(job.status, JobStatus::Failed(_) | JobStatus::Cancelled)).collect();
+        let retryable: Vec<&transfer::TransferJob> = row
+            .job_ids
+            .iter()
+            .filter_map(|id| self.transfers.get(*id))
+            .filter(|job| matches!(job.status, JobStatus::Failed(_) | JobStatus::Cancelled))
+            .collect();
         let Some(session_id) = retryable.first().map(|job| job.session_id) else {
             return;
         };
@@ -79,10 +104,68 @@ impl App {
 
     fn clear_finished_rows(&mut self) {
         let selected_kind = self.selected_transfer_row().map(|row| row.kind);
-        let finished_ids: Vec<u64> = self.transfer_rows().into_iter().filter(QueueRow::is_finished).flat_map(|row| row.job_ids).collect();
+        let finished_ids: Vec<u64> =
+            self.transfer_rows().into_iter().filter(QueueRow::is_finished).flat_map(|row| row.job_ids).collect();
+        let interrupted: Vec<transfer::TransferJob> = finished_ids
+            .iter()
+            .filter_map(|id| self.transfers.get(*id))
+            .filter(|job| matches!(job.status, JobStatus::Cancelled | JobStatus::Failed(_)))
+            .cloned()
+            .collect();
+        let protected = self.destinations_still_in_use();
         self.transfers.remove_jobs(&finished_ids);
+        let unused: Vec<transfer::TransferJob> =
+            interrupted.into_iter().filter(|job| !protected.contains(&job.part_destination())).collect();
+        self.remove_partials(unused);
         let rows = self.transfer_rows();
-        self.transfers_cursor = selected_kind.and_then(|kind| rows.iter().position(|row| row.kind == kind)).unwrap_or_else(|| self.clamped_transfers_cursor());
+        self.transfers_cursor = selected_kind
+            .and_then(|kind| rows.iter().position(|row| row.kind == kind))
+            .unwrap_or_else(|| self.clamped_transfers_cursor());
+    }
+
+    fn destinations_still_in_use(&self) -> HashSet<Destination> {
+        let mut protected: HashSet<Destination> =
+            self.transfers.jobs().map(transfer::TransferJob::destination).collect();
+        protected.extend(
+            self.transfers
+                .jobs()
+                .filter(|job| matches!(job.status, JobStatus::Queued | JobStatus::InProgress))
+                .map(transfer::TransferJob::part_destination),
+        );
+        protected
+    }
+
+    fn remove_partials(&mut self, interrupted: Vec<transfer::TransferJob>) {
+        let mut removed_local = false;
+        let mut remote_parts: HashMap<u64, Vec<String>> = HashMap::new();
+        for job in interrupted {
+            match job.direction {
+                Direction::Download => {
+                    let mut part = job.local_path.into_os_string();
+                    part.push(".part");
+                    removed_local |= std::fs::remove_file(PathBuf::from(part)).is_ok();
+                }
+                Direction::Upload => {
+                    remote_parts.entry(job.session_id).or_default().push(format!("{}.part", job.remote_path))
+                }
+            }
+        }
+        if removed_local {
+            let _ = self.local.refresh();
+        }
+        for (session_id, parts) in remote_parts {
+            let Some(resources) = self.session_resources.get(&session_id) else {
+                continue;
+            };
+            let sftp = resources.sftp.clone();
+            let tx = self.transfer_tx.clone();
+            tokio::spawn(async move {
+                for part in parts {
+                    let _ = sftp.remove_file(part).await;
+                }
+                let _ = tx.send(TransferEvent::PartialsRemoved { session_id });
+            });
+        }
     }
 
     fn selected_transfer_row(&self) -> Option<QueueRow> {

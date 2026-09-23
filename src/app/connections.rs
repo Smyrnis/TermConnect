@@ -93,7 +93,8 @@ impl App {
             return;
         };
         if entry.source == ConnectionSource::SshConfig {
-            self.notifications.push(Severity::Info, "This connection is defined in ~/.ssh/config and can't be edited here");
+            self.notifications
+                .push(Severity::Info, "This connection is defined in ~/.ssh/config and can't be edited here");
             return;
         }
 
@@ -152,7 +153,8 @@ impl App {
             return;
         };
         if entry.source == ConnectionSource::SshConfig {
-            self.notifications.push(Severity::Info, "This connection is defined in ~/.ssh/config and can't be deleted here");
+            self.notifications
+                .push(Severity::Info, "This connection is defined in ~/.ssh/config and can't be deleted here");
             return;
         }
 
@@ -194,10 +196,13 @@ impl App {
         self.sessions.remove(id);
         self.session_resources.remove(&id);
 
-        let affected = self.transfers.fail_queued_for_session(id, "session disconnected") + self.cancel_session_transfers(id) + self.drop_conflict_reviews(|review| review.session_id == id);
+        let affected = self.transfers.fail_queued_for_session(id, "session disconnected")
+            + self.cancel_session_transfers(id)
+            + self.drop_conflict_reviews(|review| review.session_id == id);
         if affected > 0 {
             let plural = if affected == 1 { "" } else { "s" };
-            self.notifications.push(Severity::Info, format!("{affected} transfer{plural} cancelled \u{2014} session disconnected"));
+            self.notifications
+                .push(Severity::Info, format!("{affected} transfer{plural} cancelled \u{2014} session disconnected"));
         }
 
         self.notifications.push(Severity::Info, format!("Disconnected from {name}"));
@@ -214,7 +219,8 @@ impl App {
             }
             ConnectEvent::NeedsPassword { name, username, respond_to } => {
                 self.pending_password = Some(respond_to);
-                self.dialog = Some(Dialog::TextInput(TextInputDialog::new_masked(format!("Password for {username}@{name}"))));
+                self.dialog =
+                    Some(Dialog::TextInput(TextInputDialog::new_masked(format!("Password for {username}@{name}"))));
                 self.pending_action = Some(PendingAction::SubmitPassword);
             }
             ConnectEvent::Failed { message } => {
@@ -254,7 +260,10 @@ impl App {
                 Err(err) => {
                     tracing::debug!("{err:?}");
                     let err = anyhow::Error::from(err);
-                    let _ = tx.send(PanelEvent::Failed { session_id, message: errors::user_message("Unable to list home directory", &err) });
+                    let _ = tx.send(PanelEvent::Failed {
+                        session_id,
+                        message: errors::user_message("Unable to list home directory", &err),
+                    });
                     return;
                 }
             };
@@ -296,7 +305,10 @@ impl App {
             let target = path_to_remote_string(&dir_path.join(&name));
             if let Err(err) = filesystem::remote::create_directory(&sftp, &target).await {
                 tracing::debug!("{err:?}");
-                let _ = tx.send(PanelEvent::Failed { session_id, message: errors::user_message("Unable to create directory", &err) });
+                let _ = tx.send(PanelEvent::Failed {
+                    session_id,
+                    message: errors::user_message("Unable to create directory", &err),
+                });
                 return;
             }
             relist(&sftp, session_id, dir_path, &tx).await;
@@ -325,7 +337,8 @@ impl App {
         tokio::spawn(async move {
             if let Err(err) = filesystem::remote::rename(&sftp, &from, &to).await {
                 tracing::debug!("{err:?}");
-                let _ = tx.send(PanelEvent::Failed { session_id, message: errors::user_message("Unable to rename", &err) });
+                let _ =
+                    tx.send(PanelEvent::Failed { session_id, message: errors::user_message("Unable to rename", &err) });
                 return;
             }
             relist(&sftp, session_id, dir_path, &tx).await;
@@ -352,7 +365,10 @@ impl App {
                 let target_str = path_to_remote_string(&target);
                 if let Err(err) = filesystem::remote::delete(&sftp, &target_str).await {
                     tracing::debug!("{err:?}");
-                    let _ = tx.send(PanelEvent::Failed { session_id, message: errors::user_message("Unable to delete", &err) });
+                    let _ = tx.send(PanelEvent::Failed {
+                        session_id,
+                        message: errors::user_message("Unable to delete", &err),
+                    });
                     return;
                 }
             }
@@ -369,7 +385,10 @@ async fn relist(sftp: &SftpSession, session_id: u64, path: PathBuf, tx: &mpsc::U
         }
         Err(err) => {
             tracing::debug!("{err:?}");
-            let _ = tx.send(PanelEvent::Failed { session_id, message: errors::user_message(format!("Unable to list {}", path.display()), &err) });
+            let _ = tx.send(PanelEvent::Failed {
+                session_id,
+                message: errors::user_message(format!("Unable to list {}", path.display()), &err),
+            });
         }
     }
 }
@@ -379,7 +398,9 @@ async fn run_connect(entry: ConnectionEntry, tx: mpsc::UnboundedSender<ConnectEv
         Ok(handle) => handle,
         Err(err) => {
             tracing::debug!("{err:?}");
-            let _ = tx.send(ConnectEvent::Failed { message: errors::user_message(format!("Unable to connect to {}", entry.name), &err) });
+            let _ = tx.send(ConnectEvent::Failed {
+                message: errors::user_message(format!("Unable to connect to {}", entry.name), &err),
+            });
             return;
         }
     };
@@ -392,13 +413,16 @@ async fn run_connect(entry: ConnectionEntry, tx: mpsc::UnboundedSender<ConnectEv
         Ok(false) => {}
         Err(err) => {
             tracing::debug!("{err:?}");
-            let _ = tx.send(ConnectEvent::Failed { message: errors::user_message(format!("Authentication error for {}", entry.name), &err) });
+            let _ = tx.send(ConnectEvent::Failed {
+                message: errors::user_message(format!("Authentication error for {}", entry.name), &err),
+            });
             return;
         }
     }
 
     let (respond_to, password_rx) = oneshot::channel();
-    let request = ConnectEvent::NeedsPassword { name: entry.name.clone(), username: entry.username.clone(), respond_to };
+    let request =
+        ConnectEvent::NeedsPassword { name: entry.name.clone(), username: entry.username.clone(), respond_to };
     if tx.send(request).is_err() {
         return;
     }
@@ -415,33 +439,56 @@ async fn run_connect(entry: ConnectionEntry, tx: mpsc::UnboundedSender<ConnectEv
         }
         Err(err) => {
             tracing::debug!("{err:?}");
-            let _ = tx.send(ConnectEvent::Failed { message: errors::user_message(format!("Authentication error for {}", entry.name), &err) });
+            let _ = tx.send(ConnectEvent::Failed {
+                message: errors::user_message(format!("Authentication error for {}", entry.name), &err),
+            });
         }
     }
 }
 
-async fn finish_connect(entry: ConnectionEntry, handle: russh::client::Handle<TermConnectHandler>, tx: &mpsc::UnboundedSender<ConnectEvent>) {
+async fn finish_connect(
+    entry: ConnectionEntry, handle: russh::client::Handle<TermConnectHandler>, tx: &mpsc::UnboundedSender<ConnectEvent>,
+) {
     match connection::client::open_sftp(&handle).await {
         Ok(sftp) => {
             let _ = tx.send(ConnectEvent::Connected { entry: Box::new(entry), handle, sftp });
         }
         Err(err) => {
             tracing::debug!("{err:?}");
-            let _ = tx.send(ConnectEvent::Failed { message: errors::user_message(format!("Connected to {} but failed to start SFTP", entry.name), &err) });
+            let _ = tx.send(ConnectEvent::Failed {
+                message: errors::user_message(format!("Connected to {} but failed to start SFTP", entry.name), &err),
+            });
         }
     }
 }
 
 fn build_connection_form(title: &str, existing: Option<&ConnectionEntry>) -> Dialog {
     let (name, host, port, username, password) = match existing {
-        Some(entry) => (entry.name.clone(), entry.host.clone(), entry.port.to_string(), entry.username.clone(), entry.password.clone().unwrap_or_default()),
+        Some(entry) => (
+            entry.name.clone(),
+            entry.host.clone(),
+            entry.port.to_string(),
+            entry.username.clone(),
+            entry.password.clone().unwrap_or_default(),
+        ),
         None => (String::new(), String::new(), "22".to_string(), String::new(), String::new()),
     };
 
-    Dialog::Form(FormDialog::new(title, vec![FormField::new("Name", name), FormField::new("Host", host), FormField::new("Port", port), FormField::new("Username", username), FormField::new_masked("Password", password)]))
+    Dialog::Form(FormDialog::new(
+        title,
+        vec![
+            FormField::new("Name", name),
+            FormField::new("Host", host),
+            FormField::new("Port", port),
+            FormField::new("Username", username),
+            FormField::new_masked("Password", password),
+        ],
+    ))
 }
 
-fn build_connection_profile(values: &[String], preserve_from: Option<&ConnectionEntry>) -> Result<ConnectionProfile, String> {
+fn build_connection_profile(
+    values: &[String], preserve_from: Option<&ConnectionEntry>,
+) -> Result<ConnectionProfile, String> {
     let [name, host, port, username, password] = values else {
         return Err("Unexpected number of fields".to_string());
     };
@@ -464,7 +511,15 @@ fn build_connection_profile(values: &[String], preserve_from: Option<&Connection
     }
     let password = if password.is_empty() { None } else { Some(password.clone()) };
 
-    Ok(ConnectionProfile { name: name.to_string(), host: host.to_string(), port, username: username.to_string(), identity_file: preserve_from.and_then(|entry| entry.identity_file.clone()), remote_path: preserve_from.and_then(|entry| entry.remote_path.clone()), password })
+    Ok(ConnectionProfile {
+        name: name.to_string(),
+        host: host.to_string(),
+        port,
+        username: username.to_string(),
+        identity_file: preserve_from.and_then(|entry| entry.identity_file.clone()),
+        remote_path: preserve_from.and_then(|entry| entry.remote_path.clone()),
+        password,
+    })
 }
 
 #[cfg(test)]

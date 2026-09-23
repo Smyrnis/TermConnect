@@ -18,7 +18,12 @@ impl App {
             }
         };
 
-        self.search = Some(SearchSession { view: SearchView::new(), target, cancel: Arc::new(AtomicBool::new(false)), generation: Arc::new(AtomicU64::new(0)) });
+        self.search = Some(SearchSession {
+            view: SearchView::new(),
+            target,
+            cancel: Arc::new(AtomicBool::new(false)),
+            generation: Arc::new(AtomicU64::new(0)),
+        });
         self.screen = Screen::Search;
     }
 

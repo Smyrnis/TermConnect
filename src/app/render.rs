@@ -50,9 +50,21 @@ impl App {
                 if self.sessions.len() > 1 {
                     let (tabs_area, panel_area) = layout::split_remote_with_tabs(remote_area);
                     self.render_session_tabs(frame, tabs_area);
-                    panels::render_panel(frame, panel_area, "REMOTE", self.active_panel == ActivePanel::Remote, &session.panel);
+                    panels::render_panel(
+                        frame,
+                        panel_area,
+                        "REMOTE",
+                        self.active_panel == ActivePanel::Remote,
+                        &session.panel,
+                    );
                 } else {
-                    panels::render_panel(frame, remote_area, "REMOTE", self.active_panel == ActivePanel::Remote, &session.panel);
+                    panels::render_panel(
+                        frame,
+                        remote_area,
+                        "REMOTE",
+                        self.active_panel == ActivePanel::Remote,
+                        &session.panel,
+                    );
                 }
             }
             None => {
@@ -81,14 +93,28 @@ impl App {
     }
 
     fn render_connections(&self, frame: &mut Frame, area: Rect) {
-        let connected_names: std::collections::HashSet<&str> = self.sessions.iter().map(|session| session.entry.name.as_str()).collect();
+        let connected_names: std::collections::HashSet<&str> =
+            self.sessions.iter().map(|session| session.entry.name.as_str()).collect();
         let active_name = self.sessions.active().map(|session| session.entry.name.as_str());
-        connections_list::render_connections_list(frame, area, &self.connections, self.connections_cursor, &connected_names, active_name);
+        connections_list::render_connections_list(
+            frame,
+            area,
+            &self.connections,
+            self.connections_cursor,
+            &connected_names,
+            active_name,
+        );
     }
 
     fn render_transfers(&self, frame: &mut Frame, area: Rect) {
         let copy_key = self.key_bindings.key_for(Action::Copy).map(input::format_key_spec);
-        transfer_list::render_transfer_list(frame, area, &self.transfer_rows(), self.transfers_cursor, copy_key.as_deref());
+        transfer_list::render_transfer_list(
+            frame,
+            area,
+            &self.transfer_rows(),
+            self.transfers_cursor,
+            copy_key.as_deref(),
+        );
     }
 
     fn render_search(&self, frame: &mut Frame, area: Rect) {
@@ -104,7 +130,11 @@ impl App {
                 Some(text) => (text, Style::default()),
                 None => {
                     let active: Vec<&transfer::TransferJob> = self.transfers.active_jobs().collect();
-                    if active.is_empty() { (build_hint_text(&self.key_bindings), Style::default()) } else { (self.transfer_status_text(&active), Style::default()) }
+                    if active.is_empty() {
+                        (build_hint_text(&self.key_bindings), Style::default())
+                    } else {
+                        (self.transfer_status_text(&active), Style::default())
+                    }
                 }
             },
         };
@@ -141,19 +171,28 @@ impl App {
                 Some(batch_id) => {
                     let progress = self.transfers.batch_progress(batch_id);
                     let percent = transfer::rows::percent_of(progress.transferred_bytes, progress.total_bytes);
-                    format!("{verb} {}: {}/{} files, {percent}%{suffix}", job.display_name, progress.completed_files, progress.total_files)
+                    format!(
+                        "{verb} {}: {}/{} files, {percent}%{suffix}",
+                        job.display_name, progress.completed_files, progress.total_files
+                    )
                 }
                 None => format!("{verb} {}: {}%{suffix}", job.display_name, job.progress_percent()),
             };
         }
 
         let count = active.len();
-        let shared_batch = active.first().and_then(|first| first.batch_id).filter(|batch_id| active.iter().all(|job| job.batch_id == Some(*batch_id)));
+        let shared_batch = active
+            .first()
+            .and_then(|first| first.batch_id)
+            .filter(|batch_id| active.iter().all(|job| job.batch_id == Some(*batch_id)));
         match shared_batch {
             Some(batch_id) => {
                 let progress = self.transfers.batch_progress(batch_id);
                 let percent = transfer::rows::percent_of(progress.transferred_bytes, progress.total_bytes);
-                format!("{verb} {count} files: {}/{} files, {percent}%{suffix}", progress.completed_files, progress.total_files)
+                format!(
+                    "{verb} {count} files: {}/{} files, {percent}%{suffix}",
+                    progress.completed_files, progress.total_files
+                )
             }
             None => {
                 let transferred: u64 = active.iter().map(|job| job.transferred_bytes).sum();
@@ -185,7 +224,13 @@ fn notification_style(severity: Severity) -> Style {
 fn build_hint_text(bindings: &input::KeyBindings) -> String {
     let entries = [(Action::Help, "Help"), (Action::OpenConnections, "Connections"), (Action::Quit, "Quit")];
 
-    entries.into_iter().filter_map(|(action, label)| bindings.key_for(action).map(|spec| format!("{} {label}", input::format_key_spec(spec)))).collect::<Vec<_>>().join("  ")
+    entries
+        .into_iter()
+        .filter_map(|(action, label)| {
+            bindings.key_for(action).map(|spec| format!("{} {label}", input::format_key_spec(spec)))
+        })
+        .collect::<Vec<_>>()
+        .join("  ")
 }
 
 #[cfg(test)]

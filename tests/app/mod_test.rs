@@ -14,9 +14,20 @@ fn app_in_temp_dir() -> (tempfile::TempDir, App) {
 fn at_with_applies_panel_settings_to_the_local_panel() {
     let dir = tempfile::tempdir().unwrap();
     fs::write(dir.path().join(".hidden"), b"x").unwrap();
-    let settings = config::settings::PanelSettings { show_hidden: true, sort_key: "name".to_string(), sort_order: "ascending".to_string() };
+    let settings = config::settings::PanelSettings {
+        show_hidden: true,
+        sort_key: "name".to_string(),
+        sort_order: "ascending".to_string(),
+    };
 
-    let app = App::at_with(dir.path().to_path_buf(), &settings, input::KeyBindings::defaults(), config::bookmarks::Bookmarks::default(), None).unwrap();
+    let app = App::at_with(
+        dir.path().to_path_buf(),
+        &settings,
+        input::KeyBindings::defaults(),
+        config::bookmarks::Bookmarks::default(),
+        None,
+    )
+    .unwrap();
 
     assert!(app.local.show_hidden());
 }
@@ -29,7 +40,12 @@ fn key_bindings_from_config_are_used_for_key_mapping() {
     let (bindings, _) = input::KeyBindings::from_overrides(&overrides);
     app.key_bindings = bindings;
 
-    let event = KeyEvent { code: KeyCode::Char('q'), modifiers: KeyModifiers::CONTROL, kind: KeyEventKind::Press, state: KeyEventState::NONE };
+    let event = KeyEvent {
+        code: KeyCode::Char('q'),
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
 
     assert_eq!(app.key_bindings.map_key(event), Action::Quit);
 }

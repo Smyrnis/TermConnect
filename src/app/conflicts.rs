@@ -4,18 +4,22 @@ use super::*;
 use crate::transfer::{conflicts::Resolution, plan::DirectoryPlan};
 
 impl App {
-    pub(super) fn review_or_apply_plan(&mut self, batch_id: u64, session_id: u64, direction: Direction, plan: DirectoryPlan) {
+    pub(super) fn review_or_apply_plan(
+        &mut self, batch_id: u64, session_id: u64, direction: Direction, plan: DirectoryPlan,
+    ) {
         let conflicts = transfer::conflicts::conflict_indices(&plan);
         if conflicts.is_empty() {
             self.apply_plan_ready(batch_id, session_id, direction, plan, &[]);
             return;
         }
-        if let Some(resolution) = self.on_conflict.automatic_resolution() {
-            let answers = vec![resolution; conflicts.len()];
+        let automatic: Option<Vec<Resolution>> =
+            conflicts.iter().map(|index| self.on_conflict.resolution_for(&plan.files[*index])).collect();
+        if let Some(answers) = automatic {
             self.apply_plan_ready(batch_id, session_id, direction, plan, &answers);
             return;
         }
-        self.conflict_reviews.push_back(ConflictReview { batch_id, session_id, direction, plan, conflicts, answers: Vec::new() });
+        let answers = vec![None; conflicts.len()];
+        self.conflict_reviews.push_back(ConflictReview { batch_id, session_id, direction, plan, conflicts, answers });
         self.open_next_conflict_prompt();
     }
 
@@ -26,15 +30,27 @@ impl App {
         let Some(review) = self.conflict_reviews.front() else {
             return;
         };
-        let index = review.answers.len();
+        let Some(index) = review.answers.iter().position(Option::is_none) else {
+            return;
+        };
         let Some(file) = review.conflicts.get(index).and_then(|file_index| review.plan.files.get(*file_index)) else {
             return;
         };
-        let Some(existing) = file.existing else {
+        if !file.is_conflict() {
             return;
-        };
+        }
         let file_name = file.display_name.clone();
-        self.dialog = Some(Dialog::Conflict(ConflictDialog { file_name, existing, new_size: file.size, new_modified: file.source_modified, index, total: review.conflicts.len(), apply_to_rest: false, now: unix_now() }));
+        self.dialog = Some(Dialog::Conflict(ConflictDialog {
+            file_name,
+            existing: file.existing,
+            partial: file.partial,
+            new_size: file.size,
+            new_modified: file.source_modified,
+            index,
+            total: review.conflicts.len(),
+            apply_to_rest: false,
+            now: unix_now(),
+        }));
         self.pending_action = Some(PendingAction::ResolveConflict);
     }
 
@@ -49,19 +65,38 @@ impl App {
             self.open_next_conflict_prompt();
             return;
         };
-        let remaining = review.conflicts.len() - review.answers.len();
-        review.answers.extend(std::iter::repeat_n(resolution, if apply_to_rest { remaining } else { 1 }));
-        if review.answers.len() < review.conflicts.len() {
-            self.conflict_reviews.push_front(review);
-        } else {
-            self.apply_plan_ready(review.batch_id, review.session_id, review.direction, review.plan, &review.answers);
+        let Some(current) = review.answers.iter().position(Option::is_none) else {
+            return;
+        };
+        review.answers[current] = Some(resolution);
+        if apply_to_rest {
+            let answered = &review.plan.files[review.conflicts[current]];
+            for index in current + 1..review.conflicts.len() {
+                if review.answers[index].is_none()
+                    && transfer::conflicts::fits_the_rest(
+                        resolution,
+                        answered,
+                        &review.plan.files[review.conflicts[index]],
+                    )
+                {
+                    review.answers[index] = Some(resolution);
+                }
+            }
+        }
+        match review.answers.iter().copied().collect::<Option<Vec<Resolution>>>() {
+            Some(answers) => {
+                self.apply_plan_ready(review.batch_id, review.session_id, review.direction, review.plan, &answers)
+            }
+            None => self.conflict_reviews.push_front(review),
         }
         self.open_next_conflict_prompt();
     }
 
     pub(super) fn drop_conflict_reviews(&mut self, should_drop: impl Fn(&ConflictReview) -> bool) -> usize {
-        let showing_dropped_review = matches!(self.pending_action, Some(PendingAction::ResolveConflict)) && self.conflict_reviews.front().is_some_and(&should_drop);
-        let dropped: Vec<u64> = self.conflict_reviews.iter().filter(|review| should_drop(review)).map(|review| review.batch_id).collect();
+        let showing_dropped_review = matches!(self.pending_action, Some(PendingAction::ResolveConflict))
+            && self.conflict_reviews.front().is_some_and(&should_drop);
+        let dropped: Vec<u64> =
+            self.conflict_reviews.iter().filter(|review| should_drop(review)).map(|review| review.batch_id).collect();
         self.conflict_reviews.retain(|review| !should_drop(review));
         for batch_id in &dropped {
             self.transfers.forget_batch_if_empty(*batch_id);

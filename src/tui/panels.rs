@@ -52,7 +52,15 @@ pub struct PanelState {
 
 impl PanelState {
     pub fn new(path: PathBuf) -> Result<Self> {
-        let mut panel = Self { path, all_entries: Vec::new(), rows: Vec::new(), cursor: 0, selected: HashSet::new(), sort_spec: SortSpec::default(), show_hidden: false };
+        let mut panel = Self {
+            path,
+            all_entries: Vec::new(),
+            rows: Vec::new(),
+            cursor: 0,
+            selected: HashSet::new(),
+            sort_spec: SortSpec::default(),
+            show_hidden: false,
+        };
         panel.refresh()?;
         Ok(panel)
     }
@@ -66,7 +74,15 @@ impl PanelState {
     }
 
     pub fn from_listing(path: PathBuf, entries: Vec<Entry>) -> Self {
-        let mut panel = Self { path: PathBuf::new(), all_entries: Vec::new(), rows: Vec::new(), cursor: 0, selected: HashSet::new(), sort_spec: SortSpec::default(), show_hidden: false };
+        let mut panel = Self {
+            path: PathBuf::new(),
+            all_entries: Vec::new(),
+            rows: Vec::new(),
+            cursor: 0,
+            selected: HashSet::new(),
+            sort_spec: SortSpec::default(),
+            show_hidden: false,
+        };
         panel.replace_listing(path, entries);
         panel
     }
@@ -79,7 +95,8 @@ impl PanelState {
     }
 
     fn recompute_rows(&mut self) {
-        let mut visible: Vec<Entry> = self.all_entries.iter().filter(|entry| self.show_hidden || !entry.name.starts_with('.')).cloned().collect();
+        let mut visible: Vec<Entry> =
+            self.all_entries.iter().filter(|entry| self.show_hidden || !entry.name.starts_with('.')).cloned().collect();
         sort::sort_entries(&mut visible, self.sort_spec);
 
         let mut rows = Vec::with_capacity(visible.len() + 1);
@@ -235,7 +252,10 @@ impl PanelState {
 pub fn render_panel(frame: &mut Frame, area: Rect, title: &str, is_active: bool, panel: &PanelState) {
     let border_style = if is_active { Style::default().fg(Color::Yellow) } else { Style::default() };
 
-    let block = Block::default().title(format!("{title} {} [{}]", panel.path().display(), sort_indicator(panel.sort_spec()))).borders(Borders::ALL).border_style(border_style);
+    let block = Block::default()
+        .title(format!("{title} {} [{}]", panel.path().display(), sort_indicator(panel.sort_spec())))
+        .borders(Borders::ALL)
+        .border_style(border_style);
 
     let inner = block.inner(area);
     frame.render_widget(block, area);

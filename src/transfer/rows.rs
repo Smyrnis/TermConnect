@@ -79,10 +79,22 @@ pub fn percent_of(done: u64, total: u64) -> u8 {
 fn row_for_jobs(queue: &TransferQueue, jobs: &[&TransferJob]) -> QueueRow {
     let first = jobs[0];
     let (kind, label) = match first.batch_id {
-        Some(batch_id) => (RowKind::Batch(batch_id), queue.batch_label(batch_id).unwrap_or(&first.display_name).to_string()),
+        Some(batch_id) => {
+            (RowKind::Batch(batch_id), queue.batch_label(batch_id).unwrap_or(&first.display_name).to_string())
+        }
         None => (RowKind::Single(first.id), first.display_name.clone()),
     };
-    QueueRow { kind, label, direction: first.direction, files_done: jobs.iter().filter(|job| job.status == JobStatus::Completed).count(), files_total: jobs.len(), bytes_done: jobs.iter().map(|job| job.transferred_bytes).sum(), bytes_total: jobs.iter().map(|job| job.total_bytes).sum(), state: row_state(jobs), job_ids: jobs.iter().map(|job| job.id).collect() }
+    QueueRow {
+        kind,
+        label,
+        direction: first.direction,
+        files_done: jobs.iter().filter(|job| job.status == JobStatus::Completed).count(),
+        files_total: jobs.len(),
+        bytes_done: jobs.iter().map(|job| job.transferred_bytes).sum(),
+        bytes_total: jobs.iter().map(|job| job.total_bytes).sum(),
+        state: row_state(jobs),
+        job_ids: jobs.iter().map(|job| job.id).collect(),
+    }
 }
 
 fn row_state(jobs: &[&TransferJob]) -> RowState {
@@ -104,7 +116,17 @@ fn row_state(jobs: &[&TransferJob]) -> RowState {
 }
 
 fn scan_row(scan: &ScanInfo) -> QueueRow {
-    QueueRow { kind: RowKind::Scan(scan.batch_id), label: scan.label.to_string(), direction: scan.direction, files_done: 0, files_total: 0, bytes_done: 0, bytes_total: 0, state: scan.state, job_ids: Vec::new() }
+    QueueRow {
+        kind: RowKind::Scan(scan.batch_id),
+        label: scan.label.to_string(),
+        direction: scan.direction,
+        files_done: 0,
+        files_total: 0,
+        bytes_done: 0,
+        bytes_total: 0,
+        state: scan.state,
+        job_ids: Vec::new(),
+    }
 }
 
 #[cfg(test)]

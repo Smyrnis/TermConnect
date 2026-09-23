@@ -24,7 +24,12 @@ fn typing_inserts_at_the_cursor_and_reports_pattern_changed() {
 #[test]
 fn ctrl_modified_characters_are_not_inserted() {
     let mut view = SearchView::new();
-    let event = KeyEvent { code: KeyCode::Char('c'), modifiers: KeyModifiers::CONTROL, kind: KeyEventKind::Press, state: KeyEventState::NONE };
+    let event = KeyEvent {
+        code: KeyCode::Char('c'),
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::NONE,
+    };
     assert_eq!(view.handle_key(event), SearchOutcome::Pending);
     assert_eq!(view.pattern, "");
 }

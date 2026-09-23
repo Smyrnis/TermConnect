@@ -70,7 +70,9 @@ fn load_from(path: &Path) -> Result<(Bookmarks, Vec<super::StartupWarning>)> {
 
     match toml::from_str::<BookmarksFile>(&contents) {
         Ok(file) => Ok((Bookmarks(file.bookmark), Vec::new())),
-        Err(err) => Ok((Bookmarks::default(), vec![super::StartupWarning(format!("failed to parse bookmarks.toml: {err}"))])),
+        Err(err) => {
+            Ok((Bookmarks::default(), vec![super::StartupWarning(format!("failed to parse bookmarks.toml: {err}"))]))
+        }
     }
 }
 

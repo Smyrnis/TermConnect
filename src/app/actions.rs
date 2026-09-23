@@ -31,7 +31,13 @@ impl App {
             }
             Action::Help => self.help_visible = true,
             Action::Back => self.handle_back(),
-            Action::Up | Action::Down | Action::ToggleSelect | Action::Open | Action::Refresh | Action::ToggleHidden | Action::CycleSort => {
+            Action::Up
+            | Action::Down
+            | Action::ToggleSelect
+            | Action::Open
+            | Action::Refresh
+            | Action::ToggleHidden
+            | Action::CycleSort => {
                 self.apply_screen_action(action);
             }
             Action::OpenTerminal => {}

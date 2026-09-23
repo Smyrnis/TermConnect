@@ -13,7 +13,16 @@ fn app() -> (tempfile::TempDir, App) {
 }
 
 fn file(name: &str, conflict: bool) -> PlannedFile {
-    PlannedFile { local_path: PathBuf::from(format!("/local/{name}")), remote_path: format!("/remote/{name}"), display_name: name.to_string(), size: 1, existing: conflict.then_some(ExistingFile { size: 2, modified: None, is_dir: false }), source_modified: None }
+    PlannedFile {
+        local_path: PathBuf::from(format!("/local/{name}")),
+        remote_path: format!("/remote/{name}"),
+        display_name: name.to_string(),
+        size: 1,
+        existing: conflict.then_some(ExistingFile { size: 2, modified: None, is_dir: false }),
+        source_modified: None,
+        partial: None,
+        resume: false,
+    }
 }
 
 fn plan(files: Vec<PlannedFile>) -> DirectoryPlan {
@@ -36,7 +45,16 @@ fn queued_remote_paths(app: &App) -> Vec<String> {
 }
 
 fn connection_entry() -> ConnectionEntry {
-    ConnectionEntry { name: "test".to_string(), host: "h".to_string(), port: 22, username: "u".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }
+    ConnectionEntry {
+        name: "test".to_string(),
+        host: "h".to_string(),
+        port: 22,
+        username: "u".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
+    }
 }
 
 #[test]
@@ -133,7 +151,14 @@ fn disconnecting_drops_that_sessions_waiting_copies_and_counts_them() {
     app.connections = vec![entry];
     app.screen = Screen::Connections;
     let batch_id = app.transfers.start_batch("copy".to_string());
-    app.conflict_reviews.push_back(ConflictReview { batch_id, session_id, direction: Direction::Upload, plan: plan(vec![file("a.txt", true)]), conflicts: vec![0], answers: Vec::new() });
+    app.conflict_reviews.push_back(ConflictReview {
+        batch_id,
+        session_id,
+        direction: Direction::Upload,
+        plan: plan(vec![file("a.txt", true)]),
+        conflicts: vec![0],
+        answers: vec![None],
+    });
 
     app.disconnect_selected();
 
@@ -240,4 +265,74 @@ fn files_blocked_by_a_folder_are_reported() {
     let notification = app.notifications.current().unwrap();
     assert_eq!(notification.severity, Severity::Warning);
     assert_eq!(notification.message, "Skipped 1 file because a folder with the same name exists");
+}
+
+#[test]
+fn an_automatic_policy_resumes_a_partial_and_queues_it_with_resume() {
+    let (_dir, mut app) = app();
+    app.on_conflict = ConflictPolicy::Skip;
+    let mut partial = file("big.iso", false);
+    partial.partial = Some(ExistingFile { size: 0, modified: None, is_dir: false });
+
+    review(&mut app, vec![partial]);
+
+    assert!(app.dialog.is_none());
+    let job = app.transfers.jobs().next().unwrap();
+    assert!(job.resume);
+}
+
+#[test]
+fn a_partial_found_at_copy_time_opens_the_prompt_with_resume() {
+    let (_dir, mut app) = app();
+    let mut partial = file("big.iso", false);
+    partial.partial = Some(ExistingFile { size: 5, modified: None, is_dir: false });
+
+    review(&mut app, vec![partial]);
+    assert!(
+        matches!(&app.dialog, Some(Dialog::Conflict(dialog)) if dialog.partial.is_some() && dialog.existing.is_none())
+    );
+    press(&mut app, KeyCode::Char('u'));
+
+    assert!(app.transfers.jobs().next().unwrap().resume);
+}
+
+fn partial_only(name: &str) -> PlannedFile {
+    let mut partial = file(name, false);
+    partial.partial = Some(ExistingFile { size: 0, modified: None, is_dir: false });
+    partial
+}
+
+#[test]
+fn resume_for_the_rest_leaves_complete_files_to_their_own_prompt() {
+    let (_dir, mut app) = app();
+    review(&mut app, vec![partial_only("a.iso"), file("b.txt", true)]);
+
+    press(&mut app, KeyCode::Char('a'));
+    press(&mut app, KeyCode::Char('u'));
+
+    assert!(matches!(&app.dialog, Some(Dialog::Conflict(dialog)) if dialog.file_name == "b.txt" && dialog.index == 1));
+    press(&mut app, KeyCode::Char('s'));
+    assert_eq!(queued_remote_paths(&app), vec!["/remote/a.iso".to_string()]);
+    assert!(app.transfers.jobs().next().unwrap().resume);
+}
+
+#[test]
+fn start_over_for_the_rest_never_overwrites_a_complete_file() {
+    let (_dir, mut app) = app();
+    review(&mut app, vec![partial_only("a.iso"), file("b.txt", true)]);
+
+    press(&mut app, KeyCode::Char('a'));
+    press(&mut app, KeyCode::Char('o'));
+
+    assert!(matches!(&app.dialog, Some(Dialog::Conflict(dialog)) if dialog.file_name == "b.txt"));
+}
+
+#[test]
+fn skipping_a_partial_is_reported_as_partly_copied() {
+    let (_dir, mut app) = app();
+    review(&mut app, vec![partial_only("a.iso")]);
+
+    press(&mut app, KeyCode::Char('s'));
+
+    assert_eq!(app.notifications.current().unwrap().message, "Skipped 1 partly copied file");
 }

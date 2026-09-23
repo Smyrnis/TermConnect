@@ -112,7 +112,12 @@ impl App {
                         }
                     }
                     Some(PendingAction::AddBookmark) => self.add_bookmark(value),
-                    Some(PendingAction::Delete) | Some(PendingAction::AddConnection) | Some(PendingAction::EditConnection { .. }) | Some(PendingAction::DeleteConnection { .. }) | Some(PendingAction::ResolveConflict) | None => {}
+                    Some(PendingAction::Delete)
+                    | Some(PendingAction::AddConnection)
+                    | Some(PendingAction::EditConnection { .. })
+                    | Some(PendingAction::DeleteConnection { .. })
+                    | Some(PendingAction::ResolveConflict)
+                    | None => {}
                 }
             }
             DialogOutcome::Selected(index) => {

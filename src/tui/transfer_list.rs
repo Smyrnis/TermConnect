@@ -48,7 +48,8 @@ pub fn render_transfer_list(frame: &mut Frame, area: Rect, rows: &[QueueRow], cu
 }
 
 fn columns_for(rows: &[QueueRow], width: usize) -> Columns {
-    let state_part = 2 + rows.iter().map(|row| UnicodeWidthStr::width(state_text(row.state).as_str())).max().unwrap_or(0);
+    let state_part =
+        2 + rows.iter().map(|row| UnicodeWidthStr::width(state_text(row.state).as_str())).max().unwrap_or(0);
     let amount_width = rows.iter().map(|row| amount_text(row).len()).max().unwrap_or(0);
     let amount_part = 1 + amount_width;
     let percent_part = 1 + PERCENT_WIDTH;

@@ -6,8 +6,20 @@ use crate::transfer::{
     rows::{QueueRow, RowKind, RowState},
 };
 
-fn row(kind: RowKind, label: &str, direction: Direction, files: (usize, usize), bytes: (u64, u64), state: RowState) -> QueueRow {
-    QueueRow { kind, label: label.to_string(), direction, files_done: files.0, files_total: files.1, bytes_done: bytes.0, bytes_total: bytes.1, state, job_ids: Vec::new() }
+fn row(
+    kind: RowKind, label: &str, direction: Direction, files: (usize, usize), bytes: (u64, u64), state: RowState,
+) -> QueueRow {
+    QueueRow {
+        kind,
+        label: label.to_string(),
+        direction,
+        files_done: files.0,
+        files_total: files.1,
+        bytes_done: bytes.0,
+        bytes_total: bytes.1,
+        state,
+        job_ids: Vec::new(),
+    }
 }
 
 fn render(rows: &[QueueRow], cursor: usize, copy_key: Option<&str>) -> String {
@@ -23,7 +35,12 @@ fn render_at_width(rows: &[QueueRow], cursor: usize, copy_key: Option<&str>, wid
 
 #[test]
 fn renders_batch_single_and_scan_rows() {
-    let rows = vec![row(RowKind::Batch(0), "photos", Direction::Upload, (412, 5000), (38, 100), RowState::Running), row(RowKind::Single(9), "report.pdf", Direction::Download, (0, 1), (71, 100), RowState::Queued), row(RowKind::Scan(3), "music", Direction::Upload, (0, 0), (0, 0), RowState::Scanning), row(RowKind::Batch(1), "docs", Direction::Upload, (8, 10), (80, 100), RowState::PartlyFailed(2))];
+    let rows = vec![
+        row(RowKind::Batch(0), "photos", Direction::Upload, (412, 5000), (38, 100), RowState::Running),
+        row(RowKind::Single(9), "report.pdf", Direction::Download, (0, 1), (71, 100), RowState::Queued),
+        row(RowKind::Scan(3), "music", Direction::Upload, (0, 0), (0, 0), RowState::Scanning),
+        row(RowKind::Batch(1), "docs", Direction::Upload, (8, 10), (80, 100), RowState::PartlyFailed(2)),
+    ];
 
     let content = render(&rows, 0, Some("F5"));
 
@@ -57,7 +74,14 @@ fn renders_with_a_cursor_past_the_end() {
 
 #[test]
 fn long_state_and_amount_texts_stay_fully_visible() {
-    let rows = vec![row(RowKind::Batch(0), "docs", Direction::Upload, (12345, 100000), (50, 100), RowState::PartlyFailed(12345))];
+    let rows = vec![row(
+        RowKind::Batch(0),
+        "docs",
+        Direction::Upload,
+        (12345, 100000),
+        (50, 100),
+        RowState::PartlyFailed(12345),
+    )];
 
     let content = render(&rows, 0, Some("F5"));
 

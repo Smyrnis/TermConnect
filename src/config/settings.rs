@@ -109,7 +109,14 @@ pub(crate) fn settings_from_file(file: SettingsFile) -> (Settings, Vec<String>) 
         }
     };
 
-    (Settings { panel: PanelSettings { show_hidden, sort_key, sort_order }, keys: file.keys, transfers: TransferSettings { max_parallel, on_conflict } }, warnings)
+    (
+        Settings {
+            panel: PanelSettings { show_hidden, sort_key, sort_order },
+            keys: file.keys,
+            transfers: TransferSettings { max_parallel, on_conflict },
+        },
+        warnings,
+    )
 }
 
 #[cfg(test)]

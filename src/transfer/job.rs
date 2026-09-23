@@ -34,9 +34,23 @@ pub struct TransferJob {
     pub status: JobStatus,
     pub attempts: u32,
     pub batch_id: Option<u64>,
+    pub resume: bool,
 }
 
 impl TransferJob {
+    pub fn part_destination(&self) -> Destination {
+        match self.direction {
+            Direction::Upload => {
+                Destination::Remote { session_id: self.session_id, path: format!("{}.part", self.remote_path) }
+            }
+            Direction::Download => {
+                let mut part = self.local_path.clone().into_os_string();
+                part.push(".part");
+                Destination::Local(PathBuf::from(part))
+            }
+        }
+    }
+
     pub fn destination(&self) -> Destination {
         match self.direction {
             Direction::Upload => Destination::Remote { session_id: self.session_id, path: self.remote_path.clone() },

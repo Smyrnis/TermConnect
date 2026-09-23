@@ -12,7 +12,15 @@ fn settings_from_file_uses_defaults_when_panel_is_absent() {
 
 #[test]
 fn settings_from_file_accepts_valid_panel_values() {
-    let file = SettingsFile { panel: PanelSettingsFile { show_hidden: Some(true), sort_key: Some("size".to_string()), sort_order: Some("descending".to_string()) }, keys: HashMap::new(), transfers: TransferSettingsFile::default() };
+    let file = SettingsFile {
+        panel: PanelSettingsFile {
+            show_hidden: Some(true),
+            sort_key: Some("size".to_string()),
+            sort_order: Some("descending".to_string()),
+        },
+        keys: HashMap::new(),
+        transfers: TransferSettingsFile::default(),
+    };
 
     let (settings, warnings) = settings_from_file(file);
 
@@ -24,7 +32,11 @@ fn settings_from_file_accepts_valid_panel_values() {
 
 #[test]
 fn settings_from_file_falls_back_and_warns_on_an_unknown_sort_key() {
-    let file = SettingsFile { panel: PanelSettingsFile { show_hidden: None, sort_key: Some("date".to_string()), sort_order: None }, keys: HashMap::new(), transfers: TransferSettingsFile::default() };
+    let file = SettingsFile {
+        panel: PanelSettingsFile { show_hidden: None, sort_key: Some("date".to_string()), sort_order: None },
+        keys: HashMap::new(),
+        transfers: TransferSettingsFile::default(),
+    };
 
     let (settings, warnings) = settings_from_file(file);
 
@@ -37,7 +49,11 @@ fn settings_from_file_falls_back_and_warns_on_an_unknown_sort_key() {
 fn settings_from_file_passes_keys_through_unvalidated() {
     let mut keys = HashMap::new();
     keys.insert("quit".to_string(), "ctrl+q".to_string());
-    let file = SettingsFile { panel: PanelSettingsFile::default(), keys: keys.clone(), transfers: TransferSettingsFile::default() };
+    let file = SettingsFile {
+        panel: PanelSettingsFile::default(),
+        keys: keys.clone(),
+        transfers: TransferSettingsFile::default(),
+    };
 
     let (settings, _) = settings_from_file(file);
 
@@ -54,7 +70,10 @@ fn max_parallel_defaults_to_four() {
 
 #[test]
 fn max_parallel_uses_an_explicit_value() {
-    let file = SettingsFile { transfers: TransferSettingsFile { max_parallel: Some(8), on_conflict: None }, ..SettingsFile::default() };
+    let file = SettingsFile {
+        transfers: TransferSettingsFile { max_parallel: Some(8), on_conflict: None },
+        ..SettingsFile::default()
+    };
 
     let (settings, warnings) = settings_from_file(file);
 
@@ -65,7 +84,10 @@ fn max_parallel_uses_an_explicit_value() {
 #[test]
 fn max_parallel_below_one_falls_back_to_one_with_a_warning() {
     for value in [0, -3] {
-        let file = SettingsFile { transfers: TransferSettingsFile { max_parallel: Some(value), on_conflict: None }, ..SettingsFile::default() };
+        let file = SettingsFile {
+            transfers: TransferSettingsFile { max_parallel: Some(value), on_conflict: None },
+            ..SettingsFile::default()
+        };
 
         let (settings, warnings) = settings_from_file(file);
 
@@ -86,7 +108,10 @@ fn negative_max_parallel_still_parses_the_rest_of_the_config() {
 
 #[test]
 fn max_parallel_above_the_cap_is_limited_with_a_warning() {
-    let file = SettingsFile { transfers: TransferSettingsFile { max_parallel: Some(500), on_conflict: None }, ..SettingsFile::default() };
+    let file = SettingsFile {
+        transfers: TransferSettingsFile { max_parallel: Some(500), on_conflict: None },
+        ..SettingsFile::default()
+    };
 
     let (settings, warnings) = settings_from_file(file);
 
@@ -96,7 +121,10 @@ fn max_parallel_above_the_cap_is_limited_with_a_warning() {
 
 #[test]
 fn max_parallel_at_the_cap_is_accepted() {
-    let file = SettingsFile { transfers: TransferSettingsFile { max_parallel: Some(16), on_conflict: None }, ..SettingsFile::default() };
+    let file = SettingsFile {
+        transfers: TransferSettingsFile { max_parallel: Some(16), on_conflict: None },
+        ..SettingsFile::default()
+    };
 
     let (settings, warnings) = settings_from_file(file);
 
@@ -114,8 +142,16 @@ fn on_conflict_defaults_to_ask() {
 
 #[test]
 fn on_conflict_accepts_every_policy() {
-    for (value, policy) in [("ask", ConflictPolicy::Ask), ("overwrite", ConflictPolicy::Overwrite), ("skip", ConflictPolicy::Skip), ("rename", ConflictPolicy::Rename)] {
-        let file = SettingsFile { transfers: TransferSettingsFile { max_parallel: None, on_conflict: Some(value.to_string()) }, ..SettingsFile::default() };
+    for (value, policy) in [
+        ("ask", ConflictPolicy::Ask),
+        ("overwrite", ConflictPolicy::Overwrite),
+        ("skip", ConflictPolicy::Skip),
+        ("rename", ConflictPolicy::Rename),
+    ] {
+        let file = SettingsFile {
+            transfers: TransferSettingsFile { max_parallel: None, on_conflict: Some(value.to_string()) },
+            ..SettingsFile::default()
+        };
 
         let (settings, warnings) = settings_from_file(file);
 
@@ -126,7 +162,10 @@ fn on_conflict_accepts_every_policy() {
 
 #[test]
 fn an_unknown_on_conflict_falls_back_to_ask_with_a_warning() {
-    let file = SettingsFile { transfers: TransferSettingsFile { max_parallel: None, on_conflict: Some("merge".to_string()) }, ..SettingsFile::default() };
+    let file = SettingsFile {
+        transfers: TransferSettingsFile { max_parallel: None, on_conflict: Some("merge".to_string()) },
+        ..SettingsFile::default()
+    };
 
     let (settings, warnings) = settings_from_file(file);
 

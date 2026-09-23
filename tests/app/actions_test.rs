@@ -10,7 +10,16 @@ fn app_in_temp_dir() -> (tempfile::TempDir, App) {
 }
 
 fn sample_connection_entry() -> ConnectionEntry {
-    ConnectionEntry { name: "test".to_string(), host: "test.example.com".to_string(), port: 22, username: "user".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }
+    ConnectionEntry {
+        name: "test".to_string(),
+        host: "test.example.com".to_string(),
+        port: 22,
+        username: "user".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::Profile,
+    }
 }
 
 #[test]
@@ -58,7 +67,16 @@ fn panel_actions_are_ignored_when_remote_panel_has_no_listing_yet() {
 #[test]
 fn remote_panel_navigation_works_once_a_listing_exists() {
     let (_dir, mut app) = app_in_temp_dir();
-    let panel = PanelState::from_listing(PathBuf::from("/home/user"), vec![Entry { name: "child".to_string(), path: PathBuf::from("/home/user/child"), is_dir: true, size: 0, permissions: None }]);
+    let panel = PanelState::from_listing(
+        PathBuf::from("/home/user"),
+        vec![Entry {
+            name: "child".to_string(),
+            path: PathBuf::from("/home/user/child"),
+            is_dir: true,
+            size: 0,
+            permissions: None,
+        }],
+    );
     app.sessions.insert(sample_connection_entry(), panel);
     app.active_panel = ActivePanel::Remote;
 
@@ -79,7 +97,28 @@ fn back_action_returns_to_files_screen() {
 fn connections_cursor_moves_within_bounds() {
     let (_dir, mut app) = app_in_temp_dir();
     app.screen = Screen::Connections;
-    app.connections = vec![ConnectionEntry { name: "a".to_string(), host: "a.example.com".to_string(), port: 22, username: "user".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }, ConnectionEntry { name: "b".to_string(), host: "b.example.com".to_string(), port: 22, username: "user".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }];
+    app.connections = vec![
+        ConnectionEntry {
+            name: "a".to_string(),
+            host: "a.example.com".to_string(),
+            port: 22,
+            username: "user".to_string(),
+            identity_file: None,
+            remote_path: None,
+            password: None,
+            source: ConnectionSource::Profile,
+        },
+        ConnectionEntry {
+            name: "b".to_string(),
+            host: "b.example.com".to_string(),
+            port: 22,
+            username: "user".to_string(),
+            identity_file: None,
+            remote_path: None,
+            password: None,
+            source: ConnectionSource::Profile,
+        },
+    ];
 
     app.apply_action(Action::Up);
     assert_eq!(app.connections_cursor, 0);
@@ -189,7 +228,16 @@ fn back_action_returns_to_files_screen_when_there_is_no_error() {
 fn rename_action_on_connections_screen_opens_the_edit_connection_form() {
     let (_dir, mut app) = app_in_temp_dir();
     app.screen = Screen::Connections;
-    app.connections = vec![ConnectionEntry { name: "prod".to_string(), host: "server.example.com".to_string(), port: 2222, username: "deploy".to_string(), identity_file: None, remote_path: None, password: Some("hunter2".to_string()), source: ConnectionSource::Profile }];
+    app.connections = vec![ConnectionEntry {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 2222,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: Some("hunter2".to_string()),
+        source: ConnectionSource::Profile,
+    }];
     app.connections_cursor = 0;
 
     app.apply_action(Action::Rename);
@@ -210,7 +258,16 @@ fn rename_action_on_connections_screen_opens_the_edit_connection_form() {
 fn rename_action_on_an_ssh_config_entry_does_not_open_a_dialog() {
     let (_dir, mut app) = app_in_temp_dir();
     app.screen = Screen::Connections;
-    app.connections = vec![ConnectionEntry { name: "prod".to_string(), host: "server.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::SshConfig }];
+    app.connections = vec![ConnectionEntry {
+        name: "prod".to_string(),
+        host: "server.example.com".to_string(),
+        port: 22,
+        username: "deploy".to_string(),
+        identity_file: None,
+        remote_path: None,
+        password: None,
+        source: ConnectionSource::SshConfig,
+    }];
     app.connections_cursor = 0;
 
     app.apply_action(Action::Rename);
