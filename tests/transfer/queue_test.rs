@@ -1,27 +1,11 @@
 use super::*;
 
 fn queue_with_one_job(queue: &mut TransferQueue) -> u64 {
-    queue.enqueue(
-        1,
-        Direction::Upload,
-        PathBuf::from("/local/file.txt"),
-        "/remote/file.txt".to_string(),
-        "file.txt".to_string(),
-        100,
-        None,
-    )
+    queue.enqueue(1, Direction::Upload, PathBuf::from("/local/file.txt"), "/remote/file.txt".to_string(), "file.txt".to_string(), 100, None)
 }
 
 fn queue_with_a_batch_job(queue: &mut TransferQueue, batch_id: u64, name: &str, total_bytes: u64) -> u64 {
-    queue.enqueue(
-        1,
-        Direction::Upload,
-        PathBuf::from(format!("/local/{name}")),
-        format!("/remote/{name}"),
-        name.to_string(),
-        total_bytes,
-        Some(batch_id),
-    )
+    queue.enqueue(1, Direction::Upload, PathBuf::from(format!("/local/{name}")), format!("/remote/{name}"), name.to_string(), total_bytes, Some(batch_id))
 }
 
 #[test]
@@ -86,35 +70,11 @@ fn retry_or_give_up_stops_after_max_attempts() {
 #[test]
 fn fail_queued_for_session_marks_only_that_sessions_queued_jobs() {
     let mut queue = TransferQueue::new();
-    let a1 = queue.enqueue(
-        1,
-        Direction::Upload,
-        PathBuf::from("/local/a1.txt"),
-        "/remote/a1.txt".to_string(),
-        "a1.txt".to_string(),
-        10,
-        None,
-    );
-    let a2 = queue.enqueue(
-        1,
-        Direction::Upload,
-        PathBuf::from("/local/a2.txt"),
-        "/remote/a2.txt".to_string(),
-        "a2.txt".to_string(),
-        10,
-        None,
-    );
+    let a1 = queue.enqueue(1, Direction::Upload, PathBuf::from("/local/a1.txt"), "/remote/a1.txt".to_string(), "a1.txt".to_string(), 10, None);
+    let a2 = queue.enqueue(1, Direction::Upload, PathBuf::from("/local/a2.txt"), "/remote/a2.txt".to_string(), "a2.txt".to_string(), 10, None);
     let other = queue_with_one_job(&mut queue);
     queue.get_mut(other).unwrap().session_id = 2;
-    let in_progress = queue.enqueue(
-        1,
-        Direction::Upload,
-        PathBuf::from("/local/a3.txt"),
-        "/remote/a3.txt".to_string(),
-        "a3.txt".to_string(),
-        10,
-        None,
-    );
+    let in_progress = queue.enqueue(1, Direction::Upload, PathBuf::from("/local/a3.txt"), "/remote/a3.txt".to_string(), "a3.txt".to_string(), 10, None);
     queue.get_mut(in_progress).unwrap().status = JobStatus::InProgress;
 
     let count = queue.fail_queued_for_session(1, "session disconnected");

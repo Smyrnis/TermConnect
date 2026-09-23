@@ -254,10 +254,7 @@ impl KeyBindings {
             };
 
             if let Some((conflicting, _)) = bindings.0.iter().find(|(a, s)| **a != action && **s == spec) {
-                warnings.push(format!(
-                    "key \"{key_str}\" is already bound to \"{}\"; \"{action_name}\" now overrides it",
-                    conflicting.name()
-                ));
+                warnings.push(format!("key \"{key_str}\" is already bound to \"{}\"; \"{action_name}\" now overrides it", conflicting.name()));
             }
 
             bindings.0.retain(|existing_action, existing_spec| *existing_action == action || *existing_spec != spec);
@@ -277,32 +274,7 @@ impl KeyBindings {
     }
 }
 
-pub const ALL_ACTIONS: &[Action] = &[
-    Action::Quit,
-    Action::SwitchPanel,
-    Action::Up,
-    Action::Down,
-    Action::Open,
-    Action::ToggleSelect,
-    Action::Rename,
-    Action::Mkdir,
-    Action::Delete,
-    Action::Refresh,
-    Action::Copy,
-    Action::CancelTransfer,
-    Action::OpenConnections,
-    Action::AddConnection,
-    Action::DeleteConnection,
-    Action::OpenTerminal,
-    Action::ToggleHidden,
-    Action::CycleSort,
-    Action::BookmarkHere,
-    Action::OpenBookmarks,
-    Action::OpenSearch,
-    Action::CycleSession,
-    Action::Help,
-    Action::Back,
-];
+pub const ALL_ACTIONS: &[Action] = &[Action::Quit, Action::SwitchPanel, Action::Up, Action::Down, Action::Open, Action::ToggleSelect, Action::Rename, Action::Mkdir, Action::Delete, Action::Refresh, Action::Copy, Action::CancelTransfer, Action::OpenConnections, Action::AddConnection, Action::DeleteConnection, Action::OpenTerminal, Action::ToggleHidden, Action::CycleSort, Action::BookmarkHere, Action::OpenBookmarks, Action::OpenSearch, Action::CycleSession, Action::Help, Action::Back];
 
 #[cfg(test)]
 #[path = "../../tests/tui/input_test.rs"]

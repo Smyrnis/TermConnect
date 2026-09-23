@@ -1,5 +1,7 @@
-use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::{
+    collections::VecDeque,
+    time::{Duration, Instant},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {

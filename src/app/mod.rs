@@ -1,38 +1,45 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
+};
 
 use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures_util::StreamExt;
-use ratatui::Frame;
-use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
-use ratatui::widgets::Paragraph;
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Color, Style},
+    widgets::Paragraph,
+};
 use russh_sftp::client::SftpSession;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::config;
-use crate::connection::client::TermConnectHandler;
-use crate::connection::{self, ConnectionEntry, ConnectionSource};
-use crate::errors;
-use crate::filesystem::path_to_remote_string;
-use crate::filesystem::search::SearchEvent;
-use crate::filesystem::{self, Entry};
-use crate::terminal;
-use crate::transfer::{self, Direction, JobStatus, TransferOutcome, TransferQueue};
-use crate::tui::connections_list;
-use crate::tui::dialog::{ConfirmDialog, Dialog, DialogOutcome, ListDialog, TextInputDialog};
-use crate::tui::help;
-use crate::tui::input::{self, Action};
-use crate::tui::notifications::{Notifications, Severity};
-use crate::tui::panels::{self, ActivePanel, PanelState};
-use crate::tui::search_view;
-use crate::tui::search_view::{SearchOutcome, SearchView};
-use crate::tui::sort::{SortKey, SortOrder};
-use crate::tui::{self, Backend, layout};
+use crate::{
+    config,
+    connection::{self, ConnectionEntry, ConnectionSource, client::TermConnectHandler},
+    errors,
+    filesystem::{self, Entry, path_to_remote_string, search::SearchEvent},
+    terminal,
+    transfer::{self, Direction, JobStatus, TransferOutcome, TransferQueue},
+    tui::{
+        self, Backend, connections_list,
+        dialog::{ConfirmDialog, Dialog, DialogOutcome, ListDialog, TextInputDialog},
+        help,
+        input::{self, Action},
+        layout,
+        notifications::{Notifications, Severity},
+        panels::{self, ActivePanel, PanelState},
+        search_view,
+        search_view::{SearchOutcome, SearchView},
+        sort::{SortKey, SortOrder},
+    },
+};
 
 mod actions;
 mod bookmarks;
@@ -150,8 +157,7 @@ impl App {
         let (bookmarks, bookmark_warnings) = config::bookmarks::load()?;
         let bookmarks_path = config::bookmarks::bookmarks_path()?;
 
-        let mut app =
-            Self::at_with(std::env::current_dir()?, &settings.panel, key_bindings, bookmarks, Some(bookmarks_path))?;
+        let mut app = Self::at_with(std::env::current_dir()?, &settings.panel, key_bindings, bookmarks, Some(bookmarks_path))?;
 
         for warning in config_warnings {
             app.notifications.push(Severity::Warning, warning.0);
@@ -168,19 +174,10 @@ impl App {
 
     #[cfg(test)]
     fn at(path: PathBuf) -> Result<Self> {
-        Self::at_with(
-            path,
-            &config::settings::PanelSettings::default(),
-            input::KeyBindings::defaults(),
-            config::bookmarks::Bookmarks::default(),
-            None,
-        )
+        Self::at_with(path, &config::settings::PanelSettings::default(), input::KeyBindings::defaults(), config::bookmarks::Bookmarks::default(), None)
     }
 
-    fn at_with(
-        path: PathBuf, panel_settings: &config::settings::PanelSettings, key_bindings: input::KeyBindings,
-        bookmarks: config::bookmarks::Bookmarks, bookmarks_path: Option<PathBuf>,
-    ) -> Result<Self> {
+    fn at_with(path: PathBuf, panel_settings: &config::settings::PanelSettings, key_bindings: input::KeyBindings, bookmarks: config::bookmarks::Bookmarks, bookmarks_path: Option<PathBuf>) -> Result<Self> {
         let (connect_tx, connect_rx) = mpsc::unbounded_channel();
         let (panel_tx, panel_rx) = mpsc::unbounded_channel();
         let (transfer_tx, transfer_rx) = mpsc::unbounded_channel();

@@ -24,26 +24,11 @@ impl TransferQueue {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub fn enqueue(
-        &mut self, session_id: u64, direction: Direction, local_path: PathBuf, remote_path: String,
-        display_name: String, total_bytes: u64, batch_id: Option<u64>,
-    ) -> u64 {
+    pub fn enqueue(&mut self, session_id: u64, direction: Direction, local_path: PathBuf, remote_path: String, display_name: String, total_bytes: u64, batch_id: Option<u64>) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
 
-        self.jobs.push(TransferJob {
-            id,
-            session_id,
-            direction,
-            local_path,
-            remote_path,
-            display_name,
-            total_bytes,
-            transferred_bytes: 0,
-            status: JobStatus::Queued,
-            attempts: 0,
-            batch_id,
-        });
+        self.jobs.push(TransferJob { id, session_id, direction, local_path, remote_path, display_name, total_bytes, transferred_bytes: 0, status: JobStatus::Queued, attempts: 0, batch_id });
 
         id
     }

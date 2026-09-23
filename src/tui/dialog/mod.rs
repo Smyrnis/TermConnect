@@ -3,13 +3,11 @@ pub mod form;
 pub mod list;
 pub mod text_input;
 
-use crossterm::event::KeyEvent;
-use ratatui::Frame;
-use ratatui::layout::Rect;
-
 pub use confirm::ConfirmDialog;
+use crossterm::event::KeyEvent;
 pub use form::{FormDialog, FormField};
 pub use list::ListDialog;
+use ratatui::{Frame, layout::Rect};
 pub use text_input::TextInputDialog;
 
 fn content_width(lines: &[&str]) -> u16 {

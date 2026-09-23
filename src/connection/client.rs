@@ -1,12 +1,15 @@
-use std::path::Path;
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 use anyhow::{Result, anyhow};
-use russh::client::{self, AuthResult, Handle};
-use russh::keys::agent::AgentIdentity;
-use russh::keys::agent::client::AgentClient;
-use russh::keys::{HashAlg, PrivateKey, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
-use russh::{Signer, keys};
+use russh::{
+    Signer,
+    client::{self, AuthResult, Handle},
+    keys,
+    keys::{
+        HashAlg, PrivateKey, PrivateKeyWithHashAlg, PublicKeyOrCertificate,
+        agent::{AgentIdentity, client::AgentClient},
+    },
+};
 
 use super::ConnectionEntry;
 
@@ -20,25 +23,13 @@ impl client::Handler for TermConnectHandler {
 
     async fn check_server_key(&mut self, server_public_key: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
         let PublicKeyOrCertificate::PublicKey { key, .. } = server_public_key else {
-            return Err(anyhow!(
-                "the host key for {} is a certificate, which TermConnect does not yet support",
-                self.host
-            ));
+            return Err(anyhow!("the host key for {} is a certificate, which TermConnect does not yet support", self.host));
         };
 
         match keys::check_known_hosts(&self.host, self.port, key) {
             Ok(true) => Ok(true),
-            Ok(false) => Err(anyhow!(
-                "host key for {}:{} is not in ~/.ssh/known_hosts \u{2014} connect once with the system `ssh` client to trust it, or add it manually",
-                self.host,
-                self.port
-            )),
-            Err(keys::Error::KeyChanged { line }) => Err(anyhow!(
-                "REMOTE HOST IDENTIFICATION HAS CHANGED for {}:{} (see ~/.ssh/known_hosts line {}) \u{2014} refusing to connect",
-                self.host,
-                self.port,
-                line
-            )),
+            Ok(false) => Err(anyhow!("host key for {}:{} is not in ~/.ssh/known_hosts \u{2014} connect once with the system `ssh` client to trust it, or add it manually", self.host, self.port)),
+            Err(keys::Error::KeyChanged { line }) => Err(anyhow!("REMOTE HOST IDENTIFICATION HAS CHANGED for {}:{} (see ~/.ssh/known_hosts line {}) \u{2014} refusing to connect", self.host, self.port, line)),
             Err(err) => Err(err.into()),
         }
     }
@@ -58,9 +49,7 @@ pub async fn connect(host: &str, port: u16) -> Result<Handle<TermConnectHandler>
     client::connect(config, (host, port), handler).await
 }
 
-pub async fn authenticate_non_interactive(
-    handle: &mut Handle<TermConnectHandler>, entry: &ConnectionEntry,
-) -> Result<bool> {
+pub async fn authenticate_non_interactive(handle: &mut Handle<TermConnectHandler>, entry: &ConnectionEntry) -> Result<bool> {
     if authenticate_with_agent(handle, &entry.username).await? {
         return Ok(true);
     }
@@ -103,9 +92,7 @@ async fn authenticate_with_agent(handle: &mut Handle<TermConnectHandler>, userna
     Ok(false)
 }
 
-async fn authenticate_with_key_file(
-    handle: &mut Handle<TermConnectHandler>, username: &str, identity_file: &Path,
-) -> Result<bool> {
+async fn authenticate_with_key_file(handle: &mut Handle<TermConnectHandler>, username: &str, identity_file: &Path) -> Result<bool> {
     let Ok(private_key) = PrivateKey::read_openssh_file(identity_file) else {
         return Ok(false);
     };
@@ -122,9 +109,7 @@ async fn authenticate_with_key_file(
     }
 }
 
-pub async fn authenticate_password(
-    handle: &mut Handle<TermConnectHandler>, username: &str, password: &str,
-) -> Result<bool> {
+pub async fn authenticate_password(handle: &mut Handle<TermConnectHandler>, username: &str, password: &str) -> Result<bool> {
     match handle.authenticate_password(username, password).await? {
         AuthResult::Success => Ok(true),
         AuthResult::Failure { .. } => Ok(false),
@@ -136,9 +121,7 @@ struct AgentSigner<'a>(&'a mut AgentClient<tokio::net::UnixStream>);
 impl Signer for AgentSigner<'_> {
     type Error = anyhow::Error;
 
-    async fn auth_sign(
-        &mut self, key: &AgentIdentity, hash_alg: Option<HashAlg>, to_sign: Vec<u8>,
-    ) -> Result<Vec<u8>, Self::Error> {
+    async fn auth_sign(&mut self, key: &AgentIdentity, hash_alg: Option<HashAlg>, to_sign: Vec<u8>) -> Result<Vec<u8>, Self::Error> {
         let public_key = key.public_key().into_owned();
         let signature = self.0.sign_request_signature(&public_key, hash_alg, &to_sign).await?;
         Ok(signature.as_bytes().to_vec())

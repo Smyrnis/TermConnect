@@ -104,11 +104,7 @@ fn planned_file_for_loose_entry_maps_paths_for_a_download() {
 fn planned_files_for_tree_maps_paths_for_an_upload_including_a_nested_file() {
     let entry = sample_entry("myfolder", "/local/myfolder", true, 0);
     let dest_root = PathBuf::from("/remote/dest/myfolder");
-    let tree = DiscoveredTree {
-        directories: vec![PathBuf::from("sub")],
-        files: vec![(PathBuf::from("top.txt"), 5), (PathBuf::from("sub/nested.txt"), 7)],
-        skipped_symlinks: 0,
-    };
+    let tree = DiscoveredTree { directories: vec![PathBuf::from("sub")], files: vec![(PathBuf::from("top.txt"), 5), (PathBuf::from("sub/nested.txt"), 7)], skipped_symlinks: 0 };
 
     let mut planned = planned_files_for_tree(Direction::Upload, &entry, &dest_root, &tree);
     planned.sort_by(|a, b| a.display_name.cmp(&b.display_name));
@@ -130,11 +126,7 @@ fn planned_files_for_tree_maps_paths_for_an_upload_including_a_nested_file() {
 fn planned_files_for_tree_maps_paths_for_a_download_including_a_nested_file() {
     let entry = sample_entry("myfolder", "/remote/myfolder", true, 0);
     let dest_root = PathBuf::from("/local/dest/myfolder");
-    let tree = DiscoveredTree {
-        directories: vec![PathBuf::from("sub")],
-        files: vec![(PathBuf::from("top.txt"), 5), (PathBuf::from("sub/nested.txt"), 7)],
-        skipped_symlinks: 0,
-    };
+    let tree = DiscoveredTree { directories: vec![PathBuf::from("sub")], files: vec![(PathBuf::from("top.txt"), 5), (PathBuf::from("sub/nested.txt"), 7)], skipped_symlinks: 0 };
 
     let mut planned = planned_files_for_tree(Direction::Download, &entry, &dest_root, &tree);
     planned.sort_by(|a, b| a.display_name.cmp(&b.display_name));

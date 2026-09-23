@@ -1,5 +1,4 @@
-use crate::connection::ConnectionEntry;
-use crate::tui::panels::PanelState;
+use crate::{connection::ConnectionEntry, tui::panels::PanelState};
 
 pub struct Session {
     pub id: u64,

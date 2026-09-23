@@ -1,8 +1,13 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
 use super::*;
-use crate::connection::ConnectionSource;
-use crate::transfer::plan::{DirectoryPlan, PlannedFile};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use crate::{
+    connection::ConnectionSource,
+    transfer::plan::{DirectoryPlan, PlannedFile},
+};
 
 fn app_in_temp_dir() -> (tempfile::TempDir, App) {
     let dir = tempfile::tempdir().unwrap();
@@ -19,16 +24,7 @@ fn app_with_a_local_directory_selected() -> (tempfile::TempDir, App) {
 }
 
 fn sample_connection_entry() -> ConnectionEntry {
-    ConnectionEntry {
-        name: "test".to_string(),
-        host: "test.example.com".to_string(),
-        port: 22,
-        username: "user".to_string(),
-        identity_file: None,
-        remote_path: None,
-        password: None,
-        source: ConnectionSource::Profile,
-    }
+    ConnectionEntry { name: "test".to_string(), host: "test.example.com".to_string(), port: 22, username: "user".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }
 }
 
 fn planning_scan(batch_id: u64, name: &str) -> PlanningScan {
@@ -38,15 +34,7 @@ fn planning_scan(batch_id: u64, name: &str) -> PlanningScan {
 #[test]
 fn maybe_start_next_transfer_notifies_when_the_jobs_session_has_disconnected() {
     let (_dir, mut app) = app_in_temp_dir();
-    app.transfers.enqueue(
-        999,
-        Direction::Upload,
-        PathBuf::from("/local/file.txt"),
-        "/remote/file.txt".to_string(),
-        "file.txt".to_string(),
-        100,
-        None,
-    );
+    app.transfers.enqueue(999, Direction::Upload, PathBuf::from("/local/file.txt"), "/remote/file.txt".to_string(), "file.txt".to_string(), 100, None);
 
     app.maybe_start_next_transfer();
 
@@ -74,23 +62,7 @@ fn copying_a_directory_with_a_disconnected_session_fails_without_spawning() {
 fn plan_ready_enqueues_every_planned_file_under_the_batch_id() {
     let (_dir, mut app) = app_in_temp_dir();
     let batch_id = app.transfers.start_batch();
-    let plan = DirectoryPlan {
-        files: vec![
-            PlannedFile {
-                local_path: PathBuf::from("/local/a.txt"),
-                remote_path: "/remote/a.txt".to_string(),
-                display_name: "a.txt".to_string(),
-                size: 10,
-            },
-            PlannedFile {
-                local_path: PathBuf::from("/local/b.txt"),
-                remote_path: "/remote/b.txt".to_string(),
-                display_name: "b.txt".to_string(),
-                size: 20,
-            },
-        ],
-        skipped_symlinks: 0,
-    };
+    let plan = DirectoryPlan { files: vec![PlannedFile { local_path: PathBuf::from("/local/a.txt"), remote_path: "/remote/a.txt".to_string(), display_name: "a.txt".to_string(), size: 10 }, PlannedFile { local_path: PathBuf::from("/local/b.txt"), remote_path: "/remote/b.txt".to_string(), display_name: "b.txt".to_string(), size: 20 }], skipped_symlinks: 0 };
 
     app.apply_plan_ready(batch_id, 1, Direction::Upload, plan);
 
@@ -117,15 +89,7 @@ fn plan_ready_fails_without_enqueueing_when_the_session_has_disconnected() {
     let (_dir, mut app) = app_in_temp_dir();
     let batch_id = app.transfers.start_batch();
     app.planning.push(planning_scan(batch_id, "myfolder"));
-    let plan = DirectoryPlan {
-        files: vec![PlannedFile {
-            local_path: PathBuf::from("/local/a.txt"),
-            remote_path: "/remote/a.txt".to_string(),
-            display_name: "a.txt".to_string(),
-            size: 10,
-        }],
-        skipped_symlinks: 0,
-    };
+    let plan = DirectoryPlan { files: vec![PlannedFile { local_path: PathBuf::from("/local/a.txt"), remote_path: "/remote/a.txt".to_string(), display_name: "a.txt".to_string(), size: 10 }], skipped_symlinks: 0 };
 
     app.apply_transfer_event(TransferEvent::PlanReady { batch_id, session_id: 1, direction: Direction::Upload, plan });
 
@@ -142,10 +106,7 @@ fn plan_failed_clears_planning_and_shows_an_error() {
     let batch_id = app.transfers.start_batch();
     app.planning.push(planning_scan(batch_id, "myfolder"));
 
-    app.apply_transfer_event(TransferEvent::PlanFailed {
-        batch_id,
-        message: "Copy failed: permission denied".to_string(),
-    });
+    app.apply_transfer_event(TransferEvent::PlanFailed { batch_id, message: "Copy failed: permission denied".to_string() });
 
     assert!(app.planning.is_empty());
     let notification = app.notifications.current().unwrap();
@@ -157,24 +118,8 @@ fn plan_failed_clears_planning_and_shows_an_error() {
 fn cancel_active_transfer_cancels_every_other_queued_job_in_the_same_batch() {
     let (_dir, mut app) = app_in_temp_dir();
     let batch_id = app.transfers.start_batch();
-    let active = app.transfers.enqueue(
-        1,
-        Direction::Upload,
-        PathBuf::from("/local/a.txt"),
-        "/remote/a.txt".to_string(),
-        "a.txt".to_string(),
-        10,
-        Some(batch_id),
-    );
-    let queued = app.transfers.enqueue(
-        1,
-        Direction::Upload,
-        PathBuf::from("/local/b.txt"),
-        "/remote/b.txt".to_string(),
-        "b.txt".to_string(),
-        10,
-        Some(batch_id),
-    );
+    let active = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 10, Some(batch_id));
+    let queued = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/b.txt"), "/remote/b.txt".to_string(), "b.txt".to_string(), 10, Some(batch_id));
     app.transfers.get_mut(active).unwrap().status = JobStatus::InProgress;
     let cancel = Arc::new(AtomicBool::new(false));
     app.active_transfer_cancel = Some(cancel.clone());
@@ -189,15 +134,7 @@ fn cancel_active_transfer_cancels_every_other_queued_job_in_the_same_batch() {
 #[test]
 fn cancel_active_transfer_is_a_plain_cancel_for_a_non_batch_job() {
     let (_dir, mut app) = app_in_temp_dir();
-    let active = app.transfers.enqueue(
-        1,
-        Direction::Upload,
-        PathBuf::from("/local/a.txt"),
-        "/remote/a.txt".to_string(),
-        "a.txt".to_string(),
-        10,
-        None,
-    );
+    let active = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 10, None);
     app.transfers.get_mut(active).unwrap().status = JobStatus::InProgress;
     let cancel = Arc::new(AtomicBool::new(false));
     app.active_transfer_cancel = Some(cancel.clone());
@@ -230,11 +167,7 @@ fn plan_cancelled_only_clears_its_own_scan() {
     app.planning.push(planning_scan(first, "one"));
     app.planning.push(planning_scan(second, "two"));
 
-    app.apply_transfer_event(TransferEvent::PlanCancelled {
-        batch_id: first,
-        session_id: 1,
-        direction: Direction::Upload,
-    });
+    app.apply_transfer_event(TransferEvent::PlanCancelled { batch_id: first, session_id: 1, direction: Direction::Upload });
 
     let remaining: Vec<u64> = app.planning.iter().map(|scan| scan.batch_id).collect();
     assert_eq!(remaining, vec![second]);
@@ -257,24 +190,8 @@ fn cancel_all_copies_stops_scans_and_the_active_batch_together() {
     let (_dir, mut app) = app_in_temp_dir();
     app.planning.push(planning_scan(100, "scanning"));
     let batch_id = app.transfers.start_batch();
-    let active = app.transfers.enqueue(
-        1,
-        Direction::Upload,
-        PathBuf::from("/local/a.txt"),
-        "/remote/a.txt".to_string(),
-        "a.txt".to_string(),
-        10,
-        Some(batch_id),
-    );
-    let queued = app.transfers.enqueue(
-        1,
-        Direction::Upload,
-        PathBuf::from("/local/b.txt"),
-        "/remote/b.txt".to_string(),
-        "b.txt".to_string(),
-        10,
-        Some(batch_id),
-    );
+    let active = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 10, Some(batch_id));
+    let queued = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/b.txt"), "/remote/b.txt".to_string(), "b.txt".to_string(), 10, Some(batch_id));
     app.transfers.get_mut(active).unwrap().status = JobStatus::InProgress;
     let transfer_cancel = Arc::new(AtomicBool::new(false));
     app.active_transfer_cancel = Some(transfer_cancel.clone());

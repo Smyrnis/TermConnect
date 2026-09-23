@@ -1,5 +1,6 @@
-use super::*;
 use std::time::{Duration, Instant};
+
+use super::*;
 
 #[test]
 fn push_makes_the_message_current() {
@@ -23,16 +24,8 @@ fn earlier_pushes_stay_current_until_dismissed_fifo() {
 fn expire_drops_only_notifications_whose_deadline_has_passed() {
     let now = Instant::now();
     let mut notifications = Notifications::default();
-    notifications.queue.push_back(Notification {
-        severity: Severity::Info,
-        message: "old".to_string(),
-        expires_at: Some(now),
-    });
-    notifications.queue.push_back(Notification {
-        severity: Severity::Info,
-        message: "fresh".to_string(),
-        expires_at: Some(now + Duration::from_secs(10)),
-    });
+    notifications.queue.push_back(Notification { severity: Severity::Info, message: "old".to_string(), expires_at: Some(now) });
+    notifications.queue.push_back(Notification { severity: Severity::Info, message: "fresh".to_string(), expires_at: Some(now + Duration::from_secs(10)) });
 
     notifications.expire(now + Duration::from_millis(1));
 

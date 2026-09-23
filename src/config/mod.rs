@@ -1,11 +1,12 @@
 pub mod bookmarks;
 pub mod settings;
 
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result};
-
 pub use settings::Settings;
 
 pub struct StartupWarning(pub String);

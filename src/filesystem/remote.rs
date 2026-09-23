@@ -14,19 +14,9 @@ pub async fn list(sftp: &SftpSession, path: &str) -> Result<Vec<Entry>> {
         let name = dir_entry.file_name();
         let entry_path = join(path, &name);
 
-        let is_dir = if metadata.is_symlink() {
-            sftp.metadata(&entry_path).await.map(|resolved| resolved.is_dir()).unwrap_or(false)
-        } else {
-            metadata.is_dir()
-        };
+        let is_dir = if metadata.is_symlink() { sftp.metadata(&entry_path).await.map(|resolved| resolved.is_dir()).unwrap_or(false) } else { metadata.is_dir() };
 
-        entries.push(Entry {
-            path: PathBuf::from(entry_path),
-            name,
-            is_dir,
-            size: metadata.len(),
-            permissions: metadata.permissions,
-        });
+        entries.push(Entry { path: PathBuf::from(entry_path), name, is_dir, size: metadata.len(), permissions: metadata.permissions });
     }
 
     Ok(entries)

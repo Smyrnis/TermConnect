@@ -1,15 +1,13 @@
-use super::*;
 use crossterm::event::{KeyCode, KeyEventKind, KeyEventState, KeyModifiers};
+
+use super::*;
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent { code, modifiers: KeyModifiers::NONE, kind: KeyEventKind::Press, state: KeyEventState::NONE }
 }
 
 fn sample_form() -> FormDialog {
-    FormDialog::new(
-        "Add connection",
-        vec![FormField::new("Name", ""), FormField::new("Host", ""), FormField::new_masked("Password", "")],
-    )
+    FormDialog::new("Add connection", vec![FormField::new("Name", ""), FormField::new("Host", ""), FormField::new_masked("Password", "")])
 }
 
 #[test]
@@ -61,10 +59,7 @@ fn enter_submits_every_fields_value_in_order() {
 
     let outcome = form.handle_key(key(KeyCode::Enter));
 
-    assert_eq!(
-        outcome,
-        FormOutcome::Submitted(vec!["prod".to_string(), "server.example.com".to_string(), "secret".to_string(),])
-    );
+    assert_eq!(outcome, FormOutcome::Submitted(vec!["prod".to_string(), "server.example.com".to_string(), "secret".to_string(),]));
 }
 
 #[test]

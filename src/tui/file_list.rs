@@ -1,7 +1,9 @@
-use ratatui::Frame;
-use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{List, ListItem, ListState};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Modifier, Style},
+    widgets::{List, ListItem, ListState},
+};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::tui::panels::{PanelState, Row};
@@ -9,8 +11,7 @@ use crate::tui::panels::{PanelState, Row};
 pub fn render_file_list(frame: &mut Frame, area: Rect, panel: &PanelState, is_active: bool) {
     let columns = Columns::for_width(area.width);
 
-    let items: Vec<ListItem> =
-        panel.rows().iter().map(|row| ListItem::new(row_label(row, is_selected(panel, row), columns))).collect();
+    let items: Vec<ListItem> = panel.rows().iter().map(|row| ListItem::new(row_label(row, is_selected(panel, row), columns))).collect();
 
     let mut highlight_style = Style::default().add_modifier(Modifier::REVERSED);
     if !is_active {
@@ -130,17 +131,7 @@ pub fn format_permissions(mode: Option<u32>) -> String {
         return "-".repeat(9);
     };
 
-    const BITS: [(u32, char); 9] = [
-        (0o400, 'r'),
-        (0o200, 'w'),
-        (0o100, 'x'),
-        (0o040, 'r'),
-        (0o020, 'w'),
-        (0o010, 'x'),
-        (0o004, 'r'),
-        (0o002, 'w'),
-        (0o001, 'x'),
-    ];
+    const BITS: [(u32, char); 9] = [(0o400, 'r'), (0o200, 'w'), (0o100, 'x'), (0o040, 'r'), (0o020, 'w'), (0o010, 'x'), (0o004, 'r'), (0o002, 'w'), (0o001, 'x')];
 
     BITS.iter().map(|(bit, ch)| if mode & bit != 0 { *ch } else { '-' }).collect()
 }

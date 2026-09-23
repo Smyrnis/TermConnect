@@ -1,5 +1,6 @@
-use super::*;
 use ratatui::layout::Rect;
+
+use super::*;
 
 #[test]
 fn splits_area_into_two_equal_halves() {

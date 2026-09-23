@@ -12,15 +12,7 @@ username = "deploy"
 
 #[test]
 fn serializing_a_profile_round_trips_the_password() {
-    let profile = ConnectionProfile {
-        name: "prod".to_string(),
-        host: "server.example.com".to_string(),
-        port: 22,
-        username: "deploy".to_string(),
-        identity_file: None,
-        remote_path: None,
-        password: Some("hunter2".to_string()),
-    };
+    let profile = ConnectionProfile { name: "prod".to_string(), host: "server.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: Some("hunter2".to_string()) };
 
     let serialized = toml::to_string(&profile).unwrap();
     let deserialized: ConnectionProfile = toml::from_str(&serialized).unwrap();
@@ -30,15 +22,7 @@ fn serializing_a_profile_round_trips_the_password() {
 
 #[test]
 fn debug_formatting_a_profile_redacts_the_password() {
-    let profile = ConnectionProfile {
-        name: "prod".to_string(),
-        host: "server.example.com".to_string(),
-        port: 22,
-        username: "deploy".to_string(),
-        identity_file: None,
-        remote_path: None,
-        password: Some("hunter2".to_string()),
-    };
+    let profile = ConnectionProfile { name: "prod".to_string(), host: "server.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: Some("hunter2".to_string()) };
 
     let debug_output = format!("{profile:?}");
 
@@ -48,16 +32,7 @@ fn debug_formatting_a_profile_redacts_the_password() {
 
 #[test]
 fn debug_formatting_an_entry_redacts_the_password() {
-    let entry = ConnectionEntry {
-        name: "prod".to_string(),
-        host: "server.example.com".to_string(),
-        port: 22,
-        username: "deploy".to_string(),
-        identity_file: None,
-        remote_path: None,
-        password: Some("hunter2".to_string()),
-        source: ConnectionSource::Profile,
-    };
+    let entry = ConnectionEntry { name: "prod".to_string(), host: "server.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: Some("hunter2".to_string()), source: ConnectionSource::Profile };
 
     let debug_output = format!("{entry:?}");
 
@@ -67,15 +42,7 @@ fn debug_formatting_an_entry_redacts_the_password() {
 
 #[test]
 fn converting_a_profile_to_an_entry_tags_it_as_profile_sourced() {
-    let profile = ConnectionProfile {
-        name: "prod".to_string(),
-        host: "server.example.com".to_string(),
-        port: 22,
-        username: "deploy".to_string(),
-        identity_file: None,
-        remote_path: Some("/var/www".to_string()),
-        password: Some("hunter2".to_string()),
-    };
+    let profile = ConnectionProfile { name: "prod".to_string(), host: "server.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: Some("/var/www".to_string()), password: Some("hunter2".to_string()) };
 
     let entry: ConnectionEntry = profile.into();
 

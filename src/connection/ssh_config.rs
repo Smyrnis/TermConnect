@@ -1,5 +1,7 @@
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Result;
 
@@ -54,13 +56,7 @@ pub fn parse(contents: &str) -> Vec<SshConfigHost> {
                     if is_pattern(alias) {
                         continue;
                     }
-                    hosts.push(SshConfigHost {
-                        name: alias.to_string(),
-                        host_name: None,
-                        user: None,
-                        port: None,
-                        identity_file: None,
-                    });
+                    hosts.push(SshConfigHost { name: alias.to_string(), host_name: None, user: None, port: None, identity_file: None });
                 }
             }
             "hostname" => {

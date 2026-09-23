@@ -1,9 +1,7 @@
-use ratatui::Terminal;
-use ratatui::backend::TestBackend;
-
-use crate::tui::input::KeyBindings;
+use ratatui::{Terminal, backend::TestBackend};
 
 use super::*;
+use crate::tui::input::KeyBindings;
 
 #[test]
 fn renders_every_action_with_its_bound_key() {

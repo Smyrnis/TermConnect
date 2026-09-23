@@ -1,24 +1,13 @@
 use std::collections::HashSet;
 
-use ratatui::Terminal;
-use ratatui::backend::TestBackend;
-
-use crate::connection::{ConnectionEntry, ConnectionSource};
+use ratatui::{Terminal, backend::TestBackend};
 
 use super::*;
+use crate::connection::{ConnectionEntry, ConnectionSource};
 
 #[test]
 fn renders_connection_names() {
-    let entries = vec![ConnectionEntry {
-        name: "production".to_string(),
-        host: "server.example.com".to_string(),
-        port: 22,
-        username: "deploy".to_string(),
-        identity_file: None,
-        remote_path: None,
-        password: None,
-        source: ConnectionSource::Profile,
-    }];
+    let entries = vec![ConnectionEntry { name: "production".to_string(), host: "server.example.com".to_string(), port: 22, username: "deploy".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }];
 
     let backend = TestBackend::new(60, 8);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -31,16 +20,7 @@ fn renders_connection_names() {
 }
 
 fn entry(name: &str) -> ConnectionEntry {
-    ConnectionEntry {
-        name: name.to_string(),
-        host: format!("{name}.example.com"),
-        port: 22,
-        username: "user".to_string(),
-        identity_file: None,
-        remote_path: None,
-        password: None,
-        source: ConnectionSource::Profile,
-    }
+    ConnectionEntry { name: name.to_string(), host: format!("{name}.example.com"), port: 22, username: "user".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }
 }
 
 fn render_rows(entries: &[ConnectionEntry], connected: &HashSet<&str>, active: Option<&str>) -> Vec<String> {
@@ -50,9 +30,7 @@ fn render_rows(entries: &[ConnectionEntry], connected: &HashSet<&str>, active: O
     terminal.draw(|frame| render_connections_list(frame, frame.area(), entries, 0, connected, active)).unwrap();
 
     let buffer = terminal.backend().buffer().clone();
-    (0..buffer.area.height)
-        .map(|y| (0..buffer.area.width).map(|x| buffer[(x, y)].symbol().to_string()).collect::<String>())
-        .collect()
+    (0..buffer.area.height).map(|y| (0..buffer.area.width).map(|x| buffer[(x, y)].symbol().to_string()).collect::<String>()).collect()
 }
 
 #[test]

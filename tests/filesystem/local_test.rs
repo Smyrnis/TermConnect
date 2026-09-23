@@ -1,5 +1,6 @@
-use super::*;
 use std::fs::File;
+
+use super::*;
 
 #[test]
 fn list_returns_every_entry_in_the_directory() {

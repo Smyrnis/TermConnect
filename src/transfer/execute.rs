@@ -1,10 +1,14 @@
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use anyhow::Result;
 use russh_sftp::client::SftpSession;
-use tokio::fs::File as LocalFile;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::{
+    fs::File as LocalFile,
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+};
 
 use super::Direction;
 
@@ -17,10 +21,7 @@ pub enum TransferOutcome {
     Cancelled,
 }
 
-pub async fn execute(
-    direction: Direction, local_path: &Path, remote_path: &str, sftp: &SftpSession, cancel: &AtomicBool,
-    on_progress: impl FnMut(u64),
-) -> Result<TransferOutcome> {
+pub async fn execute(direction: Direction, local_path: &Path, remote_path: &str, sftp: &SftpSession, cancel: &AtomicBool, on_progress: impl FnMut(u64)) -> Result<TransferOutcome> {
     match direction {
         Direction::Upload => {
             let remote_part_path = format!("{remote_path}.part");
@@ -42,9 +43,7 @@ pub async fn execute(
     }
 }
 
-async fn copy_with_progress<R, W>(
-    source: &mut R, destination: &mut W, cancel: &AtomicBool, mut on_progress: impl FnMut(u64),
-) -> Result<TransferOutcome>
+async fn copy_with_progress<R, W>(source: &mut R, destination: &mut W, cancel: &AtomicBool, mut on_progress: impl FnMut(u64)) -> Result<TransferOutcome>
 where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
@@ -98,9 +97,7 @@ async fn finalize_local(result: &Result<TransferOutcome>, part_path: &Path, fina
     Ok(())
 }
 
-async fn finalize_remote(
-    result: &Result<TransferOutcome>, sftp: &SftpSession, part_path: &str, final_path: &str,
-) -> Result<()> {
+async fn finalize_remote(result: &Result<TransferOutcome>, sftp: &SftpSession, part_path: &str, final_path: &str) -> Result<()> {
     match result {
         Ok(TransferOutcome::Completed) => {
             crate::filesystem::remote::rename_overwriting(sftp, part_path, final_path).await?;

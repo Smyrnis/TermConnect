@@ -1,7 +1,8 @@
-use super::*;
-use std::fs;
-use std::sync::Arc;
+use std::{fs, sync::Arc};
+
 use tokio::sync::mpsc;
+
+use super::*;
 
 #[test]
 fn glob_match_supports_star_and_question_wildcards() {
@@ -62,15 +63,7 @@ async fn search_local_finds_matching_files_recursively() {
     fs::write(dir.path().join("c.txt"), b"x").unwrap();
 
     let (tx, rx) = mpsc::unbounded_channel();
-    search_local_with_limits(
-        dir.path().to_path_buf(),
-        "*.log".to_string(),
-        tx,
-        Arc::new(AtomicBool::new(false)),
-        16,
-        1000,
-    )
-    .await;
+    search_local_with_limits(dir.path().to_path_buf(), "*.log".to_string(), tx, Arc::new(AtomicBool::new(false)), 16, 1000).await;
 
     let (found, truncated) = drain(rx).await;
     assert!(!truncated);
@@ -87,15 +80,7 @@ async fn search_local_respects_the_depth_limit() {
     fs::write(deep.join("target.log"), b"x").unwrap();
 
     let (tx, rx) = mpsc::unbounded_channel();
-    search_local_with_limits(
-        dir.path().to_path_buf(),
-        "*.log".to_string(),
-        tx,
-        Arc::new(AtomicBool::new(false)),
-        1,
-        1000,
-    )
-    .await;
+    search_local_with_limits(dir.path().to_path_buf(), "*.log".to_string(), tx, Arc::new(AtomicBool::new(false)), 1, 1000).await;
 
     let (found, _) = drain(rx).await;
     assert!(found.is_empty());
@@ -109,15 +94,7 @@ async fn search_local_reports_truncation_at_the_cap() {
     }
 
     let (tx, rx) = mpsc::unbounded_channel();
-    search_local_with_limits(
-        dir.path().to_path_buf(),
-        "*.log".to_string(),
-        tx,
-        Arc::new(AtomicBool::new(false)),
-        16,
-        3,
-    )
-    .await;
+    search_local_with_limits(dir.path().to_path_buf(), "*.log".to_string(), tx, Arc::new(AtomicBool::new(false)), 16, 3).await;
 
     let (found, truncated) = drain(rx).await;
     assert_eq!(found.len(), 3);

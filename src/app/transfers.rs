@@ -74,12 +74,8 @@ impl App {
         tokio::spawn(async move {
             let result = transfer::plan::plan_directory_copy(direction, entries, &dest_dir, &sftp, &cancel).await;
             let event = match result {
-                Ok(transfer::plan::PlanOutcome::Ready(plan)) => {
-                    TransferEvent::PlanReady { batch_id, session_id, direction, plan }
-                }
-                Ok(transfer::plan::PlanOutcome::Cancelled) => {
-                    TransferEvent::PlanCancelled { batch_id, session_id, direction }
-                }
+                Ok(transfer::plan::PlanOutcome::Ready(plan)) => TransferEvent::PlanReady { batch_id, session_id, direction, plan },
+                Ok(transfer::plan::PlanOutcome::Cancelled) => TransferEvent::PlanCancelled { batch_id, session_id, direction },
                 Err(err) => {
                     tracing::debug!("{err:?}");
                     TransferEvent::PlanFailed { batch_id, message: errors::user_message("Copy failed", &err) }
@@ -103,8 +99,7 @@ impl App {
             if let Some(job) = self.transfers.get_mut(id) {
                 job.status = JobStatus::Failed("session disconnected".to_string());
             }
-            self.notifications
-                .push(Severity::Error, format!("Transfer failed: {display_name} \u{2014} session disconnected"));
+            self.notifications.push(Severity::Error, format!("Transfer failed: {display_name} \u{2014} session disconnected"));
             self.maybe_start_next_transfer();
             return;
         };
@@ -135,10 +130,7 @@ impl App {
                 Ok(outcome) => TransferEvent::Finished { id, outcome },
                 Err(err) => {
                     tracing::debug!("{err:?}");
-                    TransferEvent::Failed {
-                        id,
-                        message: errors::user_message(format!("Transfer failed: {display_name}"), &err),
-                    }
+                    TransferEvent::Failed { id, message: errors::user_message(format!("Transfer failed: {display_name}"), &err) }
                 }
             };
             let _ = tx.send(event);
@@ -195,23 +187,13 @@ impl App {
         }
     }
 
-    fn apply_plan_ready(
-        &mut self, batch_id: u64, session_id: u64, direction: Direction, plan: transfer::plan::DirectoryPlan,
-    ) {
+    fn apply_plan_ready(&mut self, batch_id: u64, session_id: u64, direction: Direction, plan: transfer::plan::DirectoryPlan) {
         if plan.files.is_empty() {
             self.refresh_destination_panel(session_id, direction);
         }
 
         for file in plan.files {
-            self.transfers.enqueue(
-                session_id,
-                direction,
-                file.local_path,
-                file.remote_path,
-                file.display_name,
-                file.size,
-                Some(batch_id),
-            );
+            self.transfers.enqueue(session_id, direction, file.local_path, file.remote_path, file.display_name, file.size, Some(batch_id));
         }
         if plan.skipped_symlinks > 0 {
             let plural = if plan.skipped_symlinks == 1 { "" } else { "s" };
@@ -232,11 +214,7 @@ impl App {
         let direction = job.direction;
 
         if let Some(batch_id) = job.batch_id {
-            let batch_still_running = self
-                .transfers
-                .next_to_run()
-                .and_then(|next_id| self.transfers.get(next_id))
-                .is_some_and(|next_job| next_job.batch_id == Some(batch_id));
+            let batch_still_running = self.transfers.next_to_run().and_then(|next_id| self.transfers.get(next_id)).is_some_and(|next_job| next_job.batch_id == Some(batch_id));
             if batch_still_running {
                 return;
             }

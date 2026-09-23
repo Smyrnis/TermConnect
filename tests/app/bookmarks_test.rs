@@ -1,6 +1,8 @@
-use super::*;
-use crossterm::event::{KeyCode, KeyEventState, KeyModifiers};
 use std::fs;
+
+use crossterm::event::{KeyCode, KeyEventState, KeyModifiers};
+
+use super::*;
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent { code, modifiers: KeyModifiers::NONE, kind: KeyEventKind::Press, state: KeyEventState::NONE }
@@ -41,11 +43,7 @@ fn submitting_the_bookmark_dialog_adds_a_local_bookmark() {
 #[test]
 fn open_bookmarks_action_lists_saved_bookmarks() {
     let (dir, mut app) = app_in_temp_dir();
-    app.bookmarks.add(config::bookmarks::Bookmark {
-        label: "here".to_string(),
-        path: dir.path().to_path_buf(),
-        host: None,
-    });
+    app.bookmarks.add(config::bookmarks::Bookmark { label: "here".to_string(), path: dir.path().to_path_buf(), host: None });
 
     app.apply_action(Action::OpenBookmarks);
 
@@ -72,11 +70,7 @@ fn selecting_a_local_bookmark_navigates_the_local_panel() {
 #[test]
 fn selecting_a_remote_bookmark_without_a_connection_warns_instead_of_navigating() {
     let (_dir, mut app) = app_in_temp_dir();
-    app.bookmarks.add(config::bookmarks::Bookmark {
-        label: "prod etc".to_string(),
-        path: PathBuf::from("/etc"),
-        host: Some("production".to_string()),
-    });
+    app.bookmarks.add(config::bookmarks::Bookmark { label: "prod etc".to_string(), path: PathBuf::from("/etc"), host: Some("production".to_string()) });
     app.apply_action(Action::OpenBookmarks);
 
     app.apply_dialog_key(key(KeyCode::Enter));

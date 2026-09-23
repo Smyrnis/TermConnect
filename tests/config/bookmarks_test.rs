@@ -1,5 +1,6 @@
-use super::*;
 use std::fs;
+
+use super::*;
 
 fn sample() -> Bookmark {
     Bookmark { label: "projects".to_string(), path: PathBuf::from("/home/user/projects"), host: None }
@@ -33,11 +34,7 @@ fn save_then_load_round_trips_including_a_remote_bookmark() {
     let path = dir.path().join("bookmarks.toml");
     let mut bookmarks = Bookmarks::default();
     bookmarks.add(sample());
-    bookmarks.add(Bookmark {
-        label: "nginx conf".to_string(),
-        path: PathBuf::from("/etc/nginx"),
-        host: Some("production".to_string()),
-    });
+    bookmarks.add(Bookmark { label: "nginx conf".to_string(), path: PathBuf::from("/etc/nginx"), host: Some("production".to_string()) });
 
     save_to(&path, &bookmarks).unwrap();
     let (loaded, warnings) = load_from(&path).unwrap();

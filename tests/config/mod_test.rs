@@ -1,5 +1,6 @@
-use super::*;
 use std::fs;
+
+use super::*;
 
 #[test]
 fn load_from_a_missing_file_returns_defaults_and_no_warnings() {

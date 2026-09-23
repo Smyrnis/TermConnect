@@ -1,8 +1,10 @@
 use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::Frame;
-use ratatui::layout::{Constraint, Flex, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState};
+use ratatui::{
+    Frame,
+    layout::{Constraint, Flex, Layout, Rect},
+    style::{Color, Modifier, Style},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState},
+};
 
 pub struct ListDialog {
     pub title: String,
@@ -56,16 +58,9 @@ pub fn render_list(frame: &mut Frame, area: Rect, dialog: &ListDialog) {
     let height = (dialog.items.len() as u16 + 2).clamp(3, area.height.saturating_sub(2).max(3));
     let popup = centered_popup(area, width, height);
 
-    let block = Block::default()
-        .title(dialog.title.as_str())
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow));
+    let block = Block::default().title(dialog.title.as_str()).borders(Borders::ALL).border_style(Style::default().fg(Color::Yellow));
 
-    let items: Vec<ListItem> = if dialog.items.is_empty() {
-        vec![ListItem::new("(empty)")]
-    } else {
-        dialog.items.iter().map(|item| ListItem::new(item.as_str())).collect()
-    };
+    let items: Vec<ListItem> = if dialog.items.is_empty() { vec![ListItem::new("(empty)")] } else { dialog.items.iter().map(|item| ListItem::new(item.as_str())).collect() };
 
     let mut state = ListState::default();
     if !dialog.items.is_empty() {

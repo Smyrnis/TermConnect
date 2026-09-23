@@ -1,13 +1,13 @@
-use ratatui::Terminal;
-use ratatui::backend::TestBackend;
-use std::fs;
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
+
+use ratatui::{Terminal, backend::TestBackend};
 use unicode_width::UnicodeWidthStr;
 
-use crate::filesystem::Entry;
-use crate::tui::panels::{PanelState, Row};
-
 use super::*;
+use crate::{
+    filesystem::Entry,
+    tui::panels::{PanelState, Row},
+};
 
 const THREE_CHARS_SIX_COLUMNS: &str = "\u{65e5}\u{672c}\u{8a9e}";
 #[test]
@@ -78,13 +78,7 @@ fn truncate_name_leaves_a_wide_name_that_already_fits_untouched() {
 
 #[test]
 fn row_label_pads_a_wide_name_to_the_correct_display_width() {
-    let entry = Entry {
-        name: THREE_CHARS_SIX_COLUMNS.to_string(),
-        path: PathBuf::from("/tmp/entry"),
-        is_dir: false,
-        size: 0,
-        permissions: None,
-    };
+    let entry = Entry { name: THREE_CHARS_SIX_COLUMNS.to_string(), path: PathBuf::from("/tmp/entry"), is_dir: false, size: 0, permissions: None };
     let columns = Columns { name_width: 10, show_size: false, show_permissions: false };
 
     let label = row_label(&Row::Entry(entry), false, columns);

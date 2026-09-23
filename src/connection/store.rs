@@ -1,15 +1,16 @@
-use std::collections::BTreeMap;
-use std::fs;
-use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    fs,
+    io::Write,
+    os::unix::fs::OpenOptionsExt,
+    path::{Path, PathBuf},
+};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::config;
-
 use super::profile::ConnectionProfile;
+use crate::config;
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct ConfigFile {

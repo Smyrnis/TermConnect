@@ -1,6 +1,7 @@
+use std::path::PathBuf;
+
 use super::*;
 use crate::filesystem::Entry;
-use std::path::PathBuf;
 
 fn entry(name: &str, is_dir: bool, size: u64) -> Entry {
     Entry { name: name.to_string(), path: PathBuf::from(format!("/{name}")), is_dir, size, permissions: None }

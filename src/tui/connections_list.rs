@@ -1,16 +1,15 @@
 use std::collections::HashSet;
 
-use ratatui::Frame;
-use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
+use ratatui::{
+    Frame,
+    layout::Rect,
+    style::{Modifier, Style},
+    widgets::{Block, Borders, List, ListItem, ListState},
+};
 
 use crate::connection::ConnectionEntry;
 
-pub fn render_connections_list(
-    frame: &mut Frame, area: Rect, entries: &[ConnectionEntry], cursor: usize, connected_names: &HashSet<&str>,
-    active_name: Option<&str>,
-) {
+pub fn render_connections_list(frame: &mut Frame, area: Rect, entries: &[ConnectionEntry], cursor: usize, connected_names: &HashSet<&str>, active_name: Option<&str>) {
     let block = Block::default().title("Connections").borders(Borders::ALL);
 
     let inner = block.inner(area);

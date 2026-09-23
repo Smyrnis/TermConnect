@@ -1,5 +1,6 @@
-use super::*;
 use crossterm::event::{KeyEventKind, KeyEventState, KeyModifiers};
+
+use super::*;
 
 fn key(code: KeyCode) -> KeyEvent {
     KeyEvent { code, modifiers: KeyModifiers::NONE, kind: KeyEventKind::Press, state: KeyEventState::NONE }

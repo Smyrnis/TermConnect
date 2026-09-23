@@ -1,7 +1,7 @@
+use std::sync::{Arc, atomic::AtomicBool};
+
 use super::*;
 use crate::connection::ConnectionSource;
-use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
 
 fn app_in_temp_dir() -> (tempfile::TempDir, App) {
     let dir = tempfile::tempdir().unwrap();
@@ -10,16 +10,7 @@ fn app_in_temp_dir() -> (tempfile::TempDir, App) {
 }
 
 fn sample_connection_entry() -> ConnectionEntry {
-    ConnectionEntry {
-        name: "test".to_string(),
-        host: "test.example.com".to_string(),
-        port: 22,
-        username: "user".to_string(),
-        identity_file: None,
-        remote_path: None,
-        password: None,
-        source: ConnectionSource::Profile,
-    }
+    ConnectionEntry { name: "test".to_string(), host: "test.example.com".to_string(), port: 22, username: "user".to_string(), identity_file: None, remote_path: None, password: None, source: ConnectionSource::Profile }
 }
 
 fn planning_scan(batch_id: u64, name: &str) -> PlanningScan {
@@ -27,8 +18,7 @@ fn planning_scan(batch_id: u64, name: &str) -> PlanningScan {
 }
 
 fn render_status_text(app: &App) -> String {
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
+    use ratatui::{Terminal, backend::TestBackend};
 
     let backend = TestBackend::new(60, 1);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -38,8 +28,7 @@ fn render_status_text(app: &App) -> String {
 
 #[test]
 fn failed_status_does_not_clobber_the_title_when_a_session_is_active() {
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
+    use ratatui::{Terminal, backend::TestBackend};
 
     let (_dir, mut app) = app_in_temp_dir();
     app.sessions.insert(sample_connection_entry(), PanelState::from_listing(PathBuf::from("/"), Vec::new()));
@@ -57,8 +46,7 @@ fn failed_status_does_not_clobber_the_title_when_a_session_is_active() {
 
 #[test]
 fn failed_status_still_shows_when_there_is_no_active_session() {
-    use ratatui::Terminal;
-    use ratatui::backend::TestBackend;
+    use ratatui::{Terminal, backend::TestBackend};
 
     let (_dir, mut app) = app_in_temp_dir();
     app.connection_status = ConnectionStatus::Failed("boom".to_string());
@@ -84,24 +72,8 @@ fn render_status_shows_scanning_while_planning() {
 fn transfer_status_text_shows_batch_progress_for_a_batch_job() {
     let (_dir, mut app) = app_in_temp_dir();
     let batch_id = app.transfers.start_batch();
-    let active = app.transfers.enqueue(
-        1,
-        Direction::Upload,
-        PathBuf::from("/local/a.txt"),
-        "/remote/a.txt".to_string(),
-        "a.txt".to_string(),
-        100,
-        Some(batch_id),
-    );
-    app.transfers.enqueue(
-        1,
-        Direction::Upload,
-        PathBuf::from("/local/b.txt"),
-        "/remote/b.txt".to_string(),
-        "b.txt".to_string(),
-        100,
-        Some(batch_id),
-    );
+    let active = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 100, Some(batch_id));
+    app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/b.txt"), "/remote/b.txt".to_string(), "b.txt".to_string(), 100, Some(batch_id));
     {
         let job = app.transfers.get_mut(active).unwrap();
         job.status = JobStatus::InProgress;
@@ -117,15 +89,7 @@ fn transfer_status_text_shows_batch_progress_for_a_batch_job() {
 #[test]
 fn transfer_status_text_is_unchanged_for_a_non_batch_job() {
     let (_dir, mut app) = app_in_temp_dir();
-    let active = app.transfers.enqueue(
-        1,
-        Direction::Upload,
-        PathBuf::from("/local/a.txt"),
-        "/remote/a.txt".to_string(),
-        "a.txt".to_string(),
-        100,
-        None,
-    );
+    let active = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 100, None);
     {
         let job = app.transfers.get_mut(active).unwrap();
         job.status = JobStatus::InProgress;

@@ -1,6 +1,8 @@
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicBool, Ordering},
+};
 
 use anyhow::Result;
 
@@ -40,9 +42,7 @@ fn discover_local_tree(root: &Path, cancel: &AtomicBool) -> Result<Option<Discov
     }
 }
 
-fn discover_local_tree_into(
-    root: &Path, relative: &Path, tree: &mut DiscoveredTree, cancel: &AtomicBool,
-) -> Result<Walk> {
+fn discover_local_tree_into(root: &Path, relative: &Path, tree: &mut DiscoveredTree, cancel: &AtomicBool) -> Result<Walk> {
     for dir_entry in fs::read_dir(root.join(relative))? {
         if cancel.load(Ordering::Relaxed) {
             return Ok(Walk::Cancelled);
@@ -79,13 +79,10 @@ fn ensure_local_directory(path: &Path) -> Result<()> {
 use futures_util::future::BoxFuture;
 use russh_sftp::client::SftpSession;
 
+use super::Direction;
 use crate::filesystem::{self, Entry};
 
-use super::Direction;
-
-fn discover_remote_tree<'a>(
-    sftp: &'a SftpSession, root: &'a str, cancel: &'a AtomicBool,
-) -> BoxFuture<'a, Result<Option<DiscoveredTree>>> {
+fn discover_remote_tree<'a>(sftp: &'a SftpSession, root: &'a str, cancel: &'a AtomicBool) -> BoxFuture<'a, Result<Option<DiscoveredTree>>> {
     Box::pin(async move {
         let mut tree = DiscoveredTree { directories: Vec::new(), files: Vec::new(), skipped_symlinks: 0 };
         match discover_remote_tree_into(sftp, root, Path::new(""), &mut tree, cancel).await? {
@@ -95,15 +92,9 @@ fn discover_remote_tree<'a>(
     })
 }
 
-fn discover_remote_tree_into<'a>(
-    sftp: &'a SftpSession, root: &'a str, relative: &'a Path, tree: &'a mut DiscoveredTree, cancel: &'a AtomicBool,
-) -> BoxFuture<'a, Result<Walk>> {
+fn discover_remote_tree_into<'a>(sftp: &'a SftpSession, root: &'a str, relative: &'a Path, tree: &'a mut DiscoveredTree, cancel: &'a AtomicBool) -> BoxFuture<'a, Result<Walk>> {
     Box::pin(async move {
-        let current = if relative.as_os_str().is_empty() {
-            root.to_string()
-        } else {
-            filesystem::remote::join(root, &relative.to_string_lossy())
-        };
+        let current = if relative.as_os_str().is_empty() { root.to_string() } else { filesystem::remote::join(root, &relative.to_string_lossy()) };
 
         for dir_entry in sftp.read_dir(&current).await? {
             if cancel.load(Ordering::Relaxed) {
@@ -145,33 +136,20 @@ fn planned_file_for_loose_entry(direction: Direction, entry: &Entry, dest_dir: &
     PlannedFile { local_path, remote_path, display_name: entry.name.clone(), size: entry.size }
 }
 
-fn planned_files_for_tree(
-    direction: Direction, entry: &Entry, dest_root: &Path, tree: &DiscoveredTree,
-) -> Vec<PlannedFile> {
+fn planned_files_for_tree(direction: Direction, entry: &Entry, dest_root: &Path, tree: &DiscoveredTree) -> Vec<PlannedFile> {
     tree.files
         .iter()
         .map(|(relative_file, size)| {
             let (local_path, remote_path) = match direction {
-                Direction::Upload => {
-                    (entry.path.join(relative_file), filesystem::path_to_remote_string(&dest_root.join(relative_file)))
-                }
-                Direction::Download => {
-                    (dest_root.join(relative_file), filesystem::path_to_remote_string(&entry.path.join(relative_file)))
-                }
+                Direction::Upload => (entry.path.join(relative_file), filesystem::path_to_remote_string(&dest_root.join(relative_file))),
+                Direction::Download => (dest_root.join(relative_file), filesystem::path_to_remote_string(&entry.path.join(relative_file))),
             };
-            PlannedFile {
-                local_path,
-                remote_path,
-                display_name: relative_file.to_string_lossy().into_owned(),
-                size: *size,
-            }
+            PlannedFile { local_path, remote_path, display_name: relative_file.to_string_lossy().into_owned(), size: *size }
         })
         .collect()
 }
 
-pub async fn plan_directory_copy(
-    direction: Direction, source_entries: Vec<Entry>, dest_dir: &Path, sftp: &SftpSession, cancel: &AtomicBool,
-) -> Result<PlanOutcome> {
+pub async fn plan_directory_copy(direction: Direction, source_entries: Vec<Entry>, dest_dir: &Path, sftp: &SftpSession, cancel: &AtomicBool) -> Result<PlanOutcome> {
     let mut files = Vec::new();
     let mut skipped_symlinks = 0;
 
@@ -197,8 +175,7 @@ pub async fn plan_directory_copy(
         skipped_symlinks += tree.skipped_symlinks;
 
         let dest_root = dest_dir.join(&entry.name);
-        let directories =
-            std::iter::once(dest_root.clone()).chain(tree.directories.iter().map(|relative| dest_root.join(relative)));
+        let directories = std::iter::once(dest_root.clone()).chain(tree.directories.iter().map(|relative| dest_root.join(relative)));
         for directory in directories {
             if cancel.load(Ordering::Relaxed) {
                 return Ok(PlanOutcome::Cancelled);

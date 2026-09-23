@@ -1,7 +1,8 @@
-use super::*;
+use std::collections::HashMap;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
-use std::collections::HashMap;
+
+use super::*;
 
 fn key(code: KeyCode) -> KeyEvent {
     key_with_modifiers(code, KeyModifiers::NONE)
@@ -69,10 +70,7 @@ fn parse_key_spec_parses_plain_function_keys() {
 
 #[test]
 fn parse_key_spec_parses_ctrl_modifier_case_insensitively() {
-    assert_eq!(
-        parse_key_spec("Ctrl+R").unwrap(),
-        KeySpec { code: KeyCode::Char('r'), modifiers: KeyModifiers::CONTROL }
-    );
+    assert_eq!(parse_key_spec("Ctrl+R").unwrap(), KeySpec { code: KeyCode::Char('r'), modifiers: KeyModifiers::CONTROL });
 }
 
 #[test]
