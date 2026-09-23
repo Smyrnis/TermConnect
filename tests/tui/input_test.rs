@@ -51,6 +51,7 @@ fn defaults_cover_every_bindable_action_with_the_original_hardcoded_keys() {
         (Action::CancelTransfer, key_with_modifiers(KeyCode::Char('c'), KeyModifiers::CONTROL)),
         (Action::ToggleHidden, key_with_modifiers(KeyCode::Char('h'), KeyModifiers::CONTROL)),
         (Action::CycleSort, key_with_modifiers(KeyCode::Char('s'), KeyModifiers::CONTROL)),
+        (Action::OpenTransfers, key_with_modifiers(KeyCode::Char('t'), KeyModifiers::CONTROL)),
     ];
     for (action, event) in cases {
         assert_eq!(bindings.map_key(event), action);
@@ -161,7 +162,7 @@ fn defaults_never_bind_two_actions_to_the_same_key() {
 
 #[test]
 fn action_name_and_from_name_round_trip() {
-    for action in [Action::Quit, Action::ToggleHidden, Action::CycleSort, Action::Back] {
+    for action in [Action::Quit, Action::ToggleHidden, Action::CycleSort, Action::Back, Action::OpenTransfers] {
         assert_eq!(Action::from_name(action.name()), Some(action));
     }
 }
@@ -209,4 +210,10 @@ fn all_actions_excludes_noop() {
 #[test]
 fn delete_key_is_bound_to_delete_connection() {
     assert_eq!(map_key_via_defaults(KeyCode::Delete), Action::DeleteConnection);
+}
+
+#[test]
+fn ctrl_t_maps_to_open_transfers() {
+    assert_eq!(map_key_via_defaults_with_modifiers(KeyCode::Char('t'), KeyModifiers::CONTROL), Action::OpenTransfers);
+    assert_eq!(Action::OpenTransfers.name(), "open_transfers");
 }

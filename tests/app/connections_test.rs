@@ -193,7 +193,7 @@ fn disconnecting_a_session_counts_its_scans_in_the_aggregated_notification() {
     app.connections_cursor = 0;
     app.screen = Screen::Connections;
     let scan_cancel = Arc::new(AtomicBool::new(false));
-    app.planning.push(PlanningScan { batch_id: 0, session_id: id, display_name: "myfolder".to_string(), cancel: scan_cancel.clone() });
+    app.planning.push(PlanningScan { batch_id: 0, session_id: id, direction: Direction::Upload, display_name: "myfolder".to_string(), cancel: scan_cancel.clone() });
     app.transfers.enqueue(id, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 10, None);
 
     app.disconnect_selected();

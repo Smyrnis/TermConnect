@@ -87,7 +87,7 @@ fn row_label(row: &Row, selected: bool, columns: Columns) -> String {
     }
 }
 
-fn truncate_name(name: &str, max_width: usize) -> String {
+pub(crate) fn truncate_name(name: &str, max_width: usize) -> String {
     if UnicodeWidthStr::width(name) <= max_width {
         return name.to_string();
     }

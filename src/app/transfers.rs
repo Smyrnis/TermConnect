@@ -1,5 +1,7 @@
 use super::*;
 
+const MAX_TRANSFER_EVENTS_PER_FRAME: usize = 256;
+
 impl App {
     pub(super) fn start_copy(&mut self) {
         if self.screen != Screen::Files {
@@ -62,13 +64,13 @@ impl App {
         };
         let sftp = resources.sftp.clone();
 
-        let batch_id = self.transfers.start_batch();
         let display_name = match entries.as_slice() {
             [entry] => entry.name.clone(),
             _ => format!("{} items", entries.len()),
         };
+        let batch_id = self.transfers.start_batch(display_name.clone());
         let cancel = Arc::new(AtomicBool::new(false));
-        self.planning.push(PlanningScan { batch_id, session_id, display_name, cancel: cancel.clone() });
+        self.planning.push(PlanningScan { batch_id, session_id, direction, display_name, cancel: cancel.clone() });
 
         let tx = self.transfer_tx.clone();
         tokio::spawn(async move {
@@ -145,6 +147,15 @@ impl App {
         });
     }
 
+    pub(super) fn drain_pending_transfer_events(&mut self) {
+        for _ in 0..MAX_TRANSFER_EVENTS_PER_FRAME {
+            let Ok(event) = self.transfer_rx.try_recv() else {
+                return;
+            };
+            self.apply_transfer_event(event);
+        }
+    }
+
     pub(super) fn apply_transfer_event(&mut self, event: TransferEvent) {
         match event {
             TransferEvent::Progress { id, transferred } => {
@@ -182,6 +193,7 @@ impl App {
 
                 if !self.session_resources.contains_key(&session_id) {
                     self.notifications.push(Severity::Error, "Copy failed: session disconnected");
+                    self.transfers.forget_batch_if_empty(batch_id);
                     return;
                 }
 
@@ -189,10 +201,12 @@ impl App {
             }
             TransferEvent::PlanFailed { batch_id, message } => {
                 self.clear_planning(batch_id);
+                self.transfers.forget_batch_if_empty(batch_id);
                 self.notifications.push(Severity::Error, message);
             }
             TransferEvent::PlanCancelled { batch_id, session_id, direction } => {
                 self.clear_planning(batch_id);
+                self.transfers.forget_batch_if_empty(batch_id);
                 let session_still_connected = self.sessions.iter().any(|session| session.id == session_id);
                 if session_still_connected {
                     self.notifications.push(Severity::Info, "Copy cancelled");
@@ -214,6 +228,7 @@ impl App {
             let plural = if plan.skipped_symlinks == 1 { "" } else { "s" };
             self.notifications.push(Severity::Warning, format!("Skipped {} symlink{plural}", plan.skipped_symlinks));
         }
+        self.transfers.forget_batch_if_empty(batch_id);
         self.fill_transfer_slots();
     }
 
@@ -256,7 +271,23 @@ impl App {
         for cancel in self.transfer_cancels.values() {
             cancel.store(true, Ordering::Relaxed);
         }
+        let mut cancelled_destinations: Vec<(u64, Direction)> = Vec::new();
+        for job in self.transfers.jobs().filter(|job| job.status == JobStatus::Queued) {
+            let destination = (job.session_id, job.direction);
+            if !cancelled_destinations.contains(&destination) {
+                cancelled_destinations.push(destination);
+            }
+        }
         self.transfers.cancel_all_queued();
+        self.refresh_destinations_without_pending(&cancelled_destinations);
+    }
+
+    pub(super) fn refresh_destinations_without_pending(&mut self, destinations: &[(u64, Direction)]) {
+        for &(session_id, direction) in destinations {
+            if !self.transfers.has_pending(session_id, direction) {
+                self.refresh_destination_panel(session_id, direction);
+            }
+        }
     }
 
     pub(super) fn cancel_session_transfers(&mut self, session_id: u64) -> usize {

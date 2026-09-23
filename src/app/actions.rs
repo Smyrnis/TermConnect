@@ -12,6 +12,7 @@ impl App {
             },
             Action::Delete => match self.screen {
                 Screen::Connections => self.disconnect_selected(),
+                Screen::Transfers => self.cancel_selected_row(),
                 _ => self.open_delete_dialog(),
             },
             Action::Copy => self.start_copy(),
@@ -22,6 +23,7 @@ impl App {
             Action::BookmarkHere => self.open_bookmark_add_dialog(),
             Action::OpenBookmarks => self.open_bookmarks_dialog(),
             Action::OpenSearch => self.open_search_screen(),
+            Action::OpenTransfers => self.open_transfers_screen(),
             Action::CycleSession => {
                 if self.screen == Screen::Files {
                     self.sessions.cycle();
@@ -51,6 +53,7 @@ impl App {
             Screen::Files => self.apply_panel_action(action),
             Screen::Connections => self.apply_connections_action(action),
             Screen::Search => {}
+            Screen::Transfers => self.apply_transfers_action(action),
         }
     }
 

@@ -28,7 +28,7 @@ fn sample_connection_entry() -> ConnectionEntry {
 }
 
 fn planning_scan(batch_id: u64, name: &str) -> PlanningScan {
-    PlanningScan { batch_id, session_id: 1, display_name: name.to_string(), cancel: Arc::new(AtomicBool::new(false)) }
+    PlanningScan { batch_id, session_id: 1, direction: Direction::Upload, display_name: name.to_string(), cancel: Arc::new(AtomicBool::new(false)) }
 }
 
 #[test]
@@ -61,7 +61,7 @@ fn copying_a_directory_with_a_disconnected_session_fails_without_spawning() {
 #[test]
 fn plan_ready_enqueues_every_planned_file_under_the_batch_id() {
     let (_dir, mut app) = app_in_temp_dir();
-    let batch_id = app.transfers.start_batch();
+    let batch_id = app.transfers.start_batch("batch".to_string());
     let plan = DirectoryPlan { files: vec![PlannedFile { local_path: PathBuf::from("/local/a.txt"), remote_path: "/remote/a.txt".to_string(), display_name: "a.txt".to_string(), size: 10 }, PlannedFile { local_path: PathBuf::from("/local/b.txt"), remote_path: "/remote/b.txt".to_string(), display_name: "b.txt".to_string(), size: 20 }], skipped_symlinks: 0 };
 
     app.apply_plan_ready(batch_id, 1, Direction::Upload, plan);
@@ -74,7 +74,7 @@ fn plan_ready_enqueues_every_planned_file_under_the_batch_id() {
 #[test]
 fn plan_ready_warns_once_about_skipped_symlinks() {
     let (_dir, mut app) = app_in_temp_dir();
-    let batch_id = app.transfers.start_batch();
+    let batch_id = app.transfers.start_batch("batch".to_string());
     let plan = DirectoryPlan { files: Vec::new(), skipped_symlinks: 3 };
 
     app.apply_plan_ready(batch_id, 1, Direction::Upload, plan);
@@ -87,7 +87,7 @@ fn plan_ready_warns_once_about_skipped_symlinks() {
 #[test]
 fn plan_ready_fails_without_enqueueing_when_the_session_has_disconnected() {
     let (_dir, mut app) = app_in_temp_dir();
-    let batch_id = app.transfers.start_batch();
+    let batch_id = app.transfers.start_batch("batch".to_string());
     app.planning.push(planning_scan(batch_id, "myfolder"));
     let plan = DirectoryPlan { files: vec![PlannedFile { local_path: PathBuf::from("/local/a.txt"), remote_path: "/remote/a.txt".to_string(), display_name: "a.txt".to_string(), size: 10 }], skipped_symlinks: 0 };
 
@@ -103,7 +103,7 @@ fn plan_ready_fails_without_enqueueing_when_the_session_has_disconnected() {
 #[test]
 fn plan_failed_clears_planning_and_shows_an_error() {
     let (_dir, mut app) = app_in_temp_dir();
-    let batch_id = app.transfers.start_batch();
+    let batch_id = app.transfers.start_batch("batch".to_string());
     app.planning.push(planning_scan(batch_id, "myfolder"));
 
     app.apply_transfer_event(TransferEvent::PlanFailed { batch_id, message: "Copy failed: permission denied".to_string() });
@@ -118,7 +118,7 @@ fn plan_failed_clears_planning_and_shows_an_error() {
 fn plan_cancelled_clears_planning_and_shows_an_info_notification() {
     let (_dir, mut app) = app_in_temp_dir();
     let session_id = app.sessions.insert(sample_connection_entry(), PanelState::from_listing(PathBuf::from("/remote"), Vec::new()));
-    let batch_id = app.transfers.start_batch();
+    let batch_id = app.transfers.start_batch("batch".to_string());
     app.planning.push(planning_scan(batch_id, "myfolder"));
 
     app.apply_transfer_event(TransferEvent::PlanCancelled { batch_id, session_id, direction: Direction::Upload });
@@ -133,8 +133,8 @@ fn plan_cancelled_clears_planning_and_shows_an_info_notification() {
 #[test]
 fn plan_cancelled_only_clears_its_own_scan() {
     let (_dir, mut app) = app_in_temp_dir();
-    let first = app.transfers.start_batch();
-    let second = app.transfers.start_batch();
+    let first = app.transfers.start_batch("batch".to_string());
+    let second = app.transfers.start_batch("batch".to_string());
     app.planning.push(planning_scan(first, "one"));
     app.planning.push(planning_scan(second, "two"));
 
@@ -160,7 +160,7 @@ fn cancel_all_copies_sets_every_scans_flag_and_leaves_them_tracked() {
 fn cancel_all_copies_stops_scans_and_the_active_batch_together() {
     let (_dir, mut app) = app_in_temp_dir();
     app.planning.push(planning_scan(100, "scanning"));
-    let batch_id = app.transfers.start_batch();
+    let batch_id = app.transfers.start_batch("batch".to_string());
     let active = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 10, Some(batch_id));
     let queued = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/b.txt"), "/remote/b.txt".to_string(), "b.txt".to_string(), 10, Some(batch_id));
     app.transfers.get_mut(active).unwrap().status = JobStatus::InProgress;
@@ -210,7 +210,7 @@ fn fill_transfer_slots_fails_every_job_whose_session_is_gone_without_starting_an
 #[test]
 fn cancel_all_copies_flags_every_active_job_and_cancels_every_queued_job() {
     let (_dir, mut app) = app_in_temp_dir();
-    let batch_id = app.transfers.start_batch();
+    let batch_id = app.transfers.start_batch("batch".to_string());
     let first_active = enqueue_job(&mut app, 1, "a.txt", Some(batch_id));
     let second_active = enqueue_job(&mut app, 1, "b.txt", None);
     let queued_in_batch = enqueue_job(&mut app, 1, "c.txt", Some(batch_id));
@@ -246,7 +246,7 @@ fn cancel_session_transfers_flags_only_that_sessions_jobs_and_scans() {
     let (_dir, mut app) = app_in_temp_dir();
     let mine = enqueue_job(&mut app, 1, "a.txt", None);
     let my_cancel = mark_active(&mut app, mine);
-    app.planning.push(PlanningScan { batch_id: 7, session_id: 1, display_name: "mine".to_string(), cancel: Arc::new(AtomicBool::new(false)) });
+    app.planning.push(PlanningScan { batch_id: 7, session_id: 1, direction: Direction::Upload, display_name: "mine".to_string(), cancel: Arc::new(AtomicBool::new(false)) });
 
     let flagged = app.cancel_session_transfers(1);
 
@@ -260,7 +260,7 @@ fn cancel_session_transfers_leaves_other_sessions_alone() {
     let (_dir, mut app) = app_in_temp_dir();
     let theirs = enqueue_job(&mut app, 2, "a.txt", None);
     let their_cancel = mark_active(&mut app, theirs);
-    app.planning.push(PlanningScan { batch_id: 7, session_id: 2, display_name: "theirs".to_string(), cancel: Arc::new(AtomicBool::new(false)) });
+    app.planning.push(PlanningScan { batch_id: 7, session_id: 2, direction: Direction::Upload, display_name: "theirs".to_string(), cancel: Arc::new(AtomicBool::new(false)) });
 
     let flagged = app.cancel_session_transfers(1);
 
@@ -340,7 +340,7 @@ fn a_job_that_fails_to_start_refreshes_the_destination_once_nothing_is_pending()
 #[test]
 fn plan_cancelled_for_a_disconnected_session_is_silent() {
     let (_dir, mut app) = app_in_temp_dir();
-    let batch_id = app.transfers.start_batch();
+    let batch_id = app.transfers.start_batch("batch".to_string());
     app.planning.push(planning_scan(batch_id, "myfolder"));
 
     app.apply_transfer_event(TransferEvent::PlanCancelled { batch_id, session_id: 1, direction: Direction::Upload });
@@ -385,4 +385,71 @@ fn a_finished_download_refreshes_despite_other_sessions_and_upload_jobs() {
     app.apply_transfer_event(TransferEvent::Finished { id: finished, outcome: TransferOutcome::Completed });
 
     assert!(local_panel_shows(&app, "a.txt"));
+}
+
+#[test]
+fn cancel_all_copies_refreshes_destinations_left_with_nothing_pending() {
+    let (dir, mut app) = app_in_temp_dir();
+    let done = download_job(&mut app, dir.path(), 1, "done.txt");
+    app.transfers.get_mut(done).unwrap().status = JobStatus::Completed;
+    std::fs::write(dir.path().join("done.txt"), b"x").unwrap();
+    download_job(&mut app, dir.path(), 1, "later.txt");
+
+    app.cancel_all_copies();
+
+    assert!(local_panel_shows(&app, "done.txt"));
+}
+
+#[test]
+fn plan_failed_and_cancelled_forget_the_batch_label() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let failed = app.transfers.start_batch("one".to_string());
+    let cancelled = app.transfers.start_batch("two".to_string());
+
+    app.apply_transfer_event(TransferEvent::PlanFailed { batch_id: failed, message: "Copy failed: boom".to_string() });
+    app.apply_transfer_event(TransferEvent::PlanCancelled { batch_id: cancelled, session_id: 1, direction: Direction::Upload });
+
+    assert_eq!(app.transfers.batch_label(failed), None);
+    assert_eq!(app.transfers.batch_label(cancelled), None);
+}
+
+#[test]
+fn plan_ready_for_a_disconnected_session_forgets_the_batch_label() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let batch_id = app.transfers.start_batch("photos".to_string());
+    let plan = DirectoryPlan { files: Vec::new(), skipped_symlinks: 0 };
+
+    app.apply_transfer_event(TransferEvent::PlanReady { batch_id, session_id: 1, direction: Direction::Upload, plan });
+
+    assert_eq!(app.transfers.batch_label(batch_id), None);
+}
+
+#[test]
+fn a_ready_plan_keeps_its_label_only_when_it_has_files() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let with_files = app.transfers.start_batch("photos".to_string());
+    let empty = app.transfers.start_batch("empty".to_string());
+    let file = PlannedFile { local_path: PathBuf::from("/local/a.txt"), remote_path: "/remote/a.txt".to_string(), display_name: "a.txt".to_string(), size: 10 };
+
+    app.apply_plan_ready(with_files, 1, Direction::Upload, DirectoryPlan { files: vec![file], skipped_symlinks: 0 });
+    app.apply_plan_ready(empty, 1, Direction::Upload, DirectoryPlan { files: Vec::new(), skipped_symlinks: 0 });
+
+    assert_eq!(app.transfers.batch_label(with_files), Some("photos"));
+    assert_eq!(app.transfers.batch_label(empty), None);
+}
+
+#[test]
+fn drain_pending_transfer_events_applies_every_queued_event() {
+    let (_dir, mut app) = app_in_temp_dir();
+    let job = enqueue_job(&mut app, 1, "a.txt", None);
+    mark_active(&mut app, job);
+    app.transfer_tx.send(TransferEvent::Progress { id: job, transferred: 5 }).unwrap();
+    app.transfer_tx.send(TransferEvent::Progress { id: job, transferred: 10 }).unwrap();
+    app.transfer_tx.send(TransferEvent::Finished { id: job, outcome: TransferOutcome::Completed }).unwrap();
+
+    app.drain_pending_transfer_events();
+
+    let finished = app.transfers.get(job).unwrap();
+    assert_eq!((finished.status.clone(), finished.transferred_bytes), (JobStatus::Completed, 10));
+    assert!(app.transfer_rx.try_recv().is_err());
 }

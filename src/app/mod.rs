@@ -38,6 +38,7 @@ use crate::{
         search_view,
         search_view::{SearchOutcome, SearchView},
         sort::{SortKey, SortOrder},
+        transfer_list,
     },
 };
 
@@ -47,6 +48,7 @@ mod connections;
 mod dialogs;
 mod render;
 mod search;
+mod transfer_queue;
 mod transfers;
 
 enum PendingAction {
@@ -65,6 +67,7 @@ enum Screen {
     Files,
     Connections,
     Search,
+    Transfers,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,6 +113,7 @@ enum TransferEvent {
 struct PlanningScan {
     batch_id: u64,
     session_id: u64,
+    direction: Direction,
     display_name: String,
     cancel: Arc<AtomicBool>,
 }
@@ -133,6 +137,7 @@ pub struct App {
     notifications: Notifications,
     connections: Vec<ConnectionEntry>,
     connections_cursor: usize,
+    transfers_cursor: usize,
     connection_status: ConnectionStatus,
     search: Option<SearchSession>,
     search_tx: mpsc::UnboundedSender<SearchEvent>,
@@ -204,6 +209,7 @@ impl App {
             notifications: Notifications::default(),
             connections: Vec::new(),
             connections_cursor: 0,
+            transfers_cursor: 0,
             connection_status: ConnectionStatus::Disconnected,
             search: None,
             search_tx,
@@ -261,6 +267,7 @@ impl App {
                 }
                 Some(transfer_event) = self.transfer_rx.recv() => {
                     self.apply_transfer_event(transfer_event);
+                    self.drain_pending_transfer_events();
                 }
                 Some(search_event) = self.search_rx.recv() => {
                     self.apply_search_event(search_event);

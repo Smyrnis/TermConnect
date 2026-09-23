@@ -10,6 +10,7 @@ impl App {
             Screen::Files => self.render_files(frame, main_area),
             Screen::Connections => self.render_connections(frame, main_area),
             Screen::Search => self.render_search(frame, main_area),
+            Screen::Transfers => self.render_transfers(frame, main_area),
         }
 
         self.render_status(frame, status_area);
@@ -85,6 +86,11 @@ impl App {
         connections_list::render_connections_list(frame, area, &self.connections, self.connections_cursor, &connected_names, active_name);
     }
 
+    fn render_transfers(&self, frame: &mut Frame, area: Rect) {
+        let copy_key = self.key_bindings.key_for(Action::Copy).map(input::format_key_spec);
+        transfer_list::render_transfer_list(frame, area, &self.transfer_rows(), self.transfers_cursor, copy_key.as_deref());
+    }
+
     fn render_search(&self, frame: &mut Frame, area: Rect) {
         if let Some(session) = &self.search {
             search_view::render_search(frame, area, &session.view);
@@ -123,7 +129,7 @@ impl App {
             return match job.batch_id {
                 Some(batch_id) => {
                     let progress = self.transfers.batch_progress(batch_id);
-                    let percent = percent_of(progress.transferred_bytes, progress.total_bytes);
+                    let percent = transfer::rows::percent_of(progress.transferred_bytes, progress.total_bytes);
                     format!("{verb} {}: {}/{} files, {percent}%{suffix}", job.display_name, progress.completed_files, progress.total_files)
                 }
                 None => format!("{verb} {}: {}%{suffix}", job.display_name, job.progress_percent()),
@@ -135,13 +141,13 @@ impl App {
         match shared_batch {
             Some(batch_id) => {
                 let progress = self.transfers.batch_progress(batch_id);
-                let percent = percent_of(progress.transferred_bytes, progress.total_bytes);
+                let percent = transfer::rows::percent_of(progress.transferred_bytes, progress.total_bytes);
                 format!("{verb} {count} files: {}/{} files, {percent}%{suffix}", progress.completed_files, progress.total_files)
             }
             None => {
                 let transferred: u64 = active.iter().map(|job| job.transferred_bytes).sum();
                 let total: u64 = active.iter().map(|job| job.total_bytes).sum();
-                format!("{verb} {count} files: {}%{suffix}", percent_of(transferred, total))
+                format!("{verb} {count} files: {}%{suffix}", transfer::rows::percent_of(transferred, total))
             }
         }
     }
@@ -155,10 +161,6 @@ fn transfer_verb(active: &[&transfer::TransferJob]) -> &'static str {
     } else {
         "Transferring"
     }
-}
-
-fn percent_of(transferred: u64, total: u64) -> u8 {
-    if total == 0 { 100 } else { ((transferred as f64 / total as f64) * 100.0) as u8 }
 }
 
 fn notification_style(severity: Severity) -> Style {

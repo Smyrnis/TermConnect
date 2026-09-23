@@ -25,6 +25,7 @@ pub enum Action {
     BookmarkHere,
     OpenBookmarks,
     OpenSearch,
+    OpenTransfers,
     CycleSession,
     Help,
     Back,
@@ -55,6 +56,7 @@ impl Action {
             Action::BookmarkHere => "bookmark_here",
             Action::OpenBookmarks => "open_bookmarks",
             Action::OpenSearch => "open_search",
+            Action::OpenTransfers => "open_transfers",
             Action::CycleSession => "cycle_session",
             Action::Help => "help",
             Action::Back => "back",
@@ -85,6 +87,7 @@ impl Action {
             "bookmark_here" => Action::BookmarkHere,
             "open_bookmarks" => Action::OpenBookmarks,
             "open_search" => Action::OpenSearch,
+            "open_transfers" => Action::OpenTransfers,
             "cycle_session" => Action::CycleSession,
             "help" => Action::Help,
             "back" => Action::Back,
@@ -229,6 +232,7 @@ impl KeyBindings {
         bind(Action::BookmarkHere, KeyCode::Char('d'), KeyModifiers::CONTROL);
         bind(Action::OpenBookmarks, KeyCode::Char('b'), KeyModifiers::CONTROL);
         bind(Action::OpenSearch, KeyCode::Char('f'), KeyModifiers::CONTROL);
+        bind(Action::OpenTransfers, KeyCode::Char('t'), KeyModifiers::CONTROL);
         bind(Action::CycleSession, KeyCode::Char('n'), KeyModifiers::CONTROL);
         bind(Action::Help, KeyCode::F(1), KeyModifiers::NONE);
 
@@ -274,7 +278,7 @@ impl KeyBindings {
     }
 }
 
-pub const ALL_ACTIONS: &[Action] = &[Action::Quit, Action::SwitchPanel, Action::Up, Action::Down, Action::Open, Action::ToggleSelect, Action::Rename, Action::Mkdir, Action::Delete, Action::Refresh, Action::Copy, Action::CancelTransfer, Action::OpenConnections, Action::AddConnection, Action::DeleteConnection, Action::OpenTerminal, Action::ToggleHidden, Action::CycleSort, Action::BookmarkHere, Action::OpenBookmarks, Action::OpenSearch, Action::CycleSession, Action::Help, Action::Back];
+pub const ALL_ACTIONS: &[Action] = &[Action::Quit, Action::SwitchPanel, Action::Up, Action::Down, Action::Open, Action::ToggleSelect, Action::Rename, Action::Mkdir, Action::Delete, Action::Refresh, Action::Copy, Action::CancelTransfer, Action::OpenConnections, Action::AddConnection, Action::DeleteConnection, Action::OpenTerminal, Action::ToggleHidden, Action::CycleSort, Action::BookmarkHere, Action::OpenBookmarks, Action::OpenSearch, Action::OpenTransfers, Action::CycleSession, Action::Help, Action::Back];
 
 #[cfg(test)]
 #[path = "../../tests/tui/input_test.rs"]

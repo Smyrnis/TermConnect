@@ -19,8 +19,8 @@ fn enqueue_assigns_increasing_ids() {
 #[test]
 fn start_batch_assigns_increasing_ids() {
     let mut queue = TransferQueue::new();
-    let first = queue.start_batch();
-    let second = queue.start_batch();
+    let first = queue.start_batch("batch".to_string());
+    let second = queue.start_batch("batch".to_string());
     assert_ne!(first, second);
 }
 
@@ -72,10 +72,10 @@ fn fail_queued_for_session_marks_only_that_sessions_queued_jobs() {
 #[test]
 fn batch_progress_aggregates_across_every_job_in_the_batch() {
     let mut queue = TransferQueue::new();
-    let batch_id = queue.start_batch();
+    let batch_id = queue.start_batch("batch".to_string());
     let first = queue_with_a_batch_job(&mut queue, batch_id, "a.txt", 100);
     let second = queue_with_a_batch_job(&mut queue, batch_id, "b.txt", 200);
-    let other_batch = queue.start_batch();
+    let other_batch = queue.start_batch("batch".to_string());
     queue_with_a_batch_job(&mut queue, other_batch, "c.txt", 999);
 
     queue.get_mut(first).unwrap().status = JobStatus::Completed;
@@ -189,7 +189,7 @@ fn has_pending_ignores_other_sessions_directions_and_finished_jobs() {
 #[test]
 fn cancel_all_queued_cancels_every_queued_job_and_nothing_else() {
     let mut queue = TransferQueue::new();
-    let batch_id = queue.start_batch();
+    let batch_id = queue.start_batch("batch".to_string());
     let batch_job = queue_with_a_batch_job(&mut queue, batch_id, "a.txt", 10);
     let loose_job = queue_with_one_job(&mut queue);
     let active = queue_with_one_job(&mut queue);
@@ -251,4 +251,102 @@ fn get_finds_each_job_by_id_among_many() {
         assert_eq!(queue.get_mut(id).unwrap().id, id);
     }
     assert!(queue.get(1000).is_none());
+}
+
+#[test]
+fn start_batch_remembers_its_label() {
+    let mut queue = TransferQueue::new();
+    let batch_id = queue.start_batch("photos".to_string());
+
+    assert_eq!(queue.batch_label(batch_id), Some("photos"));
+    assert_eq!(queue.batch_label(batch_id + 1), None);
+}
+
+#[test]
+fn jobs_iterates_in_queue_order() {
+    let mut queue = TransferQueue::new();
+    let first = enqueue_for(&mut queue, 1, Direction::Upload, "a.txt");
+    let second = enqueue_for(&mut queue, 1, Direction::Upload, "b.txt");
+
+    let ids: Vec<u64> = queue.jobs().map(|job| job.id).collect();
+
+    assert_eq!(ids, vec![first, second]);
+}
+
+#[test]
+fn retry_jobs_requeues_only_failed_and_cancelled_jobs_and_resets_them() {
+    let mut queue = TransferQueue::new();
+    let failed = enqueue_for(&mut queue, 1, Direction::Upload, "a.txt");
+    let cancelled = enqueue_for(&mut queue, 1, Direction::Upload, "b.txt");
+    let completed = enqueue_for(&mut queue, 1, Direction::Upload, "c.txt");
+    let running = enqueue_for(&mut queue, 1, Direction::Upload, "d.txt");
+    {
+        let job = queue.get_mut(failed).unwrap();
+        job.status = JobStatus::Failed("boom".to_string());
+        job.attempts = 3;
+        job.transferred_bytes = 5;
+    }
+    queue.get_mut(cancelled).unwrap().status = JobStatus::Cancelled;
+    queue.get_mut(completed).unwrap().status = JobStatus::Completed;
+    queue.get_mut(running).unwrap().status = JobStatus::InProgress;
+
+    let count = queue.retry_jobs(&[failed, cancelled, completed, running]);
+
+    assert_eq!(count, 2);
+    let job = queue.get(failed).unwrap();
+    assert_eq!((job.status.clone(), job.attempts, job.transferred_bytes), (JobStatus::Queued, 0, 0));
+    assert_eq!(queue.get(cancelled).unwrap().status, JobStatus::Queued);
+    assert_eq!(queue.get(completed).unwrap().status, JobStatus::Completed);
+    assert_eq!(queue.get(running).unwrap().status, JobStatus::InProgress);
+}
+
+#[test]
+fn remove_jobs_removes_jobs_and_the_label_of_a_batch_it_emptied() {
+    let mut queue = TransferQueue::new();
+    let batch_id = queue.start_batch("photos".to_string());
+    let a = queue_with_a_batch_job(&mut queue, batch_id, "a.txt", 10);
+    let b = queue_with_a_batch_job(&mut queue, batch_id, "b.txt", 10);
+
+    queue.remove_jobs(&[a, b]);
+
+    assert!(queue.get(a).is_none());
+    assert!(queue.get(b).is_none());
+    assert_eq!(queue.batch_label(batch_id), None);
+}
+
+#[test]
+fn remove_jobs_keeps_the_label_of_a_batch_that_still_has_jobs() {
+    let mut queue = TransferQueue::new();
+    let batch_id = queue.start_batch("photos".to_string());
+    let a = queue_with_a_batch_job(&mut queue, batch_id, "a.txt", 10);
+    queue_with_a_batch_job(&mut queue, batch_id, "b.txt", 10);
+
+    queue.remove_jobs(&[a]);
+
+    assert_eq!(queue.batch_label(batch_id), Some("photos"));
+}
+
+#[test]
+fn remove_jobs_keeps_labels_of_batches_it_did_not_touch() {
+    let mut queue = TransferQueue::new();
+    let scanning = queue.start_batch("still scanning".to_string());
+    let single = queue_with_one_job(&mut queue);
+
+    queue.remove_jobs(&[single]);
+
+    assert_eq!(queue.batch_label(scanning), Some("still scanning"));
+}
+
+#[test]
+fn forget_batch_if_empty_drops_only_an_unused_label() {
+    let mut queue = TransferQueue::new();
+    let unused = queue.start_batch("scan failed".to_string());
+    let used = queue.start_batch("photos".to_string());
+    queue_with_a_batch_job(&mut queue, used, "a.txt", 10);
+
+    queue.forget_batch_if_empty(unused);
+    queue.forget_batch_if_empty(used);
+
+    assert_eq!(queue.batch_label(unused), None);
+    assert_eq!(queue.batch_label(used), Some("photos"));
 }

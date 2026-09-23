@@ -14,7 +14,7 @@ fn sample_connection_entry() -> ConnectionEntry {
 }
 
 fn planning_scan(batch_id: u64, name: &str) -> PlanningScan {
-    PlanningScan { batch_id, session_id: 1, display_name: name.to_string(), cancel: Arc::new(AtomicBool::new(false)) }
+    PlanningScan { batch_id, session_id: 1, direction: Direction::Upload, display_name: name.to_string(), cancel: Arc::new(AtomicBool::new(false)) }
 }
 
 fn render_status_text(app: &App) -> String {
@@ -71,7 +71,7 @@ fn render_status_shows_scanning_while_planning() {
 #[test]
 fn transfer_status_text_shows_batch_progress_for_a_batch_job() {
     let (_dir, mut app) = app_in_temp_dir();
-    let batch_id = app.transfers.start_batch();
+    let batch_id = app.transfers.start_batch("batch".to_string());
     let active = app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/a.txt"), "/remote/a.txt".to_string(), "a.txt".to_string(), 100, Some(batch_id));
     app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/b.txt"), "/remote/b.txt".to_string(), "b.txt".to_string(), 100, Some(batch_id));
     {
@@ -142,7 +142,7 @@ fn status_of_active_jobs(app: &App) -> String {
 #[test]
 fn transfer_status_text_summarizes_several_jobs_from_one_batch() {
     let (_dir, mut app) = app_in_temp_dir();
-    let batch_id = app.transfers.start_batch();
+    let batch_id = app.transfers.start_batch("batch".to_string());
     active_job(&mut app, Direction::Upload, "a.txt", 100, 50, Some(batch_id));
     active_job(&mut app, Direction::Upload, "b.txt", 100, 50, Some(batch_id));
     app.transfers.enqueue(1, Direction::Upload, PathBuf::from("/local/c.txt"), "/remote/c.txt".to_string(), "c.txt".to_string(), 200, Some(batch_id));

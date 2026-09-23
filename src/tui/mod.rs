@@ -18,6 +18,7 @@ pub mod notifications;
 pub mod panels;
 pub mod search_view;
 pub mod sort;
+pub mod transfer_list;
 
 pub type Backend = CrosstermBackend<Stdout>;
 
