@@ -1,5 +1,5 @@
 use super::*;
-use crate::transfer::rows::{QueueRow, RowKind, ScanInfo, queue_rows};
+use crate::transfer::rows::{QueueRow, RowKind, RowState, ScanInfo, queue_rows};
 
 impl App {
     pub(super) fn open_transfers_screen(&mut self) {
@@ -8,7 +8,7 @@ impl App {
     }
 
     pub(super) fn transfer_rows(&self) -> Vec<QueueRow> {
-        let scans: Vec<ScanInfo> = self.planning.iter().map(|scan| ScanInfo { batch_id: scan.batch_id, label: &scan.display_name, direction: scan.direction }).collect();
+        let scans: Vec<ScanInfo> = self.planning.iter().map(|scan| ScanInfo { batch_id: scan.batch_id, label: &scan.display_name, direction: scan.direction, state: RowState::Scanning }).chain(self.conflict_reviews.iter().map(|review| ScanInfo { batch_id: review.batch_id, label: self.transfers.batch_label(review.batch_id).unwrap_or("copy"), direction: review.direction, state: RowState::AwaitingAnswer })).collect();
         queue_rows(&self.transfers, &scans)
     }
 
@@ -33,6 +33,7 @@ impl App {
             for scan in self.planning.iter().filter(|scan| scan.batch_id == batch_id) {
                 scan.cancel.store(true, Ordering::Relaxed);
             }
+            self.drop_conflict_reviews(|review| review.batch_id == batch_id);
             return;
         }
         let mut cancelled_destinations: Vec<(u64, Direction)> = Vec::new();

@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::transfer::conflicts::ConflictPolicy;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PanelSettings {
     pub show_hidden: bool,
@@ -20,11 +22,12 @@ pub const MAX_PARALLEL_CAP: usize = 16;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransferSettings {
     pub max_parallel: usize,
+    pub on_conflict: ConflictPolicy,
 }
 
 impl Default for TransferSettings {
     fn default() -> Self {
-        Self { max_parallel: 4 }
+        Self { max_parallel: 4, on_conflict: ConflictPolicy::Ask }
     }
 }
 
@@ -48,6 +51,7 @@ pub(crate) struct SettingsFile {
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub(crate) struct TransferSettingsFile {
     pub max_parallel: Option<i64>,
+    pub on_conflict: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -94,7 +98,18 @@ pub(crate) fn settings_from_file(file: SettingsFile) -> (Settings, Vec<String>) 
         None => TransferSettings::default().max_parallel,
     };
 
-    (Settings { panel: PanelSettings { show_hidden, sort_key, sort_order }, keys: file.keys, transfers: TransferSettings { max_parallel } }, warnings)
+    let on_conflict = match file.transfers.on_conflict.as_deref() {
+        None | Some("ask") => ConflictPolicy::Ask,
+        Some("overwrite") => ConflictPolicy::Overwrite,
+        Some("skip") => ConflictPolicy::Skip,
+        Some("rename") => ConflictPolicy::Rename,
+        Some(other) => {
+            warnings.push(format!("unknown transfers.on_conflict \"{other}\", using \"ask\""));
+            ConflictPolicy::Ask
+        }
+    };
+
+    (Settings { panel: PanelSettings { show_hidden, sort_key, sort_order }, keys: file.keys, transfers: TransferSettings { max_parallel, on_conflict } }, warnings)
 }
 
 #[cfg(test)]

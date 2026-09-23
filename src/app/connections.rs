@@ -194,7 +194,7 @@ impl App {
         self.sessions.remove(id);
         self.session_resources.remove(&id);
 
-        let affected = self.transfers.fail_queued_for_session(id, "session disconnected") + self.cancel_session_transfers(id);
+        let affected = self.transfers.fail_queued_for_session(id, "session disconnected") + self.cancel_session_transfers(id) + self.drop_conflict_reviews(|review| review.session_id == id);
         if affected > 0 {
             let plural = if affected == 1 { "" } else { "s" };
             self.notifications.push(Severity::Info, format!("{affected} transfer{plural} cancelled \u{2014} session disconnected"));

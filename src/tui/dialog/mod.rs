@@ -1,9 +1,11 @@
 pub mod confirm;
+pub mod conflict;
 pub mod form;
 pub mod list;
 pub mod text_input;
 
 pub use confirm::ConfirmDialog;
+pub use conflict::ConflictDialog;
 use crossterm::event::KeyEvent;
 pub use form::{FormDialog, FormField};
 pub use list::ListDialog;
@@ -20,6 +22,7 @@ pub enum Dialog {
     TextInput(TextInputDialog),
     List(ListDialog),
     Form(FormDialog),
+    Conflict(ConflictDialog),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +34,7 @@ pub enum DialogOutcome {
     Selected(usize),
     Removed(usize),
     FormSubmitted(Vec<String>),
+    Resolved { resolution: Option<crate::transfer::conflicts::Resolution>, apply_to_rest: bool },
 }
 
 impl Dialog {
@@ -57,6 +61,10 @@ impl Dialog {
                 form::FormOutcome::Submitted(values) => DialogOutcome::FormSubmitted(values),
                 form::FormOutcome::Cancelled => DialogOutcome::Cancelled,
             },
+            Dialog::Conflict(dialog) => match dialog.handle_key(key) {
+                conflict::ConflictOutcome::Pending => DialogOutcome::Pending,
+                conflict::ConflictOutcome::Resolved { resolution, apply_to_rest } => DialogOutcome::Resolved { resolution, apply_to_rest },
+            },
         }
     }
 
@@ -66,6 +74,7 @@ impl Dialog {
             Dialog::TextInput(dialog) => text_input::render_text_input(frame, area, dialog),
             Dialog::List(dialog) => list::render_list(frame, area, dialog),
             Dialog::Form(dialog) => form::render_form(frame, area, dialog),
+            Dialog::Conflict(dialog) => conflict::render_conflict(frame, area, dialog),
         }
     }
 }

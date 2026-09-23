@@ -1,21 +1,44 @@
 use std::{
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use anyhow::Result;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExistingFile {
+    pub size: u64,
+    pub modified: Option<u64>,
+    pub is_dir: bool,
+}
+
+pub type DestinationListing = HashMap<String, ExistingFile>;
 
 pub struct PlannedFile {
     pub local_path: PathBuf,
     pub remote_path: String,
     pub display_name: String,
     pub size: u64,
+    pub existing: Option<ExistingFile>,
+    pub source_modified: Option<u64>,
+}
+
+impl PlannedFile {
+    pub fn destination(&self, direction: Direction) -> PathBuf {
+        match direction {
+            Direction::Upload => PathBuf::from(&self.remote_path),
+            Direction::Download => self.local_path.clone(),
+        }
+    }
 }
 
 pub struct DirectoryPlan {
     pub files: Vec<PlannedFile>,
     pub skipped_symlinks: usize,
+    pub taken_names: HashMap<PathBuf, HashSet<String>>,
 }
 
 pub enum PlanOutcome {
@@ -30,7 +53,7 @@ enum Walk {
 
 struct DiscoveredTree {
     directories: Vec<PathBuf>,
-    files: Vec<(PathBuf, u64)>,
+    files: Vec<(PathBuf, u64, Option<u64>)>,
     skipped_symlinks: usize,
 }
 
@@ -62,18 +85,19 @@ fn discover_local_tree_into(root: &Path, relative: &Path, tree: &mut DiscoveredT
                 return Ok(Walk::Cancelled);
             }
         } else {
-            let size = dir_entry.metadata()?.len();
-            tree.files.push((entry_relative, size));
+            let metadata = dir_entry.metadata()?;
+            tree.files.push((entry_relative, metadata.len(), unix_seconds(metadata.modified().ok())));
         }
     }
     Ok(Walk::Completed)
 }
 
-fn ensure_local_directory(path: &Path) -> Result<()> {
+fn ensure_local_directory(path: &Path) -> Result<bool> {
     if path.exists() {
-        return Ok(());
+        return Ok(false);
     }
-    crate::filesystem::local::create_directory(path)
+    crate::filesystem::local::create_directory(path)?;
+    Ok(true)
 }
 
 use futures_util::future::BoxFuture;
@@ -114,18 +138,19 @@ fn discover_remote_tree_into<'a>(sftp: &'a SftpSession, root: &'a str, relative:
                     return Ok(Walk::Cancelled);
                 }
             } else {
-                tree.files.push((entry_relative, metadata.len()));
+                tree.files.push((entry_relative, metadata.len(), metadata.mtime.map(u64::from)));
             }
         }
         Ok(Walk::Completed)
     })
 }
 
-async fn ensure_remote_directory(sftp: &SftpSession, path: &str) -> Result<()> {
+async fn ensure_remote_directory(sftp: &SftpSession, path: &str) -> Result<bool> {
     if sftp.metadata(path).await.is_ok_and(|m| m.is_dir()) {
-        return Ok(());
+        return Ok(false);
     }
-    filesystem::remote::create_directory(sftp, path).await
+    filesystem::remote::create_directory(sftp, path).await?;
+    Ok(true)
 }
 
 fn planned_file_for_loose_entry(direction: Direction, entry: &Entry, dest_dir: &Path) -> PlannedFile {
@@ -133,25 +158,26 @@ fn planned_file_for_loose_entry(direction: Direction, entry: &Entry, dest_dir: &
         Direction::Upload => (entry.path.clone(), filesystem::path_to_remote_string(&dest_dir.join(&entry.name))),
         Direction::Download => (dest_dir.join(&entry.name), filesystem::path_to_remote_string(&entry.path)),
     };
-    PlannedFile { local_path, remote_path, display_name: entry.name.clone(), size: entry.size }
+    PlannedFile { local_path, remote_path, display_name: entry.name.clone(), size: entry.size, existing: None, source_modified: None }
 }
 
 fn planned_files_for_tree(direction: Direction, entry: &Entry, dest_root: &Path, tree: &DiscoveredTree) -> Vec<PlannedFile> {
     tree.files
         .iter()
-        .map(|(relative_file, size)| {
+        .map(|(relative_file, size, modified)| {
             let (local_path, remote_path) = match direction {
                 Direction::Upload => (entry.path.join(relative_file), filesystem::path_to_remote_string(&dest_root.join(relative_file))),
                 Direction::Download => (dest_root.join(relative_file), filesystem::path_to_remote_string(&entry.path.join(relative_file))),
             };
-            PlannedFile { local_path, remote_path, display_name: relative_file.to_string_lossy().into_owned(), size: *size }
+            PlannedFile { local_path, remote_path, display_name: relative_file.to_string_lossy().into_owned(), size: *size, existing: None, source_modified: *modified }
         })
         .collect()
 }
 
-pub async fn plan_directory_copy(direction: Direction, source_entries: Vec<Entry>, dest_dir: &Path, sftp: &SftpSession, cancel: &AtomicBool) -> Result<PlanOutcome> {
+pub async fn plan_copy(direction: Direction, source_entries: Vec<Entry>, dest_dir: &Path, sftp: &SftpSession, cancel: &AtomicBool) -> Result<PlanOutcome> {
     let mut files = Vec::new();
     let mut skipped_symlinks = 0;
+    let mut created: HashSet<PathBuf> = HashSet::new();
 
     for entry in source_entries {
         if cancel.load(Ordering::Relaxed) {
@@ -180,16 +206,140 @@ pub async fn plan_directory_copy(direction: Direction, source_entries: Vec<Entry
             if cancel.load(Ordering::Relaxed) {
                 return Ok(PlanOutcome::Cancelled);
             }
-            ensure_directory(direction, sftp, &directory).await?;
+            if ensure_directory(direction, sftp, &directory).await? {
+                created.insert(directory);
+            }
         }
 
         files.extend(planned_files_for_tree(direction, &entry, &dest_root, &tree));
     }
 
-    Ok(PlanOutcome::Ready(DirectoryPlan { files, skipped_symlinks }))
+    let names_by_parent = names_by_parent(direction, &files);
+    let mut listings = HashMap::new();
+    for parent in parents_needing_listing(direction, &files, &created) {
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(PlanOutcome::Cancelled);
+        }
+        let listing = match direction {
+            Direction::Upload => list_remote_destination(sftp, &filesystem::path_to_remote_string(&parent), names_by_parent.get(&parent).map(Vec::as_slice).unwrap_or_default()).await?,
+            Direction::Download => list_local_destination(&parent)?,
+        };
+        listings.insert(parent, listing);
+    }
+    mark_conflicts(direction, &mut files, &listings);
+    for file in files.iter_mut().filter(|file| file.existing.is_some() && file.source_modified.is_none()) {
+        file.source_modified = source_modified(direction, sftp, file).await;
+    }
+    let taken_names = taken_names(direction, &files, &listings);
+
+    Ok(PlanOutcome::Ready(DirectoryPlan { files, skipped_symlinks, taken_names }))
 }
 
-async fn ensure_directory(direction: Direction, sftp: &SftpSession, path: &Path) -> Result<()> {
+fn destination_parent_and_name(direction: Direction, file: &PlannedFile) -> Option<(PathBuf, String)> {
+    let destination = file.destination(direction);
+    Some((destination.parent()?.to_path_buf(), destination.file_name()?.to_string_lossy().into_owned()))
+}
+
+pub(crate) fn parents_needing_listing(direction: Direction, files: &[PlannedFile], created: &HashSet<PathBuf>) -> Vec<PathBuf> {
+    let mut parents: Vec<PathBuf> = files.iter().filter_map(|file| destination_parent_and_name(direction, file)).map(|(parent, _)| parent).filter(|parent| !created.contains(parent)).collect();
+    parents.sort();
+    parents.dedup();
+    parents
+}
+
+fn names_by_parent(direction: Direction, files: &[PlannedFile]) -> HashMap<PathBuf, Vec<String>> {
+    let mut names: HashMap<PathBuf, Vec<String>> = HashMap::new();
+    for (parent, name) in files.iter().filter_map(|file| destination_parent_and_name(direction, file)) {
+        names.entry(parent).or_default().push(name);
+    }
+    names
+}
+
+pub(crate) fn mark_conflicts(direction: Direction, files: &mut [PlannedFile], listings: &HashMap<PathBuf, DestinationListing>) {
+    for file in files.iter_mut() {
+        let Some((parent, name)) = destination_parent_and_name(direction, file) else {
+            continue;
+        };
+        file.existing = listings.get(&parent).and_then(|listing| listing.get(&name)).copied();
+    }
+}
+
+pub(crate) fn taken_names(direction: Direction, files: &[PlannedFile], listings: &HashMap<PathBuf, DestinationListing>) -> HashMap<PathBuf, HashSet<String>> {
+    let mut taken: HashMap<PathBuf, HashSet<String>> = HashMap::new();
+    for (parent, listing) in listings {
+        taken.entry(parent.clone()).or_default().extend(listing.keys().cloned());
+    }
+    for (parent, name) in files.iter().filter_map(|file| destination_parent_and_name(direction, file)) {
+        taken.entry(parent).or_default().insert(name);
+    }
+    taken
+}
+
+pub(crate) fn list_local_destination(path: &Path) -> Result<DestinationListing> {
+    let entries = match fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+        Err(err) => return Err(err.into()),
+    };
+    let mut listing = HashMap::new();
+    for entry in entries.flatten() {
+        let is_symlink = entry.file_type().is_ok_and(|file_type| file_type.is_symlink());
+        let metadata = if is_symlink { fs::metadata(entry.path()).or_else(|_| entry.metadata()) } else { entry.metadata() };
+        let existing = match metadata {
+            Ok(metadata) => ExistingFile { size: metadata.len(), modified: unix_seconds(metadata.modified().ok()), is_dir: metadata.is_dir() },
+            Err(_) => ExistingFile { size: 0, modified: None, is_dir: entry.file_type().is_ok_and(|file_type| file_type.is_dir()) },
+        };
+        listing.insert(entry.file_name().to_string_lossy().into_owned(), existing);
+    }
+    Ok(listing)
+}
+
+async fn list_remote_destination(sftp: &SftpSession, path: &str, planned_names: &[String]) -> Result<DestinationListing> {
+    let mut listing = HashMap::new();
+    match sftp.read_dir(path).await {
+        Ok(entries) => {
+            for entry in entries {
+                let name = entry.file_name();
+                let metadata = entry.metadata();
+                let existing = if metadata.is_symlink() {
+                    match sftp.metadata(filesystem::remote::join(path, &name)).await {
+                        Ok(target) => existing_from_remote(&target),
+                        Err(_) => existing_from_remote(&metadata),
+                    }
+                } else {
+                    existing_from_remote(&metadata)
+                };
+                listing.insert(name, existing);
+            }
+        }
+        Err(_) if sftp.metadata(path).await.is_err() => {}
+        Err(_) => {
+            for name in planned_names {
+                if let Ok(metadata) = sftp.metadata(filesystem::remote::join(path, name)).await {
+                    listing.insert(name.clone(), existing_from_remote(&metadata));
+                }
+            }
+        }
+    }
+    Ok(listing)
+}
+
+fn existing_from_remote(metadata: &russh_sftp::client::fs::Metadata) -> ExistingFile {
+    ExistingFile { size: metadata.len(), modified: metadata.mtime.map(u64::from), is_dir: metadata.is_dir() }
+}
+
+async fn source_modified(direction: Direction, sftp: &SftpSession, file: &PlannedFile) -> Option<u64> {
+    match direction {
+        Direction::Upload => unix_seconds(fs::metadata(&file.local_path).ok()?.modified().ok()),
+        Direction::Download => sftp.metadata(&file.remote_path).await.ok()?.mtime.map(u64::from),
+    }
+}
+
+fn unix_seconds(time: Option<SystemTime>) -> Option<u64> {
+    time?.duration_since(UNIX_EPOCH).ok().map(|elapsed| elapsed.as_secs())
+}
+
+async fn ensure_directory(direction: Direction, sftp: &SftpSession, path: &Path) -> Result<bool> {
     match direction {
         Direction::Upload => {
             let remote = filesystem::path_to_remote_string(path);

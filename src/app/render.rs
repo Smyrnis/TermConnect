@@ -97,10 +97,10 @@ impl App {
         }
     }
 
-    fn render_status(&self, frame: &mut Frame, area: Rect) {
+    pub(super) fn render_status(&self, frame: &mut Frame, area: Rect) {
         let (text, style) = match self.notifications.current() {
             Some(notification) => (notification.message.clone(), notification_style(notification.severity)),
-            None => match self.planning_status_text() {
+            None => match self.waiting_for_answer_text().or_else(|| self.planning_status_text()) {
                 Some(text) => (text, Style::default()),
                 None => {
                     let active: Vec<&transfer::TransferJob> = self.transfers.active_jobs().collect();
@@ -110,6 +110,17 @@ impl App {
         };
 
         frame.render_widget(Paragraph::new(text).style(style), area);
+    }
+
+    fn waiting_for_answer_text(&self) -> Option<String> {
+        if self.dialog.is_some() {
+            return None;
+        }
+        match self.conflict_reviews.len() {
+            0 => None,
+            1 => Some("A copy is waiting for your answer".to_string()),
+            waiting => Some(format!("{waiting} copies are waiting for your answer")),
+        }
     }
 
     fn planning_status_text(&self) -> Option<String> {

@@ -40,6 +40,7 @@ impl App {
                     session.cancel.store(true, Ordering::Relaxed);
                 }
                 self.screen = Screen::Files;
+                self.open_next_conflict_prompt();
             }
             SearchOutcome::PatternChanged => self.restart_search(),
             SearchOutcome::Open => self.open_selected_search_result(),
@@ -128,6 +129,7 @@ impl App {
             session.cancel.store(true, Ordering::Relaxed);
         }
         self.screen = Screen::Files;
+        self.open_next_conflict_prompt();
         self.active_panel = target_panel;
 
         match target_panel {

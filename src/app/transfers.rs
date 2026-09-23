@@ -42,22 +42,10 @@ impl App {
             return;
         }
 
-        if entries.iter().any(|entry| entry.is_dir) {
-            self.start_directory_copy(session_id, direction, entries, dest_dir);
-            return;
-        }
-
-        for entry in entries {
-            let (local_path, remote_path) = match direction {
-                Direction::Upload => (entry.path.clone(), path_to_remote_string(&dest_dir.join(&entry.name))),
-                Direction::Download => (dest_dir.join(&entry.name), path_to_remote_string(&entry.path)),
-            };
-
-            self.transfers.enqueue(session_id, direction, local_path, remote_path, entry.name, entry.size, None);
-        }
+        self.start_copy_plan(session_id, direction, entries, dest_dir);
     }
 
-    fn start_directory_copy(&mut self, session_id: u64, direction: Direction, entries: Vec<Entry>, dest_dir: PathBuf) {
+    fn start_copy_plan(&mut self, session_id: u64, direction: Direction, entries: Vec<Entry>, dest_dir: PathBuf) {
         let Some(resources) = self.session_resources.get(&session_id) else {
             self.notifications.push(Severity::Error, "Copy failed: session disconnected");
             return;
@@ -74,7 +62,7 @@ impl App {
 
         let tx = self.transfer_tx.clone();
         tokio::spawn(async move {
-            let result = transfer::plan::plan_directory_copy(direction, entries, &dest_dir, &sftp, &cancel).await;
+            let result = transfer::plan::plan_copy(direction, entries, &dest_dir, &sftp, &cancel).await;
             let event = match result {
                 Ok(transfer::plan::PlanOutcome::Ready(plan)) => TransferEvent::PlanReady { batch_id, session_id, direction, plan },
                 Ok(transfer::plan::PlanOutcome::Cancelled) => TransferEvent::PlanCancelled { batch_id, session_id, direction },
@@ -197,7 +185,7 @@ impl App {
                     return;
                 }
 
-                self.apply_plan_ready(batch_id, session_id, direction, plan);
+                self.review_or_apply_plan(batch_id, session_id, direction, plan);
             }
             TransferEvent::PlanFailed { batch_id, message } => {
                 self.clear_planning(batch_id);
@@ -216,17 +204,28 @@ impl App {
         }
     }
 
-    fn apply_plan_ready(&mut self, batch_id: u64, session_id: u64, direction: Direction, plan: transfer::plan::DirectoryPlan) {
-        if plan.files.is_empty() {
+    pub(super) fn apply_plan_ready(&mut self, batch_id: u64, session_id: u64, direction: Direction, plan: transfer::plan::DirectoryPlan, answers: &[transfer::conflicts::Resolution]) {
+        let skipped_symlinks = plan.skipped_symlinks;
+        let resolved = transfer::conflicts::resolve(plan, answers, direction);
+        let files = resolved.files;
+        if files.is_empty() {
             self.refresh_destination_panel(session_id, direction);
         }
 
-        for file in plan.files {
+        for file in files {
             self.transfers.enqueue(session_id, direction, file.local_path, file.remote_path, file.display_name, file.size, Some(batch_id));
         }
-        if plan.skipped_symlinks > 0 {
-            let plural = if plan.skipped_symlinks == 1 { "" } else { "s" };
-            self.notifications.push(Severity::Warning, format!("Skipped {} symlink{plural}", plan.skipped_symlinks));
+        if skipped_symlinks > 0 {
+            let plural = if skipped_symlinks == 1 { "" } else { "s" };
+            self.notifications.push(Severity::Warning, format!("Skipped {skipped_symlinks} symlink{plural}"));
+        }
+        if resolved.skipped > 0 {
+            let plural = if resolved.skipped == 1 { "" } else { "s" };
+            self.notifications.push(Severity::Info, format!("Skipped {} existing file{plural}", resolved.skipped));
+        }
+        if resolved.blocked_by_folder > 0 {
+            let reason = if resolved.blocked_by_folder == 1 { "file because a folder with the same name exists" } else { "files because folders with the same names exist" };
+            self.notifications.push(Severity::Warning, format!("Skipped {} {reason}", resolved.blocked_by_folder));
         }
         self.transfers.forget_batch_if_empty(batch_id);
         self.fill_transfer_slots();
@@ -250,7 +249,7 @@ impl App {
         self.refresh_destination_panel(session_id, direction);
     }
 
-    fn refresh_destination_panel(&mut self, session_id: u64, direction: Direction) {
+    pub(super) fn refresh_destination_panel(&mut self, session_id: u64, direction: Direction) {
         match direction {
             Direction::Upload => {
                 if let Some(session) = self.sessions.by_id_mut(session_id) {
@@ -265,6 +264,7 @@ impl App {
     }
 
     pub(super) fn cancel_all_copies(&mut self) {
+        self.drop_conflict_reviews(|_| true);
         for scan in &self.planning {
             scan.cancel.store(true, Ordering::Relaxed);
         }

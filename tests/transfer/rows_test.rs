@@ -71,7 +71,7 @@ fn row_state_follows_the_precedence_rules() {
 fn scans_are_appended_as_scanning_rows() {
     let mut queue = TransferQueue::new();
     let single = job(&mut queue, "a.txt", None, JobStatus::Queued);
-    let scans = [ScanInfo { batch_id: 7, label: "photos", direction: Direction::Download }];
+    let scans = [ScanInfo { batch_id: 7, label: "photos", direction: Direction::Download, state: RowState::Scanning }];
 
     let rows = queue_rows(&queue, &scans);
 
@@ -97,4 +97,15 @@ fn finished_rows_are_done_partly_failed_failed_or_cancelled() {
 fn percent_of_handles_zero_totals() {
     assert_eq!(percent_of(0, 0), 100);
     assert_eq!(percent_of(25, 100), 25);
+}
+
+#[test]
+fn a_scan_info_carries_its_state_into_the_row() {
+    let queue = TransferQueue::new();
+    let scans = [ScanInfo { batch_id: 3, label: "photos", direction: Direction::Upload, state: RowState::AwaitingAnswer }];
+
+    let rows = queue_rows(&queue, &scans);
+
+    assert_eq!(rows[0].state, RowState::AwaitingAnswer);
+    assert!(!rows[0].is_finished());
 }

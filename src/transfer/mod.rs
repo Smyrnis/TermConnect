@@ -1,3 +1,4 @@
+pub mod conflicts;
 pub mod execute;
 pub mod job;
 pub mod plan;

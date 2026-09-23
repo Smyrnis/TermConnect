@@ -54,7 +54,7 @@ fn max_parallel_defaults_to_four() {
 
 #[test]
 fn max_parallel_uses_an_explicit_value() {
-    let file = SettingsFile { transfers: TransferSettingsFile { max_parallel: Some(8) }, ..SettingsFile::default() };
+    let file = SettingsFile { transfers: TransferSettingsFile { max_parallel: Some(8), on_conflict: None }, ..SettingsFile::default() };
 
     let (settings, warnings) = settings_from_file(file);
 
@@ -65,7 +65,7 @@ fn max_parallel_uses_an_explicit_value() {
 #[test]
 fn max_parallel_below_one_falls_back_to_one_with_a_warning() {
     for value in [0, -3] {
-        let file = SettingsFile { transfers: TransferSettingsFile { max_parallel: Some(value) }, ..SettingsFile::default() };
+        let file = SettingsFile { transfers: TransferSettingsFile { max_parallel: Some(value), on_conflict: None }, ..SettingsFile::default() };
 
         let (settings, warnings) = settings_from_file(file);
 
@@ -86,7 +86,7 @@ fn negative_max_parallel_still_parses_the_rest_of_the_config() {
 
 #[test]
 fn max_parallel_above_the_cap_is_limited_with_a_warning() {
-    let file = SettingsFile { transfers: TransferSettingsFile { max_parallel: Some(500) }, ..SettingsFile::default() };
+    let file = SettingsFile { transfers: TransferSettingsFile { max_parallel: Some(500), on_conflict: None }, ..SettingsFile::default() };
 
     let (settings, warnings) = settings_from_file(file);
 
@@ -96,10 +96,40 @@ fn max_parallel_above_the_cap_is_limited_with_a_warning() {
 
 #[test]
 fn max_parallel_at_the_cap_is_accepted() {
-    let file = SettingsFile { transfers: TransferSettingsFile { max_parallel: Some(16) }, ..SettingsFile::default() };
+    let file = SettingsFile { transfers: TransferSettingsFile { max_parallel: Some(16), on_conflict: None }, ..SettingsFile::default() };
 
     let (settings, warnings) = settings_from_file(file);
 
     assert!(warnings.is_empty());
     assert_eq!(settings.transfers.max_parallel, 16);
+}
+
+#[test]
+fn on_conflict_defaults_to_ask() {
+    let (settings, warnings) = settings_from_file(SettingsFile::default());
+
+    assert!(warnings.is_empty());
+    assert_eq!(settings.transfers.on_conflict, ConflictPolicy::Ask);
+}
+
+#[test]
+fn on_conflict_accepts_every_policy() {
+    for (value, policy) in [("ask", ConflictPolicy::Ask), ("overwrite", ConflictPolicy::Overwrite), ("skip", ConflictPolicy::Skip), ("rename", ConflictPolicy::Rename)] {
+        let file = SettingsFile { transfers: TransferSettingsFile { max_parallel: None, on_conflict: Some(value.to_string()) }, ..SettingsFile::default() };
+
+        let (settings, warnings) = settings_from_file(file);
+
+        assert!(warnings.is_empty());
+        assert_eq!(settings.transfers.on_conflict, policy);
+    }
+}
+
+#[test]
+fn an_unknown_on_conflict_falls_back_to_ask_with_a_warning() {
+    let file = SettingsFile { transfers: TransferSettingsFile { max_parallel: None, on_conflict: Some("merge".to_string()) }, ..SettingsFile::default() };
+
+    let (settings, warnings) = settings_from_file(file);
+
+    assert_eq!(settings.transfers.on_conflict, ConflictPolicy::Ask);
+    assert_eq!(warnings, vec!["unknown transfers.on_conflict \"merge\", using \"ask\"".to_string()]);
 }

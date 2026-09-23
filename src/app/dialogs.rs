@@ -112,7 +112,7 @@ impl App {
                         }
                     }
                     Some(PendingAction::AddBookmark) => self.add_bookmark(value),
-                    Some(PendingAction::Delete) | Some(PendingAction::AddConnection) | Some(PendingAction::EditConnection { .. }) | Some(PendingAction::DeleteConnection { .. }) | None => {}
+                    Some(PendingAction::Delete) | Some(PendingAction::AddConnection) | Some(PendingAction::EditConnection { .. }) | Some(PendingAction::DeleteConnection { .. }) | Some(PendingAction::ResolveConflict) | None => {}
                 }
             }
             DialogOutcome::Selected(index) => {
@@ -136,7 +136,13 @@ impl App {
                 Some(PendingAction::EditConnection { .. }) => self.submit_edit_connection(values),
                 _ => self.dialog = None,
             },
+            DialogOutcome::Resolved { resolution, apply_to_rest } => {
+                self.dialog = None;
+                self.pending_action = None;
+                self.answer_conflict(resolution, apply_to_rest);
+            }
         }
+        self.open_next_conflict_prompt();
     }
 }
 

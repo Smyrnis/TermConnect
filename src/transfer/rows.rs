@@ -12,6 +12,7 @@ pub enum RowKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowState {
     Scanning,
+    AwaitingAnswer,
     Running,
     Queued,
     Done,
@@ -47,6 +48,7 @@ pub struct ScanInfo<'a> {
     pub batch_id: u64,
     pub label: &'a str,
     pub direction: Direction,
+    pub state: RowState,
 }
 
 pub fn queue_rows(queue: &TransferQueue, scans: &[ScanInfo]) -> Vec<QueueRow> {
@@ -102,7 +104,7 @@ fn row_state(jobs: &[&TransferJob]) -> RowState {
 }
 
 fn scan_row(scan: &ScanInfo) -> QueueRow {
-    QueueRow { kind: RowKind::Scan(scan.batch_id), label: scan.label.to_string(), direction: scan.direction, files_done: 0, files_total: 0, bytes_done: 0, bytes_total: 0, state: RowState::Scanning, job_ids: Vec::new() }
+    QueueRow { kind: RowKind::Scan(scan.batch_id), label: scan.label.to_string(), direction: scan.direction, files_done: 0, files_total: 0, bytes_done: 0, bytes_total: 0, state: scan.state, job_ids: Vec::new() }
 }
 
 #[cfg(test)]

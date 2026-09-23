@@ -98,6 +98,7 @@ fn percent_text(row: &QueueRow) -> String {
 fn state_text(state: RowState) -> String {
     match state {
         RowState::Scanning => "scanning\u{2026}".to_string(),
+        RowState::AwaitingAnswer => "waiting for you".to_string(),
         RowState::Running => "running".to_string(),
         RowState::Queued => "queued".to_string(),
         RowState::Done => "done".to_string(),

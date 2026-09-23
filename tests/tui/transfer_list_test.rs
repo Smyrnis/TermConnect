@@ -82,3 +82,10 @@ fn shows_a_plain_empty_message_when_copy_is_unbound() {
     assert!(content.contains("No transfers yet"));
     assert!(!content.contains("copies"));
 }
+
+#[test]
+fn a_copy_awaiting_answers_says_waiting_for_you() {
+    let rows = vec![row(RowKind::Scan(1), "photos", Direction::Upload, (0, 0), (0, 0), RowState::AwaitingAnswer)];
+
+    assert!(render(&rows, 0, Some("F5")).contains("waiting for you"));
+}

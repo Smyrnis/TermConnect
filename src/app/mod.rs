@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     path::PathBuf,
     sync::{
         Arc,
@@ -26,10 +26,10 @@ use crate::{
     errors,
     filesystem::{self, Entry, path_to_remote_string, search::SearchEvent},
     terminal,
-    transfer::{self, Direction, JobStatus, TransferOutcome, TransferQueue},
+    transfer::{self, Direction, JobStatus, TransferOutcome, TransferQueue, conflicts::ConflictPolicy},
     tui::{
         self, Backend, connections_list,
-        dialog::{ConfirmDialog, Dialog, DialogOutcome, ListDialog, TextInputDialog},
+        dialog::{ConfirmDialog, ConflictDialog, Dialog, DialogOutcome, ListDialog, TextInputDialog},
         help,
         input::{self, Action},
         layout,
@@ -44,6 +44,7 @@ use crate::{
 
 mod actions;
 mod bookmarks;
+mod conflicts;
 mod connections;
 mod dialogs;
 mod render;
@@ -60,6 +61,7 @@ enum PendingAction {
     AddConnection,
     EditConnection { original: ConnectionEntry },
     DeleteConnection { name: String },
+    ResolveConflict,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,6 +120,15 @@ struct PlanningScan {
     cancel: Arc<AtomicBool>,
 }
 
+struct ConflictReview {
+    batch_id: u64,
+    session_id: u64,
+    direction: Direction,
+    plan: transfer::plan::DirectoryPlan,
+    conflicts: Vec<usize>,
+    answers: Vec<transfer::conflicts::Resolution>,
+}
+
 struct SessionResources {
     handle: Arc<russh::client::Handle<TermConnectHandler>>,
     sftp: Arc<SftpSession>,
@@ -148,10 +159,12 @@ pub struct App {
     panel_rx: mpsc::UnboundedReceiver<PanelEvent>,
     transfers: TransferQueue,
     max_parallel: usize,
+    on_conflict: ConflictPolicy,
     transfer_cancels: HashMap<u64, Arc<AtomicBool>>,
     transfer_tx: mpsc::UnboundedSender<TransferEvent>,
     transfer_rx: mpsc::UnboundedReceiver<TransferEvent>,
     planning: Vec<PlanningScan>,
+    conflict_reviews: VecDeque<ConflictReview>,
     key_bindings: input::KeyBindings,
     bookmarks: config::bookmarks::Bookmarks,
     bookmarks_path: Option<PathBuf>,
@@ -166,6 +179,7 @@ impl App {
 
         let mut app = Self::at_with(std::env::current_dir()?, &settings.panel, key_bindings, bookmarks, Some(bookmarks_path))?;
         app.max_parallel = settings.transfers.max_parallel;
+        app.on_conflict = settings.transfers.on_conflict;
 
         for warning in config_warnings {
             app.notifications.push(Severity::Warning, warning.0);
@@ -220,10 +234,12 @@ impl App {
             panel_rx,
             transfers: TransferQueue::new(),
             max_parallel: config::settings::TransferSettings::default().max_parallel,
+            on_conflict: ConflictPolicy::Ask,
             transfer_cancels: HashMap::new(),
             transfer_tx,
             transfer_rx,
             planning: Vec::new(),
+            conflict_reviews: VecDeque::new(),
             key_bindings,
             bookmarks,
             bookmarks_path,

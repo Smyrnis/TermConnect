@@ -1,6 +1,9 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
+use std::{
+    collections::HashMap,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use super::*;
@@ -62,9 +65,9 @@ fn copying_a_directory_with_a_disconnected_session_fails_without_spawning() {
 fn plan_ready_enqueues_every_planned_file_under_the_batch_id() {
     let (_dir, mut app) = app_in_temp_dir();
     let batch_id = app.transfers.start_batch("batch".to_string());
-    let plan = DirectoryPlan { files: vec![PlannedFile { local_path: PathBuf::from("/local/a.txt"), remote_path: "/remote/a.txt".to_string(), display_name: "a.txt".to_string(), size: 10 }, PlannedFile { local_path: PathBuf::from("/local/b.txt"), remote_path: "/remote/b.txt".to_string(), display_name: "b.txt".to_string(), size: 20 }], skipped_symlinks: 0 };
+    let plan = DirectoryPlan { files: vec![PlannedFile { local_path: PathBuf::from("/local/a.txt"), remote_path: "/remote/a.txt".to_string(), display_name: "a.txt".to_string(), size: 10, existing: None, source_modified: None }, PlannedFile { local_path: PathBuf::from("/local/b.txt"), remote_path: "/remote/b.txt".to_string(), display_name: "b.txt".to_string(), size: 20, existing: None, source_modified: None }], skipped_symlinks: 0, taken_names: HashMap::new() };
 
-    app.apply_plan_ready(batch_id, 1, Direction::Upload, plan);
+    app.apply_plan_ready(batch_id, 1, Direction::Upload, plan, &[]);
 
     let progress = app.transfers.batch_progress(batch_id);
     assert_eq!(progress.total_files, 2);
@@ -75,9 +78,9 @@ fn plan_ready_enqueues_every_planned_file_under_the_batch_id() {
 fn plan_ready_warns_once_about_skipped_symlinks() {
     let (_dir, mut app) = app_in_temp_dir();
     let batch_id = app.transfers.start_batch("batch".to_string());
-    let plan = DirectoryPlan { files: Vec::new(), skipped_symlinks: 3 };
+    let plan = DirectoryPlan { files: Vec::new(), skipped_symlinks: 3, taken_names: HashMap::new() };
 
-    app.apply_plan_ready(batch_id, 1, Direction::Upload, plan);
+    app.apply_plan_ready(batch_id, 1, Direction::Upload, plan, &[]);
 
     let notification = app.notifications.current().unwrap();
     assert_eq!(notification.severity, Severity::Warning);
@@ -89,7 +92,7 @@ fn plan_ready_fails_without_enqueueing_when_the_session_has_disconnected() {
     let (_dir, mut app) = app_in_temp_dir();
     let batch_id = app.transfers.start_batch("batch".to_string());
     app.planning.push(planning_scan(batch_id, "myfolder"));
-    let plan = DirectoryPlan { files: vec![PlannedFile { local_path: PathBuf::from("/local/a.txt"), remote_path: "/remote/a.txt".to_string(), display_name: "a.txt".to_string(), size: 10 }], skipped_symlinks: 0 };
+    let plan = DirectoryPlan { files: vec![PlannedFile { local_path: PathBuf::from("/local/a.txt"), remote_path: "/remote/a.txt".to_string(), display_name: "a.txt".to_string(), size: 10, existing: None, source_modified: None }], skipped_symlinks: 0, taken_names: HashMap::new() };
 
     app.apply_transfer_event(TransferEvent::PlanReady { batch_id, session_id: 1, direction: Direction::Upload, plan });
 
@@ -417,7 +420,7 @@ fn plan_failed_and_cancelled_forget_the_batch_label() {
 fn plan_ready_for_a_disconnected_session_forgets_the_batch_label() {
     let (_dir, mut app) = app_in_temp_dir();
     let batch_id = app.transfers.start_batch("photos".to_string());
-    let plan = DirectoryPlan { files: Vec::new(), skipped_symlinks: 0 };
+    let plan = DirectoryPlan { files: Vec::new(), skipped_symlinks: 0, taken_names: HashMap::new() };
 
     app.apply_transfer_event(TransferEvent::PlanReady { batch_id, session_id: 1, direction: Direction::Upload, plan });
 
@@ -429,10 +432,10 @@ fn a_ready_plan_keeps_its_label_only_when_it_has_files() {
     let (_dir, mut app) = app_in_temp_dir();
     let with_files = app.transfers.start_batch("photos".to_string());
     let empty = app.transfers.start_batch("empty".to_string());
-    let file = PlannedFile { local_path: PathBuf::from("/local/a.txt"), remote_path: "/remote/a.txt".to_string(), display_name: "a.txt".to_string(), size: 10 };
+    let file = PlannedFile { local_path: PathBuf::from("/local/a.txt"), remote_path: "/remote/a.txt".to_string(), display_name: "a.txt".to_string(), size: 10, existing: None, source_modified: None };
 
-    app.apply_plan_ready(with_files, 1, Direction::Upload, DirectoryPlan { files: vec![file], skipped_symlinks: 0 });
-    app.apply_plan_ready(empty, 1, Direction::Upload, DirectoryPlan { files: Vec::new(), skipped_symlinks: 0 });
+    app.apply_plan_ready(with_files, 1, Direction::Upload, DirectoryPlan { files: vec![file], skipped_symlinks: 0, taken_names: HashMap::new() }, &[]);
+    app.apply_plan_ready(empty, 1, Direction::Upload, DirectoryPlan { files: Vec::new(), skipped_symlinks: 0, taken_names: HashMap::new() }, &[]);
 
     assert_eq!(app.transfers.batch_label(with_files), Some("photos"));
     assert_eq!(app.transfers.batch_label(empty), None);
