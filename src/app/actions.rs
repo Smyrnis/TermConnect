@@ -15,7 +15,7 @@ impl App {
                 _ => self.open_delete_dialog(),
             },
             Action::Copy => self.start_copy(),
-            Action::CancelTransfer => self.cancel_active_transfer(),
+            Action::CancelTransfer => self.cancel_all_copies(),
             Action::OpenConnections => self.open_connections_screen(),
             Action::AddConnection => self.open_add_connection_dialog(),
             Action::DeleteConnection => self.open_delete_connection_dialog(),

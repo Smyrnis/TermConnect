@@ -60,12 +60,6 @@ impl App {
         }
     }
 
-    /// Kicks off a directory copy's planning phase: looks up the session's
-    /// SFTP handle synchronously (so a disconnected session fails fast
-    /// with a notification, exactly like `maybe_start_next_transfer`
-    /// already does for a job whose session vanished — no `tokio::spawn`
-    /// happens on that path), then spawns `plan_directory_copy` and sends
-    /// its outcome back as `PlanReady`/`PlanFailed`.
     fn start_directory_copy(&mut self, session_id: u64, direction: Direction, entries: Vec<Entry>, dest_dir: PathBuf) {
         let Some(resources) = self.session_resources.get(&session_id) else {
             self.notifications.push(Severity::Error, "Copy failed: session disconnected");
@@ -78,12 +72,19 @@ impl App {
             [entry] => entry.name.clone(),
             _ => format!("{} items", entries.len()),
         };
-        self.planning = Some((batch_id, display_name));
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.planning.push(PlanningScan { batch_id, display_name, cancel: cancel.clone() });
 
         let tx = self.transfer_tx.clone();
         tokio::spawn(async move {
-            let event = match transfer::plan::plan_directory_copy(direction, entries, &dest_dir, &sftp).await {
-                Ok(plan) => TransferEvent::PlanReady { batch_id, session_id, direction, plan },
+            let result = transfer::plan::plan_directory_copy(direction, entries, &dest_dir, &sftp, &cancel).await;
+            let event = match result {
+                Ok(transfer::plan::PlanOutcome::Ready(plan)) => {
+                    TransferEvent::PlanReady { batch_id, session_id, direction, plan }
+                }
+                Ok(transfer::plan::PlanOutcome::Cancelled) => {
+                    TransferEvent::PlanCancelled { batch_id, session_id, direction }
+                }
                 Err(err) => {
                     tracing::debug!("{err:?}");
                     TransferEvent::PlanFailed { batch_id, message: errors::user_message("Copy failed", &err) }
@@ -197,6 +198,11 @@ impl App {
                 self.clear_planning(batch_id);
                 self.notifications.push(Severity::Error, message);
             }
+            TransferEvent::PlanCancelled { batch_id, session_id, direction } => {
+                self.clear_planning(batch_id);
+                self.notifications.push(Severity::Info, "Copy cancelled");
+                self.refresh_destination_panel(session_id, direction);
+            }
         }
     }
 
@@ -237,15 +243,8 @@ impl App {
         self.maybe_start_next_transfer();
     }
 
-    /// Clears `self.planning` only if it's still tracking `batch_id`. Plain
-    /// `self.planning = None` would let one directory copy's completion
-    /// wipe out a second, still-scanning copy's "Scanning..." indicator if
-    /// the user pressed `F5` again on another directory while the first
-    /// one's planning was still running.
     fn clear_planning(&mut self, batch_id: u64) {
-        if self.planning.as_ref().is_some_and(|(id, _)| *id == batch_id) {
-            self.planning = None;
-        }
+        self.planning.retain(|scan| scan.batch_id != batch_id);
     }
 
     /// Refreshes whichever panel just received a file, so the new listing
@@ -292,6 +291,13 @@ impl App {
                 let _ = self.local.refresh();
             }
         }
+    }
+
+    pub(super) fn cancel_all_copies(&mut self) {
+        for scan in &self.planning {
+            scan.cancel.store(true, Ordering::Relaxed);
+        }
+        self.cancel_active_transfer();
     }
 
     pub(super) fn cancel_active_transfer(&mut self) {

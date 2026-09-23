@@ -117,8 +117,8 @@ impl App {
     fn render_status(&self, frame: &mut Frame, area: Rect) {
         let (text, style) = match self.notifications.current() {
             Some(notification) => (notification.message.clone(), notification_style(notification.severity)),
-            None => match &self.planning {
-                Some((_, display_name)) => (format!("Scanning {display_name}\u{2026}"), Style::default()),
+            None => match self.planning_status_text() {
+                Some(text) => (text, Style::default()),
                 None => match self.transfers.active() {
                     Some(job) => (self.transfer_status_text(job), Style::default()),
                     None => (build_hint_text(&self.key_bindings), Style::default()),
@@ -127,6 +127,14 @@ impl App {
         };
 
         frame.render_widget(Paragraph::new(text).style(style), area);
+    }
+
+    fn planning_status_text(&self) -> Option<String> {
+        match self.planning.as_slice() {
+            [] => None,
+            [scan] => Some(format!("Scanning {}\u{2026}", scan.display_name)),
+            scans => Some(format!("Scanning {} copies\u{2026}", scans.len())),
+        }
     }
 
     fn transfer_status_text(&self, job: &transfer::TransferJob) -> String {

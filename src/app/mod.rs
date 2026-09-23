@@ -116,6 +116,13 @@ enum TransferEvent {
     Failed { id: u64, message: String },
     PlanReady { batch_id: u64, session_id: u64, direction: Direction, plan: transfer::plan::DirectoryPlan },
     PlanFailed { batch_id: u64, message: String },
+    PlanCancelled { batch_id: u64, session_id: u64, direction: Direction },
+}
+
+struct PlanningScan {
+    batch_id: u64,
+    display_name: String,
+    cancel: Arc<AtomicBool>,
 }
 
 /// The parts of a connected session that can't live in `Sessions` itself:
@@ -152,12 +159,7 @@ pub struct App {
     active_transfer_cancel: Option<Arc<AtomicBool>>,
     transfer_tx: mpsc::UnboundedSender<TransferEvent>,
     transfer_rx: mpsc::UnboundedReceiver<TransferEvent>,
-    /// Set while a directory copy's planning phase (tree walk + destination
-    /// directory creation) is running: the batch id and a display name for
-    /// the "Scanning …" status line (see `app/render.rs`). `None` the rest
-    /// of the time, including once planning finishes and the batch's file
-    /// jobs are queued.
-    planning: Option<(u64, String)>,
+    planning: Vec<PlanningScan>,
     key_bindings: input::KeyBindings,
     bookmarks: config::bookmarks::Bookmarks,
     bookmarks_path: Option<PathBuf>,
@@ -236,7 +238,7 @@ impl App {
             active_transfer_cancel: None,
             transfer_tx,
             transfer_rx,
-            planning: None,
+            planning: Vec::new(),
             key_bindings,
             bookmarks,
             bookmarks_path,

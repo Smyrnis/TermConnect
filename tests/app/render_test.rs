@@ -1,5 +1,7 @@
 use super::*;
 use crate::connection::ConnectionSource;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 fn app_in_temp_dir() -> (tempfile::TempDir, App) {
     let dir = tempfile::tempdir().unwrap();
@@ -18,6 +20,10 @@ fn sample_connection_entry() -> ConnectionEntry {
         password: None,
         source: ConnectionSource::Profile,
     }
+}
+
+fn planning_scan(batch_id: u64, name: &str) -> PlanningScan {
+    PlanningScan { batch_id, display_name: name.to_string(), cancel: Arc::new(AtomicBool::new(false)) }
 }
 
 fn render_status_text(app: &App) -> String {
@@ -69,7 +75,7 @@ fn failed_status_still_shows_when_there_is_no_active_session() {
 #[test]
 fn render_status_shows_scanning_while_planning() {
     let (_dir, mut app) = app_in_temp_dir();
-    app.planning = Some((1, "myfolder".to_string()));
+    app.planning.push(planning_scan(1, "myfolder"));
 
     assert!(render_status_text(&app).contains("Scanning myfolder"));
 }
@@ -130,4 +136,28 @@ fn transfer_status_text_is_unchanged_for_a_non_batch_job() {
 
     assert!(text.contains("a.txt: 50%"));
     assert!(!text.contains("files"));
+}
+
+#[test]
+fn planning_status_text_is_none_without_a_scan() {
+    let (_dir, app) = app_in_temp_dir();
+
+    assert_eq!(app.planning_status_text(), None);
+}
+
+#[test]
+fn planning_status_text_names_a_single_scan() {
+    let (_dir, mut app) = app_in_temp_dir();
+    app.planning.push(planning_scan(1, "myfolder"));
+
+    assert_eq!(app.planning_status_text(), Some("Scanning myfolder\u{2026}".to_string()));
+}
+
+#[test]
+fn planning_status_text_counts_several_scans() {
+    let (_dir, mut app) = app_in_temp_dir();
+    app.planning.push(planning_scan(1, "one"));
+    app.planning.push(planning_scan(2, "two"));
+
+    assert_eq!(app.planning_status_text(), Some("Scanning 2 copies\u{2026}".to_string()));
 }

@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
 
@@ -20,6 +21,16 @@ pub struct DirectoryPlan {
     pub skipped_symlinks: usize,
 }
 
+pub enum PlanOutcome {
+    Ready(DirectoryPlan),
+    Cancelled,
+}
+
+enum Walk {
+    Completed,
+    Cancelled,
+}
+
 /// A tree discovered by walking a source directory, independent of where
 /// it will be copied to. `directories` and `files` hold paths relative to
 /// the walked root; `directories` is ordered parent-before-child, so
@@ -31,18 +42,21 @@ struct DiscoveredTree {
     skipped_symlinks: usize,
 }
 
-/// Recursively lists everything under `root` (a local directory), never
-/// following symlinks — a symlink is counted in `skipped_symlinks` and
-/// otherwise ignored, which also means a symlink back to an ancestor
-/// directory can never cause infinite recursion.
-fn discover_local_tree(root: &Path) -> Result<DiscoveredTree> {
+fn discover_local_tree(root: &Path, cancel: &AtomicBool) -> Result<Option<DiscoveredTree>> {
     let mut tree = DiscoveredTree { directories: Vec::new(), files: Vec::new(), skipped_symlinks: 0 };
-    discover_local_tree_into(root, Path::new(""), &mut tree)?;
-    Ok(tree)
+    match discover_local_tree_into(root, Path::new(""), &mut tree, cancel)? {
+        Walk::Completed => Ok(Some(tree)),
+        Walk::Cancelled => Ok(None),
+    }
 }
 
-fn discover_local_tree_into(root: &Path, relative: &Path, tree: &mut DiscoveredTree) -> Result<()> {
+fn discover_local_tree_into(
+    root: &Path, relative: &Path, tree: &mut DiscoveredTree, cancel: &AtomicBool,
+) -> Result<Walk> {
     for dir_entry in fs::read_dir(root.join(relative))? {
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(Walk::Cancelled);
+        }
         let dir_entry = dir_entry?;
         let file_type = dir_entry.file_type()?;
         let entry_relative = relative.join(dir_entry.file_name());
@@ -54,13 +68,15 @@ fn discover_local_tree_into(root: &Path, relative: &Path, tree: &mut DiscoveredT
 
         if file_type.is_dir() {
             tree.directories.push(entry_relative.clone());
-            discover_local_tree_into(root, &entry_relative, tree)?;
+            if let Walk::Cancelled = discover_local_tree_into(root, &entry_relative, tree, cancel)? {
+                return Ok(Walk::Cancelled);
+            }
         } else {
             let size = dir_entry.metadata()?.len();
             tree.files.push((entry_relative, size));
         }
     }
-    Ok(())
+    Ok(Walk::Completed)
 }
 
 /// Creates `path` if it doesn't already exist. A directory that's already
@@ -81,21 +97,21 @@ use crate::filesystem::{self, Entry};
 
 use super::Direction;
 
-/// The async counterpart to `discover_local_tree_into` — recurses over an
-/// SFTP directory listing instead of a local one. Boxed because async fns
-/// can't recurse directly (mirrors `filesystem::remote::remove_dir_recursive`,
-/// the existing recursive-SFTP-walk pattern in this codebase).
-fn discover_remote_tree<'a>(sftp: &'a SftpSession, root: &'a str) -> BoxFuture<'a, Result<DiscoveredTree>> {
+fn discover_remote_tree<'a>(
+    sftp: &'a SftpSession, root: &'a str, cancel: &'a AtomicBool,
+) -> BoxFuture<'a, Result<Option<DiscoveredTree>>> {
     Box::pin(async move {
         let mut tree = DiscoveredTree { directories: Vec::new(), files: Vec::new(), skipped_symlinks: 0 };
-        discover_remote_tree_into(sftp, root, Path::new(""), &mut tree).await?;
-        Ok(tree)
+        match discover_remote_tree_into(sftp, root, Path::new(""), &mut tree, cancel).await? {
+            Walk::Completed => Ok(Some(tree)),
+            Walk::Cancelled => Ok(None),
+        }
     })
 }
 
 fn discover_remote_tree_into<'a>(
-    sftp: &'a SftpSession, root: &'a str, relative: &'a Path, tree: &'a mut DiscoveredTree,
-) -> BoxFuture<'a, Result<()>> {
+    sftp: &'a SftpSession, root: &'a str, relative: &'a Path, tree: &'a mut DiscoveredTree, cancel: &'a AtomicBool,
+) -> BoxFuture<'a, Result<Walk>> {
     Box::pin(async move {
         let current = if relative.as_os_str().is_empty() {
             root.to_string()
@@ -104,6 +120,9 @@ fn discover_remote_tree_into<'a>(
         };
 
         for dir_entry in sftp.read_dir(&current).await? {
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(Walk::Cancelled);
+            }
             let metadata = dir_entry.metadata();
             let entry_relative = relative.join(dir_entry.file_name());
 
@@ -114,12 +133,14 @@ fn discover_remote_tree_into<'a>(
 
             if metadata.is_dir() {
                 tree.directories.push(entry_relative.clone());
-                discover_remote_tree_into(sftp, root, &entry_relative, tree).await?;
+                if let Walk::Cancelled = discover_remote_tree_into(sftp, root, &entry_relative, tree, cancel).await? {
+                    return Ok(Walk::Cancelled);
+                }
             } else {
                 tree.files.push((entry_relative, metadata.len()));
             }
         }
-        Ok(())
+        Ok(Walk::Completed)
     })
 }
 
@@ -180,43 +201,47 @@ fn planned_files_for_tree(
         .collect()
 }
 
-/// Walks `source_entries` (an `F5` selection that contains at least one
-/// directory) and creates the matching destination structure under
-/// `dest_dir`, on whichever side is remote for `direction`. Returns every
-/// file found, ready to enqueue — loose files in the selection (not under
-/// any directory) pass straight through unchanged, alongside every file
-/// discovered under each selected directory.
 pub async fn plan_directory_copy(
-    direction: Direction, source_entries: Vec<Entry>, dest_dir: &Path, sftp: &SftpSession,
-) -> Result<DirectoryPlan> {
+    direction: Direction, source_entries: Vec<Entry>, dest_dir: &Path, sftp: &SftpSession, cancel: &AtomicBool,
+) -> Result<PlanOutcome> {
     let mut files = Vec::new();
     let mut skipped_symlinks = 0;
 
     for entry in source_entries {
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(PlanOutcome::Cancelled);
+        }
         if !entry.is_dir {
             files.push(planned_file_for_loose_entry(direction, &entry, dest_dir));
             continue;
         }
 
         let tree = match direction {
-            Direction::Upload => discover_local_tree(&entry.path)?,
+            Direction::Upload => discover_local_tree(&entry.path, cancel)?,
             Direction::Download => {
                 let root = filesystem::path_to_remote_string(&entry.path);
-                discover_remote_tree(sftp, &root).await?
+                discover_remote_tree(sftp, &root, cancel).await?
             }
+        };
+        let Some(tree) = tree else {
+            return Ok(PlanOutcome::Cancelled);
         };
         skipped_symlinks += tree.skipped_symlinks;
 
         let dest_root = dest_dir.join(&entry.name);
-        ensure_directory(direction, sftp, &dest_root).await?;
-        for relative_dir in &tree.directories {
-            ensure_directory(direction, sftp, &dest_root.join(relative_dir)).await?;
+        let directories =
+            std::iter::once(dest_root.clone()).chain(tree.directories.iter().map(|relative| dest_root.join(relative)));
+        for directory in directories {
+            if cancel.load(Ordering::Relaxed) {
+                return Ok(PlanOutcome::Cancelled);
+            }
+            ensure_directory(direction, sftp, &directory).await?;
         }
 
         files.extend(planned_files_for_tree(direction, &entry, &dest_root, &tree));
     }
 
-    Ok(DirectoryPlan { files, skipped_symlinks })
+    Ok(PlanOutcome::Ready(DirectoryPlan { files, skipped_symlinks }))
 }
 
 async fn ensure_directory(direction: Direction, sftp: &SftpSession, path: &Path) -> Result<()> {
