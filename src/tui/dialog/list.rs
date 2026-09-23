@@ -24,8 +24,6 @@ impl ListDialog {
         Self { title: title.into(), items, cursor: 0, removable: false }
     }
 
-    /// Enables `F8`-to-remove — used for the bookmarks menu, not for a
-    /// read-only picker.
     pub fn removable(mut self, removable: bool) -> Self {
         self.removable = removable;
         self

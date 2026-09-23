@@ -2,11 +2,8 @@ use std::path::PathBuf;
 
 use super::job::{Direction, JobStatus, TransferJob};
 
-/// Retries a failed job this many additional times before giving up.
 const MAX_ATTEMPTS: u32 = 3;
 
-/// Aggregate progress for one batch's worth of jobs — reported in the
-/// status line while a directory copy runs.
 pub struct BatchProgress {
     pub total_files: usize,
     pub completed_files: usize,
@@ -14,10 +11,6 @@ pub struct BatchProgress {
     pub transferred_bytes: u64,
 }
 
-/// A sequential queue of transfers: at most one job runs at a time, and
-/// each finished job (successfully or not) makes room for the next queued
-/// one. Completed and permanently-failed jobs stay in the list as history
-/// until cleared.
 #[derive(Default)]
 pub struct TransferQueue {
     jobs: Vec<TransferJob>,
@@ -55,8 +48,6 @@ impl TransferQueue {
         id
     }
 
-    /// Mints a new batch id, shared by every `TransferJob` spawned from one
-    /// directory copy (see `enqueue`'s `batch_id` parameter).
     pub fn start_batch(&mut self) -> u64 {
         let id = self.next_batch_id;
         self.next_batch_id += 1;
@@ -83,7 +74,6 @@ impl TransferQueue {
         self.jobs.iter().filter(|job| job.status == JobStatus::Queued).count()
     }
 
-    /// The next job to run, if any and nothing is currently active.
     pub fn next_to_run(&self) -> Option<u64> {
         if self.is_active() {
             return None;
@@ -91,15 +81,6 @@ impl TransferQueue {
         self.jobs.iter().find(|job| job.status == JobStatus::Queued).map(|job| job.id)
     }
 
-    /// Marks every still-queued job belonging to `session_id` as `Failed`
-    /// with `reason`, in one pass. Used when a session disconnects: without
-    /// this, each queued job would only fail once `maybe_start_next_transfer`
-    /// got to it, pushing its own notification — this lets the caller fail
-    /// them all up front and report a single aggregated notification
-    /// instead. Deliberately leaves an `InProgress` job for that session
-    /// alone — the caller is expected to cancel it separately (see
-    /// `App::disconnect_selected`) and let it finish through the normal
-    /// transfer-event flow. Returns how many jobs were marked.
     pub fn fail_queued_for_session(&mut self, session_id: u64, reason: &str) -> usize {
         let mut count = 0;
         for job in self.jobs.iter_mut() {
@@ -111,9 +92,6 @@ impl TransferQueue {
         count
     }
 
-    /// Marks a failed job for retry if it hasn't exhausted its attempts.
-    /// Returns `true` if it was re-queued, `false` if it's out of retries
-    /// (and stays `Failed`).
     pub fn retry_or_give_up(&mut self, id: u64) -> bool {
         let Some(job) = self.get_mut(id) else {
             return false;
@@ -128,8 +106,6 @@ impl TransferQueue {
         }
     }
 
-    /// Aggregates every job sharing `batch_id` — used to show combined
-    /// progress for a directory copy in the status line.
     pub fn batch_progress(&self, batch_id: u64) -> BatchProgress {
         let mut progress = BatchProgress { total_files: 0, completed_files: 0, total_bytes: 0, transferred_bytes: 0 };
 
@@ -145,11 +121,6 @@ impl TransferQueue {
         progress
     }
 
-    /// Marks every still-`Queued` job in `batch_id` as `Cancelled`, in the
-    /// same style as `fail_queued_for_session`. Leaves any `InProgress` job
-    /// alone — the caller cancels that one separately via its own
-    /// `AtomicBool`, exactly like a single-file transfer already does.
-    /// Returns how many jobs were cancelled.
     pub fn cancel_batch(&mut self, batch_id: u64) -> usize {
         let mut count = 0;
         for job in self.jobs.iter_mut() {

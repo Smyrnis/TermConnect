@@ -20,9 +20,6 @@ impl Bookmarks {
         self.0.iter()
     }
 
-    // Exercised by tests only for now; kept as normal collection API
-    // rather than test-gated, since a caller with a `Bookmarks` in hand
-    // reasonably expects `len`/`is_empty` alongside `iter`/`get`.
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.0.len()
@@ -56,9 +53,6 @@ pub fn bookmarks_path() -> Result<PathBuf> {
     Ok(super::config_dir()?.join("bookmarks.toml"))
 }
 
-/// Loads bookmarks. Same never-fail contract as `config::load`: a missing
-/// file is empty with no warnings, a malformed one recovers to empty with
-/// one warning.
 pub fn load() -> Result<(Bookmarks, Vec<super::StartupWarning>)> {
     load_from(&bookmarks_path()?)
 }
@@ -80,11 +74,6 @@ fn load_from(path: &Path) -> Result<(Bookmarks, Vec<super::StartupWarning>)> {
     }
 }
 
-/// Writes the whole file atomically — small and human-editable, so
-/// there's no need for incremental writes — by writing to a temp file in
-/// the same directory and renaming it into place, so a crash or full disk
-/// mid-write leaves the previous, still-intact file rather than a
-/// truncated or empty one.
 pub(crate) fn save_to(path: &Path, bookmarks: &Bookmarks) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;

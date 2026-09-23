@@ -130,7 +130,7 @@ fn from_overrides_warns_on_unparseable_key_string_and_keeps_the_default() {
 #[test]
 fn from_overrides_warns_on_duplicate_binding() {
     let mut overrides = HashMap::new();
-    overrides.insert("refresh".to_string(), "F10".to_string()); // F10 is Quit's default
+    overrides.insert("refresh".to_string(), "F10".to_string());
 
     let (_, warnings) = KeyBindings::from_overrides(&overrides);
 
@@ -141,17 +141,12 @@ fn from_overrides_warns_on_duplicate_binding() {
 #[test]
 fn from_overrides_resolves_a_colliding_binding_deterministically() {
     let mut overrides = HashMap::new();
-    // F10 is Quit's default; overriding Refresh to F10 collides.
     overrides.insert("refresh".to_string(), "F10".to_string());
 
     let (bindings, warnings) = KeyBindings::from_overrides(&overrides);
 
     assert_eq!(warnings.len(), 1);
-    // Only one action may map to F10 now — the override wins,
-    // deterministically (not dependent on HashMap iteration order).
     assert_eq!(bindings.map_key(key(KeyCode::F(10))), Action::Refresh);
-    // The original action (Quit) no longer resolves to anything, since
-    // its only binding was reassigned to Refresh.
     assert_eq!(bindings.key_for(Action::Quit), None);
 }
 

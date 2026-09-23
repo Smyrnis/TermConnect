@@ -85,9 +85,6 @@ fn rename_dialog_prefills_the_current_name() {
 #[test]
 fn failed_operation_sets_a_status_message() {
     let (_dir, mut app) = app_in_temp_dir();
-    // Renaming when nothing is selected/under the cursor is a no-op that
-    // succeeds trivially, so instead force a real failure: try to create
-    // a directory that already exists.
     app.local.create_directory("dup").unwrap();
     app.apply_action(Action::Mkdir);
     for c in "dup".chars() {

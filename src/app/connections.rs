@@ -4,11 +4,6 @@ use crate::connection::profile::ConnectionProfile;
 use crate::tui::dialog::{FormDialog, FormField};
 
 impl App {
-    /// Hands the terminal over to the system `ssh` client, per the
-    /// roadmap's Terminal Lifecycle: leave the alternate screen, let `ssh`
-    /// take stdin/stdout/stderr, wait for it to exit, then reinitialize the
-    /// TUI. Nothing else in the event loop runs while `ssh` has the
-    /// terminal, by design — that's the whole point of the handover.
     pub(super) async fn launch_ssh_terminal(&mut self, terminal: &mut ratatui::Terminal<Backend>) -> Result<()> {
         let Some(entry) = self.sessions.active().map(|session| session.entry.clone()) else {
             self.notifications.push(Severity::Warning, "Connect to a server first");
@@ -19,12 +14,6 @@ impl App {
 
         let ssh_result = tokio::task::spawn_blocking(move || terminal::run(&entry)).await;
 
-        // `tui::init` builds a brand-new `Terminal` with an empty internal
-        // buffer, so the next `draw` repaints everything on its own —
-        // deliberately not calling `.clear()` here, since it queries the
-        // cursor position via a DSR escape sequence that some terminals
-        // (or terminals mid-handover right after `ssh` exits) may not
-        // answer in time, which would turn a cosmetic no-op into a crash.
         *terminal = tui::init()?;
 
         match ssh_result {
@@ -64,10 +53,6 @@ impl App {
         self.pending_action = Some(PendingAction::AddConnection);
     }
 
-    /// Only closes the dialog once `store::save` actually succeeds — a
-    /// disk-level failure (e.g. an unwritable config directory) must leave
-    /// the form open with the user's input intact, exactly like a
-    /// validation failure does, rather than discarding it.
     pub(super) fn submit_add_connection(&mut self, values: Vec<String>) {
         let profile = match build_connection_profile(&values, None) {
             Ok(profile) => profile,
@@ -116,10 +101,6 @@ impl App {
         self.pending_action = Some(PendingAction::EditConnection { original: entry });
     }
 
-    /// Same close-only-on-success rule as `submit_add_connection`. A rename
-    /// (name changed) deletes the old profile first — if that delete fails,
-    /// the form stays open rather than going on to save under the new name,
-    /// so the user doesn't end up with two saved copies from one confirm.
     pub(super) fn submit_edit_connection(&mut self, values: Vec<String>) {
         let Some(PendingAction::EditConnection { original }) = &self.pending_action else {
             return;
@@ -202,8 +183,6 @@ impl App {
         tokio::spawn(run_connect(entry, tx));
     }
 
-    /// Disconnects the connection under the connections-screen cursor, if
-    /// it's connected — `F8`'s counterpart to `Enter`'s connect/switch.
     pub(super) fn disconnect_selected(&mut self) {
         let Some(entry) = self.connections.get(self.connections_cursor) else {
             return;
@@ -216,15 +195,6 @@ impl App {
         self.sessions.remove(id);
         self.session_resources.remove(&id);
 
-        // Clean up anything the disconnected session left behind in the
-        // transfer queue: an in-flight transfer would otherwise fail with a
-        // raw I/O error once its `Arc<SftpSession>` handle is dropped (and
-        // get retried up to 3 times, each retry its own error
-        // notification), and each still-queued job would otherwise trickle
-        // through `maybe_start_next_transfer`'s per-job
-        // "session disconnected" failure path one at a time, each pushing
-        // its own notification. Handle both here in one pass and report a
-        // single aggregated notification instead.
         let mut affected = self.transfers.fail_queued_for_session(id, "session disconnected");
         if self.transfers.active().is_some_and(|job| job.session_id == id) {
             self.cancel_active_transfer();
@@ -302,9 +272,6 @@ impl App {
         });
     }
 
-    /// Refreshes the *active* session's panel — used for user-driven
-    /// navigation/refresh, where "the remote panel" unambiguously means
-    /// whichever session is focused.
     pub(super) fn spawn_remote_list(&mut self, path: PathBuf) {
         let Some(session_id) = self.sessions.active_id() else {
             return;
@@ -312,9 +279,6 @@ impl App {
         self.spawn_remote_list_for(session_id, path);
     }
 
-    /// Refreshes a specific session's panel by id — used when the session
-    /// that needs refreshing isn't necessarily the active one (a finished
-    /// transfer targets whichever session it was queued against).
     pub(super) fn spawn_remote_list_for(&mut self, session_id: u64, path: PathBuf) {
         let Some(resources) = self.session_resources.get(&session_id) else {
             return;
@@ -414,9 +378,6 @@ impl App {
     }
 }
 
-/// Lists `path` over SFTP and reports the outcome — the tail end of every
-/// remote panel operation (navigate, mkdir, rename, delete all finish by
-/// refreshing the listing, just like their local counterparts do).
 async fn relist(sftp: &SftpSession, session_id: u64, path: PathBuf, tx: &mpsc::UnboundedSender<PanelEvent>) {
     let path_str = path_to_remote_string(&path);
     match filesystem::remote::list(sftp, &path_str).await {
@@ -433,12 +394,6 @@ async fn relist(sftp: &SftpSession, session_id: u64, path: PathBuf, tx: &mpsc::U
     }
 }
 
-/// Runs a full connection attempt in the background: dial, verify the host
-/// key, authenticate in the roadmap's priority order (agent, key file,
-/// password), then open the SFTP subsystem — reporting progress back over
-/// `tx` so the UI never blocks on network I/O. A password prompt is
-/// requested via a one-shot round-trip embedded in
-/// [`ConnectEvent::NeedsPassword`].
 async fn run_connect(entry: ConnectionEntry, tx: mpsc::UnboundedSender<ConnectEvent>) {
     let mut handle = match connection::client::connect(&entry.host, entry.port).await {
         Ok(handle) => handle,
@@ -492,8 +447,6 @@ async fn run_connect(entry: ConnectionEntry, tx: mpsc::UnboundedSender<ConnectEv
     }
 }
 
-/// Opens the SFTP subsystem on a freshly-authenticated session and reports
-/// the finished connection, or a failure if SFTP itself couldn't start.
 async fn finish_connect(
     entry: ConnectionEntry, handle: russh::client::Handle<TermConnectHandler>, tx: &mpsc::UnboundedSender<ConnectEvent>,
 ) {

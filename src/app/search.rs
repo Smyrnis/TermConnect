@@ -52,12 +52,6 @@ impl App {
         }
     }
 
-    /// Cancels any in-flight (or still-debouncing) search and schedules a
-    /// new one for the current pattern — called on every keystroke that
-    /// changes the pattern. The actual search doesn't dispatch immediately:
-    /// it waits out `SEARCH_DEBOUNCE` first (see `wait_out_search_debounce`)
-    /// so a burst of keystrokes coalesces into one search per pause instead
-    /// of one remote `find`/local walk per keystroke.
     fn restart_search(&mut self) {
         let Some(session) = self.search.as_mut() else {
             return;
@@ -74,10 +68,6 @@ impl App {
         if pattern.is_empty() {
             return;
         }
-        // The search box is a plain substring filter, not a glob editor —
-        // wrap the typed text so `glob_match`'s anchored matching (see
-        // `filesystem::search`) behaves like "contains" instead of
-        // requiring an exact filename match.
         let glob_pattern = format!("*{pattern}*");
 
         let tx = self.search_tx.clone();
@@ -126,8 +116,6 @@ impl App {
         }
     }
 
-    /// Closes the search screen and navigates the target panel to the
-    /// selected result's parent directory.
     fn open_selected_search_result(&mut self) {
         let Some(session) = self.search.as_ref() else {
             return;
@@ -157,12 +145,6 @@ impl App {
     }
 }
 
-/// Waits out `SEARCH_DEBOUNCE`, then reports whether the search that
-/// scheduled this wait is still the one to run: `false` means either it was
-/// cancelled (e.g. the pattern changed again, or the search screen closed)
-/// or a newer pattern change superseded it (`generation` no longer matches
-/// `expected`), in which case the caller should skip dispatching the actual
-/// search entirely.
 async fn wait_out_search_debounce(cancel: &Arc<AtomicBool>, generation: &Arc<AtomicU64>, expected: u64) -> bool {
     tokio::time::sleep(SEARCH_DEBOUNCE).await;
     !cancel.load(Ordering::Relaxed) && generation.load(Ordering::Relaxed) == expected

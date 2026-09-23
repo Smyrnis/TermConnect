@@ -39,7 +39,6 @@ impl Sessions {
         self.items.iter().find(|session| session.entry.name == name)
     }
 
-    /// Adds a new session and makes it the active one.
     pub fn insert(&mut self, entry: ConnectionEntry, panel: PanelState) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
@@ -48,9 +47,6 @@ impl Sessions {
         id
     }
 
-    /// Removes the session with `id`. If it was active, the next session
-    /// (or the previous one, if it was last) becomes active; if it was the
-    /// only session, nothing is active afterward.
     pub fn remove(&mut self, id: u64) -> Option<Session> {
         let index = self.items.iter().position(|session| session.id == id)?;
         let removed = self.items.remove(index);
@@ -70,8 +66,6 @@ impl Sessions {
         Some(removed)
     }
 
-    /// Advances to the next session, wrapping around. A no-op with zero or
-    /// one sessions.
     pub fn cycle(&mut self) {
         if self.items.len() < 2 {
             return;
@@ -91,8 +85,6 @@ impl Sessions {
         self.items.iter()
     }
 
-    /// Makes the session with `id` active, if it exists. Returns whether
-    /// it was found.
     pub fn activate(&mut self, id: u64) -> bool {
         if let Some(index) = self.items.iter().position(|session| session.id == id) {
             self.active = Some(index);

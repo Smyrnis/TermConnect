@@ -36,10 +36,6 @@ pub(crate) struct PanelSettingsFile {
     pub sort_order: Option<String>,
 }
 
-/// Converts a parsed TOML file into validated `Settings`. An unrecognized
-/// `[panel]` value falls back to the default and produces one warning;
-/// `[keys]` passes through untouched (see the module-level interface note
-/// on why validation happens in `App` instead).
 pub(crate) fn settings_from_file(file: SettingsFile) -> (Settings, Vec<String>) {
     let mut warnings = Vec::new();
     let defaults = PanelSettings::default();

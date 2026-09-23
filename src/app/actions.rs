@@ -38,16 +38,11 @@ impl App {
             | Action::CycleSort => {
                 self.apply_screen_action(action);
             }
-            // Handled specially in `run`, which has the `&mut Terminal`
-            // this needs to suspend/resume the TUI around `ssh`.
             Action::OpenTerminal => {}
             Action::Noop => {}
         }
     }
 
-    /// `Esc`: dismisses a persistent error notification first, if one is
-    /// showing; otherwise falls back to its usual meaning of closing the
-    /// dialog/returning to the Files screen.
     fn handle_back(&mut self) {
         let showing_error = matches!(self.notifications.current().map(|n| n.severity), Some(Severity::Error));
         if showing_error {
@@ -65,7 +60,6 @@ impl App {
         }
     }
 
-    /// Actions that operate on whichever panel is focused.
     fn apply_panel_action(&mut self, action: Action) {
         match self.active_panel {
             ActivePanel::Local => self.apply_local_panel_action(action),
@@ -103,10 +97,6 @@ impl App {
         self.set_status(result);
     }
 
-    /// Remote navigation/selection is instant (pure state), but anything
-    /// that needs a fresh listing (`Open`, `Refresh`) has to go over the
-    /// network, so it's dispatched to a background task instead of run
-    /// inline — see `spawn_remote_list`.
     fn apply_remote_panel_action(&mut self, action: Action) {
         let target_path = {
             let Some(session) = self.sessions.active_mut() else {

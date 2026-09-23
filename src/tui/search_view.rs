@@ -76,7 +76,6 @@ impl SearchView {
         }
     }
 
-    /// Resets for a new search — called right before spawning one.
     pub fn start(&mut self) {
         self.results.clear();
         self.selected = 0;

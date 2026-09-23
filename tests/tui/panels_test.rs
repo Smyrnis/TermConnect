@@ -25,7 +25,7 @@ fn from_listing_builds_rows_from_provided_entries() {
     let panel = PanelState::from_listing(PathBuf::from("/home/user"), entries);
 
     assert_eq!(panel.path(), Path::new("/home/user"));
-    assert_eq!(panel.rows().len(), 2); // Parent + the one entry
+    assert_eq!(panel.rows().len(), 2);
     assert_eq!(panel.rows()[0], Row::Parent);
 }
 
@@ -60,7 +60,6 @@ fn new_panel_lists_the_given_directory() {
 
     let panel = PanelState::new(dir.path().to_path_buf()).unwrap();
 
-    // Parent row + the one file.
     assert_eq!(panel.rows().len(), 2);
     assert_eq!(panel.rows()[0], Row::Parent);
 }
@@ -95,7 +94,7 @@ fn open_selected_navigates_into_a_directory() {
     let dir = tempfile::tempdir().unwrap();
     fs::create_dir(dir.path().join("child")).unwrap();
     let mut panel = PanelState::new(dir.path().to_path_buf()).unwrap();
-    panel.cursor = panel.rows().len() - 1; // the child directory row
+    panel.cursor = panel.rows().len() - 1;
 
     panel.open_selected().unwrap();
 
@@ -268,7 +267,7 @@ fn toggle_hidden_reveals_dotfiles_without_touching_the_filesystem() {
     assert_eq!(names, vec![".hidden".to_string()]);
 
     panel.toggle_hidden();
-    assert_eq!(panel.rows().len(), 1); // back to just the Parent row
+    assert_eq!(panel.rows().len(), 1);
 }
 
 #[test]
@@ -278,8 +277,8 @@ fn cycle_sort_reorders_rows_by_size_when_advanced_twice() {
     fs::write(dir.path().join("small.txt"), vec![0u8; 1]).unwrap();
     let mut panel = PanelState::new(dir.path().to_path_buf()).unwrap();
 
-    panel.cycle_sort(); // Name Ascending -> Name Descending
-    panel.cycle_sort(); // Name Descending -> Size Ascending
+    panel.cycle_sort();
+    panel.cycle_sort();
 
     let names: Vec<String> = panel
         .rows()
@@ -300,7 +299,7 @@ fn set_sort_spec_and_set_show_hidden_apply_immediately() {
 
     panel.set_show_hidden(true);
     assert!(panel.show_hidden());
-    assert_eq!(panel.rows().len(), 2); // Parent + .hidden
+    assert_eq!(panel.rows().len(), 2);
 
     panel.set_sort_spec(crate::tui::sort::SortSpec {
         key: crate::tui::sort::SortKey::Size,

@@ -9,7 +9,6 @@ pub enum Severity {
 }
 
 impl Severity {
-    /// `None` means "never auto-expires" — only `Esc` dismisses it.
     fn ttl(self) -> Option<Duration> {
         match self {
             Severity::Info => Some(Duration::from_secs(4)),
@@ -25,9 +24,6 @@ pub struct Notification {
     expires_at: Option<Instant>,
 }
 
-/// A FIFO queue of status-bar messages. An `Error` at the front blocks
-/// later messages from showing until it's dismissed — errors need
-/// acknowledgment, so they're never silently superseded.
 #[derive(Default)]
 pub struct Notifications {
     queue: VecDeque<Notification>,
@@ -47,9 +43,6 @@ impl Notifications {
         self.queue.pop_front();
     }
 
-    /// Drops leading entries whose deadline has passed. Only ever looks at
-    /// the front — a later entry can't be showing yet, so its expiry
-    /// doesn't matter until it reaches the front.
     pub fn expire(&mut self, now: Instant) {
         while let Some(front) = self.queue.front() {
             match front.expires_at {
@@ -61,9 +54,6 @@ impl Notifications {
         }
     }
 
-    /// When the event loop should next re-check `expire`, or `None` if
-    /// there's nothing to wait for (empty queue, or the front entry never
-    /// expires on its own).
     pub fn next_wake(&self) -> Option<Instant> {
         self.queue.front().and_then(|n| n.expires_at)
     }

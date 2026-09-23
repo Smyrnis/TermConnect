@@ -21,25 +21,12 @@ pub enum SearchEvent {
     Failed(String),
 }
 
-/// Matches `*` (any run of characters) and `?` (exactly one character)
-/// against `name`, case-insensitively (matching remote `find -iname`'s
-/// behavior, so local search, the `find`-based remote search, and the
-/// SFTP-walk remote fallback all agree on the same typed pattern) — not a
-/// general glob implementation, just the two wildcards file-name searching
-/// needs.
 pub fn glob_match(pattern: &str, name: &str) -> bool {
     let pattern: Vec<char> = pattern.to_lowercase().chars().collect();
     let name: Vec<char> = name.to_lowercase().chars().collect();
     match_from(&pattern, &name)
 }
 
-/// Iterative two-pointer wildcard match: on a mismatch after a `*`,
-/// backtracks by remembering the most recent `*` and how much of `name`
-/// it had already consumed, rather than exploring both "consume" and
-/// "don't consume" branches recursively. That naive recursive form is
-/// exponential on adversarial patterns (many `*`s followed by a
-/// non-matching tail); this form is a single pass with O(1) backtrack
-/// state, linear in practice.
 fn match_from(pattern: &[char], name: &[char]) -> bool {
     let (mut p, mut n) = (0, 0);
     let mut star: Option<(usize, usize)> = None;
@@ -73,9 +60,6 @@ pub async fn search_local(
     search_local_with_limits(root, pattern, tx, cancel, MAX_DEPTH, MAX_RESULTS).await;
 }
 
-/// Depth-limited, cancellable, capped recursive walk. Split from
-/// `search_local` so tests can exercise the depth/cap boundaries with
-/// small numbers instead of `MAX_DEPTH`/`MAX_RESULTS`.
 async fn search_local_with_limits(
     root: PathBuf, pattern: String, tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>, max_depth: usize,
     max_results: usize,
@@ -146,9 +130,6 @@ async fn search_local_with_limits(
     let _ = tx.send(SearchEvent::Done { truncated });
 }
 
-/// Wraps `value` in single quotes for a POSIX shell command line, escaping
-/// any embedded `'` — the standard way to pass an arbitrary string as one
-/// shell argument without it being interpreted.
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
@@ -160,9 +141,6 @@ pub async fn search_remote(
     search_remote_with_limits(handle, sftp, root, pattern, tx, cancel, MAX_DEPTH, MAX_RESULTS).await;
 }
 
-/// `search_remote`'s inner implementation, parameterized on `max_depth`/
-/// `max_results` so tests can exercise the truncation/depth-limit behavior
-/// without waiting on the real (much larger) `MAX_DEPTH`/`MAX_RESULTS`.
 #[allow(clippy::too_many_arguments)]
 async fn search_remote_with_limits(
     handle: &Handle<TermConnectHandler>, sftp: &SftpSession, root: String, pattern: String,
@@ -203,11 +181,6 @@ async fn search_remote_with_limits(
     }
 }
 
-/// Runs `find <root> -maxdepth <max_depth> -iname <pattern>` over an SSH
-/// exec channel — the only remote command execution in TermConnect, and it
-/// only ever runs on an explicit search. Returns `None` (triggering the
-/// SFTP-walk fallback) if the channel can't be opened, `exec` fails, or the
-/// command exits non-zero.
 async fn run_find(
     handle: &Handle<TermConnectHandler>, root: &str, pattern: &str, max_depth: usize, cancel: &Arc<AtomicBool>,
 ) -> Option<Vec<String>> {
@@ -220,15 +193,9 @@ async fn run_find(
 
     loop {
         if cancel.load(Ordering::Relaxed) {
-            // Dropping `channel` closes the SSH exec channel, ending the
-            // remote `find` process rather than letting it run to
-            // completion after the caller has stopped listening.
             return None;
         }
 
-        // Race the next channel message against a short poll interval so a
-        // cancellation flag flip is noticed promptly even while `find` is
-        // silently still running remotely (no data arriving to wake us).
         let msg = tokio::select! {
             msg = channel.wait() => msg,
             () = tokio::time::sleep(std::time::Duration::from_millis(100)) => continue,
@@ -251,8 +218,6 @@ async fn run_find(
     Some(text.lines().filter(|line| !line.is_empty()).map(str::to_string).collect())
 }
 
-/// Depth-limited, cancellable, capped SFTP `read_dir` walk — the fallback
-/// when `find` isn't available, mirroring `search_local`'s shape.
 async fn search_remote_walk(
     sftp: &SftpSession, root: String, pattern: String, tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>,
     max_depth: usize, max_results: usize,

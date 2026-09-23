@@ -4,9 +4,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
 
-/// One file discovered while planning a directory copy, with its final
-/// source and destination already resolved — ready to enqueue as an
-/// ordinary `TransferJob`.
 pub struct PlannedFile {
     pub local_path: PathBuf,
     pub remote_path: String,
@@ -14,8 +11,6 @@ pub struct PlannedFile {
     pub size: u64,
 }
 
-/// The result of planning one directory copy: every file to transfer,
-/// plus how many symlinks were skipped along the way.
 pub struct DirectoryPlan {
     pub files: Vec<PlannedFile>,
     pub skipped_symlinks: usize,
@@ -31,11 +26,6 @@ enum Walk {
     Cancelled,
 }
 
-/// A tree discovered by walking a source directory, independent of where
-/// it will be copied to. `directories` and `files` hold paths relative to
-/// the walked root; `directories` is ordered parent-before-child, so
-/// creating them at a destination in list order never tries to create a
-/// child before its parent exists.
 struct DiscoveredTree {
     directories: Vec<PathBuf>,
     files: Vec<(PathBuf, u64)>,
@@ -79,10 +69,6 @@ fn discover_local_tree_into(
     Ok(Walk::Completed)
 }
 
-/// Creates `path` if it doesn't already exist. A directory that's already
-/// there (e.g. copying into a destination that partially exists) is left
-/// as is, not an error — a directory copy merges into an existing
-/// destination rather than failing on it.
 fn ensure_local_directory(path: &Path) -> Result<()> {
     if path.exists() {
         return Ok(());
@@ -144,16 +130,6 @@ fn discover_remote_tree_into<'a>(
     })
 }
 
-/// Creates the remote directory `path` if it doesn't already exist —
-/// checked with `metadata` first rather than inspecting the error from a
-/// failed `create_dir`, since the base SFTP v3 status codes this crate
-/// exposes have no distinct "already exists" code (mkdir-on-existing-dir
-/// and other server-side failures both come back as the same generic
-/// `Failure` status), so error-based detection can't reliably tell them
-/// apart. Only treats an existing *directory* as "already there" — a
-/// regular file already sitting at `path` (a name collision) falls
-/// through to `create_directory`, which then fails loudly with a real,
-/// surfaced error instead of planning silently succeeding over a file.
 async fn ensure_remote_directory(sftp: &SftpSession, path: &str) -> Result<()> {
     if sftp.metadata(path).await.is_ok_and(|m| m.is_dir()) {
         return Ok(());
@@ -161,10 +137,6 @@ async fn ensure_remote_directory(sftp: &SftpSession, path: &str) -> Result<()> {
     filesystem::remote::create_directory(sftp, path).await
 }
 
-/// Resolves a loose file's (not under any directory) final source and
-/// destination paths — pure path mapping, no I/O. Split out of
-/// `plan_directory_copy` so it's unit-testable without a live
-/// `SftpSession`.
 fn planned_file_for_loose_entry(direction: Direction, entry: &Entry, dest_dir: &Path) -> PlannedFile {
     let (local_path, remote_path) = match direction {
         Direction::Upload => (entry.path.clone(), filesystem::path_to_remote_string(&dest_dir.join(&entry.name))),
@@ -173,10 +145,6 @@ fn planned_file_for_loose_entry(direction: Direction, entry: &Entry, dest_dir: &
     PlannedFile { local_path, remote_path, display_name: entry.name.clone(), size: entry.size }
 }
 
-/// Resolves the final source/destination paths for every file already
-/// discovered under a walked directory (`tree`) — pure path mapping, no
-/// I/O. Split out of `plan_directory_copy` so it's unit-testable without a
-/// live `SftpSession`.
 fn planned_files_for_tree(
     direction: Direction, entry: &Entry, dest_root: &Path, tree: &DiscoveredTree,
 ) -> Vec<PlannedFile> {

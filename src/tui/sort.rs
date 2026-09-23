@@ -27,8 +27,6 @@ impl Default for SortSpec {
 }
 
 impl SortSpec {
-    /// Advances to the next spec in the cycle Name↑ → Name↓ → Size↑ →
-    /// Size↓ → Name↑, used by `Ctrl+S`.
     pub fn cycled(self) -> SortSpec {
         match (self.key, self.order) {
             (SortKey::Name, SortOrder::Ascending) => SortSpec { key: SortKey::Name, order: SortOrder::Descending },
@@ -39,9 +37,6 @@ impl SortSpec {
     }
 }
 
-/// Sorts `entries` in place. Directories always precede files, independent
-/// of `spec`; within a group, ties always break ascending by lowercased
-/// name so ordering stays deterministic under any key/order combination.
 pub fn sort_entries(entries: &mut [Entry], spec: SortSpec) {
     entries.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| compare_by(a, b, spec)));
 }

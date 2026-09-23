@@ -18,14 +18,9 @@ use crate::config;
 use crate::connection::client::TermConnectHandler;
 use crate::connection::{self, ConnectionEntry, ConnectionSource};
 use crate::errors;
+use crate::filesystem::path_to_remote_string;
 use crate::filesystem::search::SearchEvent;
 use crate::filesystem::{self, Entry};
-// SFTP paths are always POSIX-style strings; since TermConnect targets
-// Linux only, a `PathBuf`'s own `Display` already produces exactly that.
-// Lives in `filesystem` (used by `transfer::plan` too, which can't depend
-// back on `app`); re-exported here so every existing call site in this
-// module tree keeps working unchanged.
-use crate::filesystem::path_to_remote_string;
 use crate::terminal;
 use crate::transfer::{self, Direction, JobStatus, TransferOutcome, TransferQueue};
 use crate::tui::connections_list;
@@ -47,7 +42,6 @@ mod render;
 mod search;
 mod transfers;
 
-/// The file operation a dialog is currently collecting input/confirmation for.
 enum PendingAction {
     Mkdir,
     Rename,
@@ -59,7 +53,6 @@ enum PendingAction {
     DeleteConnection { name: String },
 }
 
-/// Which top-level screen is currently shown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
     Files,
@@ -84,32 +77,20 @@ struct SearchSession {
     view: SearchView,
     target: SearchTarget,
     cancel: Arc<AtomicBool>,
-    /// Bumped on every pattern change; a debounced search checks this after
-    /// its idle delay and bails out as a no-op if it's no longer current
-    /// (see `restart_search`).
     generation: Arc<AtomicU64>,
 }
 
-/// Progress reported by a background connection attempt (see
-/// `run_connect`), delivered back to the event loop over a channel so the
-/// TUI never blocks on network I/O.
 enum ConnectEvent {
     Connected { entry: Box<ConnectionEntry>, handle: russh::client::Handle<TermConnectHandler>, sftp: SftpSession },
     NeedsPassword { name: String, username: String, respond_to: oneshot::Sender<String> },
     Failed { message: String },
 }
 
-/// The result of a background SFTP operation on the remote panel: every
-/// remote action (navigate, mkdir, rename, delete, refresh) ends the same
-/// way — either a fresh listing to show, or a failure message.
 enum PanelEvent {
     Listed { session_id: u64, path: PathBuf, entries: Vec<Entry> },
     Failed { session_id: u64, message: String },
 }
 
-/// Progress reported by a running file transfer (see `run_transfer`), or
-/// by the planning phase a directory copy runs first (see
-/// `start_directory_copy` in `app/transfers.rs`).
 enum TransferEvent {
     Progress { id: u64, transferred: u64 },
     Finished { id: u64, outcome: TransferOutcome },
@@ -125,9 +106,6 @@ struct PlanningScan {
     cancel: Arc<AtomicBool>,
 }
 
-/// The parts of a connected session that can't live in `Sessions` itself:
-/// `Handle` isn't `Clone`, and neither type can be constructed without a
-/// live connection, which would make `Sessions`'s own tests need one too.
 struct SessionResources {
     handle: Arc<russh::client::Handle<TermConnectHandler>>,
     sftp: Arc<SftpSession>,
@@ -267,10 +245,6 @@ impl App {
                             let action = self.key_bindings.map_key(key);
                             if action == Action::OpenTerminal {
                                 self.launch_ssh_terminal(terminal).await?;
-                                // The alternate screen and raw mode were
-                                // left and re-entered around `ssh`; a
-                                // fresh EventStream avoids relying on the
-                                // old one's internal state surviving that.
                                 events = EventStream::new();
                             } else {
                                 self.apply_action(action);
@@ -299,11 +273,6 @@ impl App {
         Ok(())
     }
 
-    /// Reports the outcome of a synchronous local action. Success is a
-    /// no-op — it no longer clears whatever notification is currently
-    /// showing, since an `Error` notification must persist until the user
-    /// acknowledges it (`Esc`), not get silently overwritten by the next
-    /// unrelated success.
     fn set_status(&mut self, result: Result<()>) {
         if let Err(err) = result {
             self.notifications.push(Severity::Error, err.to_string());
@@ -311,13 +280,8 @@ impl App {
     }
 }
 
-/// How long a search waits, idle, before actually dispatching — coalesces a
-/// burst of pattern-changing keystrokes into a single search per pause.
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(250);
 
-/// Converts saved panel settings into a `SortSpec` — the one place allowed
-/// to know about both `config::settings::PanelSettings`'s strings and
-/// `tui::sort::SortSpec`'s enums.
 fn parse_sort_spec(panel: &config::settings::PanelSettings) -> crate::tui::sort::SortSpec {
     let key = match panel.sort_key.as_str() {
         "size" => SortKey::Size,
@@ -330,9 +294,6 @@ fn parse_sort_spec(panel: &config::settings::PanelSettings) -> crate::tui::sort:
     crate::tui::sort::SortSpec { key, order }
 }
 
-/// Resolves at `deadline`, or never resolves if there's nothing to wait
-/// for — so a `tokio::select!` branch built from this doesn't wake the
-/// idle event loop on a timer it doesn't need.
 async fn sleep_until_or_pending(deadline: Option<Instant>) {
     match deadline {
         Some(deadline) => tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await,

@@ -60,8 +60,6 @@ fn command_falls_back_to_plain_ssh_when_sshpass_is_not_found() {
     let command = command_for_with(&entry, None);
 
     assert_eq!(command.get_program(), "ssh");
-    // The password must never leak into the child's environment when
-    // sshpass isn't being used to supply it.
     assert!(command.get_envs().all(|(key, _)| key != "SSHPASS"));
 }
 

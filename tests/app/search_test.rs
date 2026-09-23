@@ -52,9 +52,6 @@ async fn typing_a_pattern_streams_matching_results_back_into_the_search_view() {
         app.apply_search_key(key(KeyCode::Char(c)));
     }
 
-    // Longer than `SEARCH_DEBOUNCE`, so the debounced search past the
-    // last keystroke has actually dispatched and completed by the time
-    // we drain `search_rx` below.
     tokio::time::sleep(SEARCH_DEBOUNCE + std::time::Duration::from_millis(200)).await;
     while let Ok(event) = app.search_rx.try_recv() {
         app.apply_search_event(event);
@@ -71,10 +68,6 @@ async fn rapid_pattern_changes_dispatch_only_one_search_for_the_final_pattern() 
     let mut app = App::at(dir.path().to_path_buf()).unwrap();
 
     app.apply_action(Action::OpenSearch);
-    // Simulate rapid typing: each keystroke calls `restart_search`
-    // (bumping the search generation and cancelling the previous
-    // debounce/search), all faster than `SEARCH_DEBOUNCE`, so only the
-    // last one should ever actually dispatch a search.
     for c in "aaa".chars() {
         app.apply_search_key(key(KeyCode::Char(c)));
     }
@@ -88,8 +81,6 @@ async fn rapid_pattern_changes_dispatch_only_one_search_for_the_final_pattern() 
         app.apply_search_event(event);
     }
 
-    // Exactly one search actually ran (one `Done`), and it was for the
-    // final pattern "aaa" — not one per keystroke ("a", "aa", "aaa").
     assert_eq!(done_count, 1, "expected exactly one dispatched search");
     let session = app.search.unwrap();
     assert!(session.view.results.iter().any(|entry| entry.name == "aaa.log"));

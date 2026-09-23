@@ -12,19 +12,8 @@ fn key(code: KeyCode) -> KeyEvent {
     KeyEvent { code, modifiers: KeyModifiers::NONE, kind: KeyEventKind::Press, state: KeyEventState::NONE }
 }
 
-/// Serializes tests that redirect `$HOME` to a tempdir. `std::env::set_var`
-/// mutates process-global state; without this lock, two such tests running
-/// concurrently (the default under `cargo test`) could each see the
-/// other's `HOME` value mid-test. `std::sync::Mutex` avoids pulling in a
-/// dependency like `serial_test` just for this file.
 static HOME_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-/// Builds an `App` in a fresh temp dir with `$HOME` redirected into that
-/// same dir for the test's duration — so `connection::store`'s `$HOME`-based
-/// save/load/delete round-trip against an isolated file instead of the
-/// machine's real `~/.config/termconnect/config.toml`. The returned guard
-/// must stay bound (not `_`) for the whole test body; dropping it early
-/// releases the lock before the test's `set_var` state is safe to unwind.
 fn app_with_isolated_home() -> (tempfile::TempDir, std::sync::MutexGuard<'static, ()>, App) {
     let guard = HOME_ENV_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     let dir = tempfile::tempdir().unwrap();
@@ -48,6 +37,7 @@ fn sample_connection_entry() -> ConnectionEntry {
     }
 }
 
+const PORT_NOTHING_LISTENS_ON: u16 = 1;
 #[test]
 fn open_connections_switches_screen_and_loads_entries() {
     let (_dir, mut app) = app_in_temp_dir();
@@ -62,7 +52,7 @@ async fn connecting_to_an_unreachable_host_reports_failure() {
     app.connections = vec![ConnectionEntry {
         name: "unreachable".to_string(),
         host: "127.0.0.1".to_string(),
-        port: 1, // nothing listens on port 1
+        port: PORT_NOTHING_LISTENS_ON,
         username: "user".to_string(),
         identity_file: None,
         remote_path: None,
@@ -134,7 +124,6 @@ fn connecting_to_an_already_connected_host_switches_instead_of_reconnecting() {
 
     app.connect_to_selected();
 
-    // still exactly one session — no reconnect attempt was spawned
     assert_eq!(app.sessions.len(), 1);
     assert_eq!(app.connection_status, ConnectionStatus::Disconnected);
 }
@@ -192,7 +181,6 @@ fn disconnecting_a_session_fails_its_queued_jobs_with_one_aggregated_notificatio
         10,
         None,
     );
-    // A job for a different session should be untouched.
     let other_session_job = app.transfers.enqueue(
         999,
         Direction::Upload,
@@ -209,7 +197,6 @@ fn disconnecting_a_session_fails_its_queued_jobs_with_one_aggregated_notificatio
     assert!(matches!(app.transfers.get(job_b).unwrap().status, JobStatus::Failed(_)));
     assert_eq!(app.transfers.get(other_session_job).unwrap().status, JobStatus::Queued);
 
-    // Collect every notification pushed, in order.
     let messages: Vec<String> = std::iter::from_fn(|| {
         let message = app.notifications.current().map(|n| n.message.clone());
         if message.is_some() {
@@ -219,8 +206,6 @@ fn disconnecting_a_session_fails_its_queued_jobs_with_one_aggregated_notificatio
     })
     .collect();
 
-    // Exactly one message aggregates both cancelled/failed transfers —
-    // not one notification per job — plus the disconnect confirmation.
     let transfer_messages: Vec<&String> =
         messages.iter().filter(|m| m.contains("transfer") && m.contains("disconnected")).collect();
     assert_eq!(transfer_messages.len(), 1, "expected exactly one aggregated transfer notification, got {messages:?}");
@@ -394,9 +379,6 @@ fn add_connection_action_does_nothing_outside_the_connections_screen() {
 #[test]
 fn add_connection_dialog_stays_open_when_saving_fails() {
     let (dir, _guard, mut app) = app_with_isolated_home();
-    // Make `~/.config` a plain file, so `store::save`'s `create_dir_all`
-    // for `~/.config/termconnect/` fails — this simulates any disk-level
-    // save error without needing to fake a permissions failure.
     std::fs::write(dir.path().join(".config"), b"not a directory").unwrap();
     app.screen = Screen::Connections;
 

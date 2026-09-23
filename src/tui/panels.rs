@@ -26,8 +26,6 @@ impl ActivePanel {
     }
 }
 
-/// One line in a panel's listing: either the synthetic ".." entry used to
-/// navigate to the parent directory, or a real filesystem entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Row {
     Parent,
@@ -67,9 +65,6 @@ impl PanelState {
         &self.rows
     }
 
-    /// Builds a panel directly from an already-fetched listing, bypassing
-    /// `local::list` — used for the remote panel, whose listings come back
-    /// from an async SFTP call rather than a synchronous filesystem read.
     pub fn from_listing(path: PathBuf, entries: Vec<Entry>) -> Self {
         let mut panel = Self {
             path: PathBuf::new(),
@@ -84,8 +79,6 @@ impl PanelState {
         panel
     }
 
-    /// Replaces the current listing with an already-fetched one, without
-    /// touching the filesystem — the async counterpart to `refresh`.
     pub fn replace_listing(&mut self, path: PathBuf, entries: Vec<Entry>) {
         self.path = path;
         self.all_entries = entries;
@@ -93,9 +86,6 @@ impl PanelState {
         self.recompute_rows();
     }
 
-    /// Rebuilds `rows` from `all_entries` by applying `show_hidden` and
-    /// `sort_spec` — pure state, touches neither the filesystem nor the
-    /// network, so toggling either is instant.
     fn recompute_rows(&mut self) {
         let mut visible: Vec<Entry> =
             self.all_entries.iter().filter(|entry| self.show_hidden || !entry.name.starts_with('.')).cloned().collect();
@@ -135,8 +125,6 @@ impl PanelState {
         self.sort_spec
     }
 
-    // Exercised by tests only for now; kept alongside `set_show_hidden`
-    // as normal accessor API rather than test-gated.
     #[allow(dead_code)]
     pub fn show_hidden(&self) -> bool {
         self.show_hidden
@@ -158,11 +146,6 @@ impl PanelState {
         self.cursor = next as usize;
     }
 
-    /// Where `Open` would navigate to: the parent directory for `..`, a
-    /// subdirectory's path for a directory entry, or `None` for a file (or
-    /// an empty listing). Pure — does not touch the filesystem or mutate
-    /// state, so both the synchronous local path and the async remote path
-    /// can use it to decide where to fetch next.
     pub fn target_path_for_open(&self) -> Option<PathBuf> {
         match self.rows.get(self.cursor) {
             Some(Row::Parent) => self.path.parent().map(Path::to_path_buf),
@@ -171,18 +154,12 @@ impl PanelState {
         }
     }
 
-    /// Navigates directly to `path` (used by bookmarks). Sets the cursor
-    /// to the top and refreshes, same as opening a directory normally.
     pub fn navigate_to(&mut self, path: PathBuf) -> Result<()> {
         self.path = path;
         self.cursor = 0;
         self.refresh()
     }
 
-    /// Enters the directory at the cursor (or the parent, for `..`).
-    /// A no-op if the cursor is on a file. Local-panel only — the remote
-    /// panel navigates by fetching a new listing asynchronously instead
-    /// (see `target_path_for_open`).
     pub fn open_selected(&mut self) -> Result<()> {
         if let Some(target) = self.target_path_for_open() {
             self.navigate_to(target)?;
@@ -190,7 +167,6 @@ impl PanelState {
         Ok(())
     }
 
-    /// Toggles selection of the entry at the cursor. Selecting `..` is a no-op.
     pub fn toggle_selection(&mut self) {
         if let Some(Row::Entry(entry)) = self.rows.get(self.cursor) {
             let path = entry.path.clone();
@@ -200,8 +176,6 @@ impl PanelState {
         }
     }
 
-    /// The name of the entry at the cursor, for pre-filling a rename dialog.
-    /// `None` for `..` or an empty listing.
     pub fn current_entry_name(&self) -> Option<&str> {
         match self.rows.get(self.cursor) {
             Some(Row::Entry(entry)) => Some(entry.name.as_str()),
@@ -209,8 +183,6 @@ impl PanelState {
         }
     }
 
-    /// The paths a delete/rename should act on: the selection if non-empty,
-    /// otherwise just the entry under the cursor.
     pub fn targets(&self) -> Vec<PathBuf> {
         if !self.selected.is_empty() {
             return self.selected.iter().cloned().collect();
@@ -222,8 +194,6 @@ impl PanelState {
         }
     }
 
-    /// Like `targets`, but returns the full entries (name, size, is_dir)
-    /// rather than just their paths — what a transfer needs to know.
     pub fn target_entries(&self) -> Vec<Entry> {
         if !self.selected.is_empty() {
             return self

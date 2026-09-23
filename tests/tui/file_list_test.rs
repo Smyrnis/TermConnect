@@ -9,6 +9,7 @@ use crate::tui::panels::{PanelState, Row};
 
 use super::*;
 
+const THREE_CHARS_SIX_COLUMNS: &str = "\u{65e5}\u{672c}\u{8a9e}";
 #[test]
 fn renders_entry_names() {
     let dir = tempfile::tempdir().unwrap();
@@ -60,23 +61,17 @@ fn format_permissions_renders_dashes_when_unknown() {
 
 #[test]
 fn truncate_name_measures_display_width_not_char_count() {
-    // Each CJK character is 2 terminal columns wide; a max_width of 6
-    // must cut after 2 characters (4 columns) plus a 1-column ellipsis,
-    // not after 5 characters as char-counting would allow.
     let name = "\u{65e5}\u{672c}\u{8a9e}\u{30d5}\u{30a1}\u{30a4}\u{30eb}";
 
     let truncated = truncate_name(name, 6);
 
-    // 2-column characters can't always fill the budget exactly (2 chars +
-    // ellipsis = 5, a 3rd char would overshoot to 7) — the invariant that
-    // matters is never exceeding max_width, not hitting it exactly.
     assert!(UnicodeWidthStr::width(truncated.as_str()) <= 6);
     assert!(truncated.ends_with('\u{2026}'));
 }
 
 #[test]
 fn truncate_name_leaves_a_wide_name_that_already_fits_untouched() {
-    let name = "\u{65e5}\u{672c}\u{8a9e}"; // 3 chars, 6 display columns
+    let name = THREE_CHARS_SIX_COLUMNS;
 
     assert_eq!(truncate_name(name, 10), name);
 }
@@ -84,7 +79,7 @@ fn truncate_name_leaves_a_wide_name_that_already_fits_untouched() {
 #[test]
 fn row_label_pads_a_wide_name_to_the_correct_display_width() {
     let entry = Entry {
-        name: "\u{65e5}\u{672c}\u{8a9e}".to_string(), // 3 chars, 6 display columns
+        name: THREE_CHARS_SIX_COLUMNS.to_string(),
         path: PathBuf::from("/tmp/entry"),
         is_dir: false,
         size: 0,
@@ -94,7 +89,6 @@ fn row_label_pads_a_wide_name_to_the_correct_display_width() {
 
     let label = row_label(&Row::Entry(entry), false, columns);
 
-    // marker + space (2 columns) + the name column padded to name_width.
     assert_eq!(UnicodeWidthStr::width(label.as_str()), 2 + columns.name_width);
 }
 
@@ -110,8 +104,8 @@ fn wide_panel_shows_size_and_permissions_columns() {
 
     let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
 
-    assert!(content.contains('5')); // the 5-byte size
-    assert!(content.contains('r') || content.contains('-')); // permissions column present
+    assert!(content.contains('5'));
+    assert!(content.contains('r') || content.contains('-'));
 }
 
 #[test]
@@ -127,5 +121,5 @@ fn narrow_panel_hides_size_and_permissions_columns() {
     let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
 
     assert!(content.contains("a.txt"));
-    assert!(!content.contains("120.6K")); // the size string must not appear
+    assert!(!content.contains("120.6K"));
 }

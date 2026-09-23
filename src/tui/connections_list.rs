@@ -7,11 +7,6 @@ use ratatui::widgets::{Block, Borders, List, ListItem, ListState};
 
 use crate::connection::ConnectionEntry;
 
-/// Renders the connections list, distinguishing "connected" (this host has
-/// a live session, `connected_names`) from "active" (that session is the
-/// one currently focused, `active_name`) — with multiple simultaneous
-/// sessions, a host can be connected without being the active one, and the
-/// user needs to be able to tell both states apart at a glance.
 pub fn render_connections_list(
     frame: &mut Frame, area: Rect, entries: &[ConnectionEntry], cursor: usize, connected_names: &HashSet<&str>,
     active_name: Option<&str>,

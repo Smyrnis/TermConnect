@@ -18,13 +18,6 @@ fn glob_match_supports_star_and_question_wildcards() {
 
 #[test]
 fn glob_match_does_not_blow_up_on_pathological_backtracking_patterns() {
-    // A naive recursive backtracking matcher is exponential on patterns
-    // like this against a name with no matching suffix (each `*` can
-    // either consume the next character or not, so there are ~2^30
-    // ways to fail before the final mismatch is found). This test exists
-    // to catch a regression to that implementation: a reintroduced
-    // exponential matcher blows well past the bound below, rather than
-    // just returning the (correct either way) `false`.
     let pattern = "*a".repeat(30) + "*b";
     let name = "a".repeat(40);
 
@@ -143,8 +136,6 @@ fn shell_quote_escapes_embedded_single_quotes() {
 
 #[test]
 fn shell_quote_preserves_other_shell_metacharacters_literally_inside_quotes() {
-    // Dangerous outside quotes, inert once wrapped — quoting the whole
-    // argument is the defense, not denying individual characters.
     assert_eq!(shell_quote("$(rm -rf /)"), "'$(rm -rf /)'");
 }
 

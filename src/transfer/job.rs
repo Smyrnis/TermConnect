@@ -15,9 +15,6 @@ pub enum JobStatus {
     Cancelled,
 }
 
-/// A single file transfer. `local_path` and `remote_path` are always both
-/// populated (source and destination), so which one is being read from and
-/// which is being written to is determined entirely by `direction`.
 #[derive(Debug, Clone)]
 pub struct TransferJob {
     pub id: u64,

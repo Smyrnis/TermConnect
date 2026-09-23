@@ -44,7 +44,6 @@ impl client::Handler for TermConnectHandler {
     }
 }
 
-/// Opens the SFTP subsystem on an already-authenticated SSH session.
 pub async fn open_sftp(handle: &Handle<TermConnectHandler>) -> Result<russh_sftp::client::SftpSession> {
     let channel = handle.channel_open_session().await?;
     channel.request_subsystem(true, "sftp").await?;
@@ -52,8 +51,6 @@ pub async fn open_sftp(handle: &Handle<TermConnectHandler>) -> Result<russh_sftp
     Ok(sftp)
 }
 
-/// Opens a TCP connection and completes the SSH handshake, including host
-/// key verification against `~/.ssh/known_hosts`. Does not authenticate.
 pub async fn connect(host: &str, port: u16) -> Result<Handle<TermConnectHandler>> {
     let config = Arc::new(client::Config::default());
     let handler = TermConnectHandler { host: host.to_string(), port };
@@ -61,11 +58,6 @@ pub async fn connect(host: &str, port: u16) -> Result<Handle<TermConnectHandler>
     client::connect(config, (host, port), handler).await
 }
 
-/// Tries non-interactive authentication methods in priority order: an
-/// `ssh-agent`, then the entry's identity file, then a password saved on
-/// the profile. Returns `true` if authentication succeeded, `false` if
-/// nothing was available or accepted (in which case the caller should fall
-/// back to an interactive password prompt).
 pub async fn authenticate_non_interactive(
     handle: &mut Handle<TermConnectHandler>, entry: &ConnectionEntry,
 ) -> Result<bool> {
@@ -119,8 +111,6 @@ async fn authenticate_with_key_file(
     };
 
     if private_key.is_encrypted() {
-        // Passphrase-protected keys aren't prompted for yet; skip to the
-        // next method rather than hanging or failing hard.
         return Ok(false);
     }
 
@@ -132,8 +122,6 @@ async fn authenticate_with_key_file(
     }
 }
 
-/// Password authentication, used as the interactive fallback once
-/// non-interactive methods are exhausted.
 pub async fn authenticate_password(
     handle: &mut Handle<TermConnectHandler>, username: &str, password: &str,
 ) -> Result<bool> {
@@ -143,9 +131,6 @@ pub async fn authenticate_password(
     }
 }
 
-/// Adapts an agent connection to russh's [`Signer`] trait, so the agent can
-/// sign an authentication challenge without the private key ever leaving
-/// it.
 struct AgentSigner<'a>(&'a mut AgentClient<tokio::net::UnixStream>);
 
 impl Signer for AgentSigner<'_> {

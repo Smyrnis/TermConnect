@@ -43,9 +43,6 @@ fn entry(name: &str) -> ConnectionEntry {
     }
 }
 
-/// Renders into rows of plain text (one `String` per terminal row) so
-/// assertions can check which marker appears on which entry's line,
-/// rather than just "somewhere in the whole buffer".
 fn render_rows(entries: &[ConnectionEntry], connected: &HashSet<&str>, active: Option<&str>) -> Vec<String> {
     let width = 60;
     let backend = TestBackend::new(width, 8);
@@ -66,11 +63,8 @@ fn multiple_connected_sessions_all_show_as_connected() {
     let rows = render_rows(&entries, &connected, Some("a"));
     let full_text = rows.join("\n");
 
-    // "a" is connected AND active: the "*" marker.
     assert!(full_text.contains("* a ("));
-    // "b" is connected but not active: the "+" marker.
     assert!(full_text.contains("+ b ("));
-    // "c" is neither connected nor active: no marker.
     assert!(full_text.contains("  c ("));
     assert!(!full_text.contains("* c ("));
     assert!(!full_text.contains("+ c ("));

@@ -1,11 +1,6 @@
 use super::*;
 
 impl App {
-    /// Copies the focused panel's selection (or the entry under the
-    /// cursor) to the other panel's current directory — upload if LOCAL is
-    /// focused, download if REMOTE is focused. Direction and source/target
-    /// panel follow the roadmap's rule: "determined by the active/source
-    /// panel."
     pub(super) fn start_copy(&mut self) {
         if self.screen != Screen::Files {
             return;
@@ -181,12 +176,6 @@ impl App {
             TransferEvent::PlanReady { batch_id, session_id, direction, plan } => {
                 self.clear_planning(batch_id);
 
-                // Planning is async, so the session can disconnect while it
-                // was running. Enqueueing anyway would let every file fail
-                // one at a time through maybe_start_next_transfer's own
-                // "session disconnected" path, each pushing its own
-                // non-expiring Error notification. Fail fast with one
-                // instead, and leave the queue untouched.
                 if !self.session_resources.contains_key(&session_id) {
                     self.notifications.push(Severity::Error, "Copy failed: session disconnected");
                     return;
@@ -206,22 +195,10 @@ impl App {
         }
     }
 
-    /// The part of `PlanReady` handling that runs once the session's still
-    /// known to be present: enqueues every planned file under `batch_id`
-    /// and warns once about any skipped symlinks. Split out from the event
-    /// arm above so it stays unit-testable without a live `SftpSession` —
-    /// the session-presence guard's own "session present" branch needs one
-    /// to exercise, which no unit test in this codebase can construct, but
-    /// this half has no such dependency.
     fn apply_plan_ready(
         &mut self, batch_id: u64, session_id: u64, direction: Direction, plan: transfer::plan::DirectoryPlan,
     ) {
         if plan.files.is_empty() {
-            // Planning may still have created the destination directory
-            // (e.g. an empty source directory) even though nothing got
-            // enqueued — without this, no job ever runs to trigger the
-            // usual per-job refresh, so the new directory stays invisible
-            // until a manual Ctrl+R.
             self.refresh_destination_panel(session_id, direction);
         }
 
@@ -247,12 +224,6 @@ impl App {
         self.planning.retain(|scan| scan.batch_id != batch_id);
     }
 
-    /// Refreshes whichever panel just received a file, so the new listing
-    /// is visible without a manual `Ctrl+R`. For a job that's part of a
-    /// batch, this only actually refreshes once nothing else from the same
-    /// batch is still queued to run next — refreshing after every file in
-    /// a large directory copy would otherwise issue a full remote listing
-    /// (and churn the panel's cursor/selection) after every single file.
     fn refresh_transfer_destination(&mut self, id: u64) {
         let Some(job) = self.transfers.get(id) else {
             return;
@@ -274,11 +245,6 @@ impl App {
         self.refresh_destination_panel(session_id, direction);
     }
 
-    /// Does the actual panel refresh for `session_id`/`direction` — shared
-    /// by `refresh_transfer_destination` (per-job, batch-aware) and
-    /// `apply_transfer_event`'s `PlanReady` zero-file case (nothing ever
-    /// gets enqueued for an empty directory, so the per-job path above
-    /// never runs).
     fn refresh_destination_panel(&mut self, session_id: u64, direction: Direction) {
         match direction {
             Direction::Upload => {

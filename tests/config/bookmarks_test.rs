@@ -55,8 +55,6 @@ fn save_to_leaves_the_original_file_untouched_if_the_write_fails() {
     original.add(sample());
     save_to(&path, &original).unwrap();
 
-    // Read-only directory: creating a new temp file inside it fails,
-    // simulating a crash/disk-full partway through a write.
     use std::os::unix::fs::PermissionsExt;
     let mut perms = fs::metadata(dir.path()).unwrap().permissions();
     perms.set_mode(0o500);

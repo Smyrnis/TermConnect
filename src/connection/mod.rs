@@ -8,9 +8,6 @@ use anyhow::Result;
 
 pub use profile::{ConnectionEntry, ConnectionSource};
 
-/// The connections available to dial: saved profiles first, then any
-/// `~/.ssh/config` hosts not already saved as a profile — so the same host
-/// alias never appears twice, and a saved profile always wins.
 pub fn list_all() -> Result<Vec<ConnectionEntry>> {
     let profiles = store::load()?;
     let known_names: std::collections::HashSet<String> = profiles.iter().map(|profile| profile.name.clone()).collect();

@@ -27,10 +27,6 @@ pub fn render_file_list(frame: &mut Frame, area: Rect, panel: &PanelState, is_ac
     frame.render_stateful_widget(list, area, &mut state);
 }
 
-/// Which columns fit in `area.width`, and how wide the flexible name
-/// column gets once the fixed-width ones are accounted for. Permissions
-/// drops first (below 40 columns), then size (below 28); name is never
-/// dropped.
 #[derive(Debug, Clone, Copy)]
 struct Columns {
     name_width: usize,
@@ -38,6 +34,8 @@ struct Columns {
     show_permissions: bool,
 }
 
+const SELECTION_MARKER_WIDTH: usize = 2;
+const COLUMN_GAP: usize = 1;
 const SIZE_WIDTH: usize = 8;
 const PERMISSIONS_WIDTH: usize = 9;
 
@@ -47,12 +45,12 @@ impl Columns {
         let show_permissions = width >= 40;
         let show_size = width >= 28;
 
-        let mut overhead = 2; // selection marker + one space
+        let mut overhead = SELECTION_MARKER_WIDTH;
         if show_size {
-            overhead += 1 + SIZE_WIDTH;
+            overhead += COLUMN_GAP + SIZE_WIDTH;
         }
         if show_permissions {
-            overhead += 1 + PERMISSIONS_WIDTH;
+            overhead += COLUMN_GAP + PERMISSIONS_WIDTH;
         }
 
         Columns { name_width: width.saturating_sub(overhead).max(4), show_size, show_permissions }
@@ -73,9 +71,6 @@ fn row_label(row: &Row, selected: bool, columns: Columns) -> String {
             let marker = if selected { '*' } else { ' ' };
             let suffix = if entry.is_dir { "/" } else { "" };
             let name = truncate_name(&format!("{}{suffix}", entry.name), columns.name_width);
-            // `{:<width$}` pads by char count, not terminal display width,
-            // so a CJK or emoji name would misalign every column after
-            // it — pad manually using the name's actual display width.
             let padding = " ".repeat(columns.name_width.saturating_sub(UnicodeWidthStr::width(name.as_str())));
 
             let mut label = format!("{marker} {name}{padding}");
@@ -91,9 +86,6 @@ fn row_label(row: &Row, selected: bool, columns: Columns) -> String {
     }
 }
 
-/// Truncates `name` to fit within `max_width` terminal columns (not
-/// characters — a CJK or emoji character occupies 2 columns), appending
-/// an ellipsis when it doesn't fit.
 fn truncate_name(name: &str, max_width: usize) -> String {
     if UnicodeWidthStr::width(name) <= max_width {
         return name.to_string();
@@ -115,9 +107,6 @@ fn truncate_name(name: &str, max_width: usize) -> String {
     format!("{head}\u{2026}")
 }
 
-/// Human-readable size: raw byte count under 1024, then one decimal place
-/// per unit above that (`4.2K`, `1.3M`, …). Directories show an em dash —
-/// their reported "size" isn't meaningful to a user.
 pub fn format_size(size: u64, is_dir: bool) -> String {
     if is_dir {
         return "\u{2014}".to_string();
@@ -136,9 +125,6 @@ pub fn format_size(size: u64, is_dir: bool) -> String {
     format!("{value:.1}{}", UNITS[unit])
 }
 
-/// Renders the low 9 bits of a Unix mode as `rwxr-xr-x`. `None` (mode
-/// unknown) renders as nine dashes rather than panicking or omitting the
-/// column, so the layout stays stable.
 pub fn format_permissions(mode: Option<u32>) -> String {
     let Some(mode) = mode else {
         return "-".repeat(9);

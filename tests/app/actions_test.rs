@@ -163,14 +163,6 @@ fn delete_on_the_connections_screen_disconnects_the_selected_session() {
 
     app.apply_action(Action::Delete);
 
-    // The session (and any resources held for it) are gone — this is
-    // the only way a connected session can ever be closed, since
-    // `Sessions`/`SessionResources` can't be constructed with a live
-    // handle in a unit test (see `SessionResources`'s doc comment), so
-    // `session_resources` itself starts and stays empty here; the bug
-    // this guards against is `Action::Delete` never reaching
-    // `disconnect_selected` at all (it was intercepted earlier by the
-    // mkdir/delete-dialog arm regardless of screen).
     assert!(app.sessions.is_empty());
     assert!(app.session_resources.is_empty());
 }

@@ -42,7 +42,7 @@ fn down_and_up_move_the_selection_within_bounds() {
 
     view.handle_key(key(KeyCode::Down));
     assert_eq!(view.selected, 1);
-    view.handle_key(key(KeyCode::Down)); // clamps at the last result
+    view.handle_key(key(KeyCode::Down));
     assert_eq!(view.selected, 1);
     view.handle_key(key(KeyCode::Up));
     assert_eq!(view.selected, 0);

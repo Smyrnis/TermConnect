@@ -3,9 +3,6 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-/// One `Host` block parsed from `~/.ssh/config`. Only the directives
-/// TermConnect needs to dial a connection are extracted; everything else
-/// (`ProxyJump`, `Match`, `Include`, ...) is intentionally ignored for now.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SshConfigHost {
     pub name: String,
@@ -19,8 +16,6 @@ pub fn default_path() -> Option<PathBuf> {
     std::env::var("HOME").ok().map(|home| PathBuf::from(home).join(".ssh").join("config"))
 }
 
-/// Reads and parses `~/.ssh/config`. A missing file is not an error — it
-/// simply means there is nothing to merge in.
 pub fn load() -> Result<Vec<SshConfigHost>> {
     let Some(path) = default_path() else {
         return Ok(Vec::new());
@@ -38,13 +33,8 @@ fn load_from(path: &Path) -> Result<Vec<SshConfigHost>> {
     Ok(parse(&contents))
 }
 
-/// Parses the contents of an SSH client config file into concrete
-/// (non-wildcard) `Host` entries.
 pub fn parse(contents: &str) -> Vec<SshConfigHost> {
     let mut hosts: Vec<SshConfigHost> = Vec::new();
-    // Index into `hosts` where the current `Host` line's aliases begin — a
-    // single `Host a b` line creates one entry per alias, and every
-    // directive until the next `Host` line applies to all of them.
     let mut group_start = 0;
 
     for line in contents.lines() {
@@ -95,8 +85,6 @@ pub fn parse(contents: &str) -> Vec<SshConfigHost> {
     hosts
 }
 
-/// Applies `f` to every host entry in the current `Host` group, i.e. those
-/// at index `group_start` and after.
 fn set_group(hosts: &mut [SshConfigHost], group_start: usize, f: impl Fn(&mut SshConfigHost)) {
     for host in hosts.iter_mut().skip(group_start) {
         f(host);

@@ -62,9 +62,6 @@ impl Action {
         }
     }
 
-    /// The inverse of `name`. Returns `None` for `"noop"` too — it's the
-    /// event loop's internal "nothing matched" sentinel, not a bindable
-    /// action a user should be able to target from `config.toml`.
     pub fn from_name(name: &str) -> Option<Action> {
         Some(match name {
             "quit" => Action::Quit,
@@ -113,9 +110,6 @@ impl std::fmt::Display for ParseKeyError {
 
 impl std::error::Error for ParseKeyError {}
 
-/// Parses a binding string like `"ctrl+h"` or `"F10"`, case-insensitively.
-/// Accepts any combination of `ctrl+`/`alt+`/`shift+` prefixes followed by
-/// a function key (`f1`-`f12`), a named key, or a single character.
 pub fn parse_key_spec(s: &str) -> Result<KeySpec, ParseKeyError> {
     let mut modifiers = KeyModifiers::NONE;
     let mut remainder = s.to_lowercase();
@@ -170,8 +164,6 @@ fn parse_key_code(s: &str) -> Result<KeyCode, ParseKeyError> {
     }
 }
 
-/// The inverse of `parse_key_spec`, for status-bar/help-overlay display —
-/// e.g. `"F10"`, `"Ctrl+R"`.
 pub fn format_key_spec(spec: KeySpec) -> String {
     let mut parts = Vec::new();
     if spec.modifiers.contains(KeyModifiers::CONTROL) {
@@ -243,12 +235,6 @@ impl KeyBindings {
         Self(map)
     }
 
-    /// Builds bindings from the defaults, replacing one entry per valid
-    /// `[keys]` line. Never fails: an unknown action name, an unparseable
-    /// key string, or a key that collides with another action's binding
-    /// each produce one warning string and otherwise leave the default (or
-    /// prior override) in place, so `App` can surface them as startup
-    /// notifications without blocking.
     pub fn from_overrides(overrides: &HashMap<String, String>) -> (Self, Vec<String>) {
         let mut bindings = Self::defaults();
         let mut warnings = Vec::new();
@@ -274,10 +260,6 @@ impl KeyBindings {
                 ));
             }
 
-            // Ensure at most one action ever maps to `spec`: drop any other
-            // action currently bound to the same key before inserting the
-            // override, so `map_key` can't land on a nondeterministic choice
-            // between two actions sharing an identical `KeySpec`.
             bindings.0.retain(|existing_action, existing_spec| *existing_action == action || *existing_spec != spec);
             bindings.0.insert(action, spec);
         }
@@ -290,15 +272,11 @@ impl KeyBindings {
         self.0.iter().find(|(_, bound)| **bound == spec).map(|(action, _)| *action).unwrap_or(Action::Noop)
     }
 
-    /// The key currently bound to `action`, for the help overlay (Task 16)
-    /// and the status-bar hint text.
     pub fn key_for(&self, action: Action) -> Option<KeySpec> {
         self.0.get(&action).copied()
     }
 }
 
-/// Every bindable action, in the order the `F1` help overlay lists them.
-/// Excludes `Noop` — the "nothing matched" sentinel isn't bindable.
 pub const ALL_ACTIONS: &[Action] = &[
     Action::Quit,
     Action::SwitchPanel,

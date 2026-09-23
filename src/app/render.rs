@@ -78,9 +78,6 @@ impl App {
         }
     }
 
-    /// A one-line strip of session host names, the active one marked with
-    /// `>` — plain text rather than a styled tab widget, matching the rest
-    /// of the app's low-frills rendering.
     fn render_session_tabs(&self, frame: &mut Frame, area: Rect) {
         let active_id = self.sessions.active_id();
         let labels: Vec<String> = self
@@ -171,8 +168,6 @@ fn notification_style(severity: Severity) -> Style {
     }
 }
 
-/// Builds the key-hint line from the live bindings, so a remapped action
-/// shows its new key instead of a hardcoded default.
 fn build_hint_text(bindings: &input::KeyBindings) -> String {
     let entries = [(Action::Help, "Help"), (Action::OpenConnections, "Connections"), (Action::Quit, "Quit")];
 

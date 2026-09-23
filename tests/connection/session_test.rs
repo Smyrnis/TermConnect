@@ -42,7 +42,7 @@ fn cycle_advances_through_sessions_and_wraps() {
     let mut sessions = Sessions::new();
     let a = sessions.insert(entry("a"), panel());
     let b = sessions.insert(entry("b"), panel());
-    assert_eq!(sessions.active().unwrap().id, b); // insert activates the newest
+    assert_eq!(sessions.active().unwrap().id, b);
 
     sessions.cycle();
     assert_eq!(sessions.active().unwrap().id, a);
@@ -53,11 +53,11 @@ fn cycle_advances_through_sessions_and_wraps() {
 #[test]
 fn cycle_is_a_no_op_with_zero_or_one_sessions() {
     let mut sessions = Sessions::new();
-    sessions.cycle(); // zero sessions
+    sessions.cycle();
     assert!(sessions.active().is_none());
 
     sessions.insert(entry("a"), panel());
-    sessions.cycle(); // one session
+    sessions.cycle();
     assert_eq!(sessions.len(), 1);
 }
 
@@ -66,7 +66,7 @@ fn removing_the_active_session_activates_the_next_one() {
     let mut sessions = Sessions::new();
     let a = sessions.insert(entry("a"), panel());
     let b = sessions.insert(entry("b"), panel());
-    sessions.cycle(); // active is now `a`
+    sessions.cycle();
 
     let removed = sessions.remove(a).unwrap();
 
@@ -89,7 +89,7 @@ fn removing_the_last_session_leaves_nothing_active() {
 fn removing_an_inactive_session_keeps_the_active_one_unchanged() {
     let mut sessions = Sessions::new();
     let a = sessions.insert(entry("a"), panel());
-    let b = sessions.insert(entry("b"), panel()); // active
+    let b = sessions.insert(entry("b"), panel());
 
     sessions.remove(a);
 

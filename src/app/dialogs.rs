@@ -67,8 +67,6 @@ impl App {
             DialogOutcome::Cancelled => {
                 self.dialog = None;
                 if let Some(PendingAction::SubmitPassword) = self.pending_action.take() {
-                    // Dropping the sender signals cancellation to the
-                    // waiting connect task.
                     self.pending_password = None;
                     self.connection_status = ConnectionStatus::Disconnected;
                 }

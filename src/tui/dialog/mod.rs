@@ -12,9 +12,6 @@ pub use form::{FormDialog, FormField};
 pub use list::ListDialog;
 pub use text_input::TextInputDialog;
 
-/// Popup width sized to fit the longest line, clamped so a short confirm
-/// message doesn't get a needlessly wide box and a long one doesn't
-/// overflow a narrow terminal.
 fn content_width(lines: &[&str]) -> u16 {
     let longest = lines.iter().map(|line| line.chars().count()).max().unwrap_or(0);
     (longest as u16 + 4).clamp(20, 76)

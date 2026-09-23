@@ -56,10 +56,6 @@ impl App {
         self.dialog = Some(Dialog::List(ListDialog::new("Bookmarks", items).removable(true)));
     }
 
-    /// Navigates to a bookmark. A remote bookmark whose host has no active
-    /// session warns instead of navigating — the list itself doesn't grey
-    /// such entries out (`ListDialog` stays a plain string list), so this
-    /// check is the only guard.
     pub(super) fn navigate_to_bookmark(&mut self, index: usize) {
         let Some(bookmark) = self.bookmarks.get(index).cloned() else {
             return;
@@ -83,9 +79,6 @@ impl App {
         }
     }
 
-    /// Saves `self.bookmarks` to disk, or does nothing if there's no real
-    /// path to save to (`App::at`'s test construction) — mutations still
-    /// apply to the in-memory list either way.
     pub(super) fn save_bookmarks(&mut self) {
         if let Some(path) = self.bookmarks_path.clone() {
             let result = config::bookmarks::save_to(&path, &self.bookmarks);

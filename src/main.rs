@@ -1,9 +1,5 @@
 use anyhow::Result;
 
-// File permissions (connection/store.rs, config/bookmarks.rs) and the F4
-// terminal handoff (terminal.rs) both use std::os::unix APIs directly, so
-// this only builds on Unix-like platforms — fail early with a clear
-// message rather than a wall of missing-type errors on Windows.
 #[cfg(not(unix))]
 compile_error!("termconnect only supports Unix-like platforms (Linux/macOS)");
 
@@ -27,11 +23,6 @@ fn install_panic_hook() {
     }));
 }
 
-/// Sends trace output to a log file rather than the default stdout writer,
-/// which would print over the TUI's alternate screen the moment `RUST_LOG`
-/// is set. Falls back to discarding log output (rather than stdout) if the
-/// log file can't be opened, so a broken log path degrades quietly instead
-/// of corrupting the display.
 fn init_tracing() {
     let filter = tracing_subscriber::EnvFilter::from_default_env();
     match logging::open_writer() {

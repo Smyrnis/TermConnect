@@ -104,7 +104,7 @@ fn fail_queued_for_session_marks_only_that_sessions_queued_jobs() {
         10,
         None,
     );
-    let other = queue_with_one_job(&mut queue); // session_id 1 too, but...
+    let other = queue_with_one_job(&mut queue);
     queue.get_mut(other).unwrap().session_id = 2;
     let in_progress = queue.enqueue(
         1,
@@ -122,10 +122,7 @@ fn fail_queued_for_session_marks_only_that_sessions_queued_jobs() {
     assert_eq!(count, 2);
     assert_eq!(queue.get(a1).unwrap().status, JobStatus::Failed("session disconnected".to_string()));
     assert_eq!(queue.get(a2).unwrap().status, JobStatus::Failed("session disconnected".to_string()));
-    // Session 2's job is untouched.
     assert_eq!(queue.get(other).unwrap().status, JobStatus::Queued);
-    // The in-progress job for session 1 is left for the caller to
-    // cancel separately, not force-failed here.
     assert_eq!(queue.get(in_progress).unwrap().status, JobStatus::InProgress);
 }
 
@@ -135,7 +132,6 @@ fn batch_progress_aggregates_across_every_job_in_the_batch() {
     let batch_id = queue.start_batch();
     let first = queue_with_a_batch_job(&mut queue, batch_id, "a.txt", 100);
     let second = queue_with_a_batch_job(&mut queue, batch_id, "b.txt", 200);
-    // A job in a different batch must not be counted.
     let other_batch = queue.start_batch();
     queue_with_a_batch_job(&mut queue, other_batch, "c.txt", 999);
 

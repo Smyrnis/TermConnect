@@ -4,13 +4,6 @@ use std::process::{Command, ExitStatus};
 
 use crate::connection::ConnectionEntry;
 
-/// Builds the system `ssh` invocation for a connection, using explicit
-/// `-p`/`-i`/`user@host` arguments rather than relying on the connection's
-/// display name being a valid `~/.ssh/config` alias — it works the same
-/// whether the entry came from a saved profile or from parsed SSH config.
-/// Wraps the command with `sshpass` when a password is saved on the profile
-/// and `sshpass` is installed, so the terminal handoff doesn't prompt for
-/// it a second time; otherwise behaves exactly as a plain `ssh` call would.
 pub fn command_for(entry: &ConnectionEntry) -> Command {
     command_for_with(entry, find_sshpass())
 }
@@ -19,9 +12,6 @@ fn command_for_with(entry: &ConnectionEntry, sshpass: Option<PathBuf>) -> Comman
     let mut command = match (&entry.password, sshpass) {
         (Some(password), Some(sshpass_path)) => {
             let mut command = Command::new(sshpass_path);
-            // `-e` reads the password from the `SSHPASS` env var rather
-            // than a `-p <password>` CLI flag, so it never shows up in
-            // `ps`/`/proc/*/cmdline` output visible to other local users.
             command.arg("-e");
             command.env("SSHPASS", password);
             command.arg("ssh");
@@ -49,11 +39,6 @@ fn find_sshpass_in(path_var: &str) -> Option<PathBuf> {
     })
 }
 
-/// Runs the system `ssh` client interactively, blocking until it exits.
-/// Must be called with the TUI's alternate screen already left (see
-/// `tui::restore`) — this function only owns the `ssh` process itself, not
-/// the surrounding terminal lifecycle, which is `app`'s responsibility to
-/// keep `terminal/` from depending on `tui/`.
 pub fn run(entry: &ConnectionEntry) -> std::io::Result<ExitStatus> {
     command_for(entry).status()
 }

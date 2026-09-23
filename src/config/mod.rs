@@ -8,9 +8,6 @@ use anyhow::{Context, Result};
 
 pub use settings::Settings;
 
-/// A non-fatal problem found while loading configuration — surfaced as a
-/// `Warning`-severity notification at startup (Task 12) rather than
-/// blocking the app from running.
 pub struct StartupWarning(pub String);
 
 pub fn config_dir() -> Result<PathBuf> {
@@ -21,10 +18,6 @@ pub fn config_dir() -> Result<PathBuf> {
     Ok(PathBuf::from(home).join(".config").join("termconnect"))
 }
 
-/// Loads `config.toml`. A missing file is not an error — it just means no
-/// settings have been saved yet. A file that fails to parse, or that
-/// contains an unrecognized `[panel]` value, recovers to defaults for the
-/// broken part and reports one warning each; loading never blocks startup.
 pub fn load() -> Result<(Settings, Vec<StartupWarning>)> {
     load_from(&config_dir()?.join("config.toml"))
 }

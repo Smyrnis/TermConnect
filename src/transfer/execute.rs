@@ -9,8 +9,6 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use super::Direction;
 
 const CHUNK_SIZE: usize = 32 * 1024;
-/// How often progress is reported back, in bytes — frequent enough to feel
-/// live, infrequent enough not to flood the event channel on a fast link.
 const PROGRESS_STEP_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -19,9 +17,6 @@ pub enum TransferOutcome {
     Cancelled,
 }
 
-/// Runs one file transfer end to end, reporting cumulative bytes
-/// transferred via `on_progress` every [`PROGRESS_STEP_BYTES`] and
-/// checking `cancel` between chunks.
 pub async fn execute(
     direction: Direction, local_path: &Path, remote_path: &str, sftp: &SftpSession, cancel: &AtomicBool,
     on_progress: impl FnMut(u64),
@@ -32,8 +27,6 @@ pub async fn execute(
             let mut source = LocalFile::open(local_path).await?;
             let mut destination = sftp.create(&remote_part_path).await?;
             let result = copy_with_progress(&mut source, &mut destination, cancel, on_progress).await;
-            // Best-effort: a shutdown failure after a copy failure would
-            // otherwise mask the real error below.
             let _ = destination.shutdown().await;
             finalize_remote(&result, sftp, &remote_part_path, remote_path).await?;
             result
@@ -85,17 +78,12 @@ where
     Ok(TransferOutcome::Completed)
 }
 
-/// The path a download is written to while in progress, so a cancelled or
-/// failed transfer never leaves a half-written file at `path` itself.
 fn part_path(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
     name.push(".part");
     PathBuf::from(name)
 }
 
-/// Resolves a download's part file once its copy loop has finished:
-/// renamed to `final_path` on success, otherwise removed. A missing part
-/// file (e.g. it was never created) is not an error.
 async fn finalize_local(result: &Result<TransferOutcome>, part_path: &Path, final_path: &Path) -> Result<()> {
     match result {
         Ok(TransferOutcome::Completed) => {
@@ -110,11 +98,6 @@ async fn finalize_local(result: &Result<TransferOutcome>, part_path: &Path, fina
     Ok(())
 }
 
-/// The remote counterpart of `finalize_local`: renamed to `final_path` on
-/// success (overwriting an existing file there, e.g. a re-upload of an
-/// edited file — see `filesystem::remote::rename_overwriting`), otherwise
-/// removed via `sftp.remove_file` (best-effort — an already-gone part file
-/// is not an error).
 async fn finalize_remote(
     result: &Result<TransferOutcome>, sftp: &SftpSession, part_path: &str, final_path: &str,
 ) -> Result<()> {
