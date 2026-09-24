@@ -1,0 +1,19 @@
+[package]
+name = "termconnect-sftp"
+description = "SSH/SFTP protocol support for TermConnect"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+futures-util.workspace = true
+russh.workspace = true
+russh-sftp.workspace = true
+termconnect-vfs.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+async-trait.workspace = true

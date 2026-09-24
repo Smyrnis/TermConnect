@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, development]
   pull_request:
 
 jobs:
@@ -15,5 +15,36 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
-      - run: cargo clippy --tests -- -D warnings
-      - run: cargo test
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo test -p termconnect-core --no-default-features
+      - name: Dependency boundaries
+        run: |
+          forbid_dependency() {
+            if cargo tree "${@:3}" -p "$1" -e normal -i "$2" >/dev/null 2>&1; then
+              echo "$1 must not depend on $2"
+              exit 1
+            fi
+          }
+          forbid_workspace_crates() {
+            if cargo tree -p "$1" -e normal | grep -qE "$2"; then
+              echo "$1 depends on a workspace crate it must not use"
+              exit 1
+            fi
+          }
+          forbid_dependency termconnect-core ratatui
+          forbid_dependency termconnect-core crossterm
+          forbid_dependency termconnect-core russh --no-default-features
+          forbid_workspace_crates termconnect-vfs 'termconnect-(core|lfs|sftp|tui)'
+          forbid_workspace_crates termconnect-lfs 'termconnect-(core|sftp|tui)'
+          for manifest in protocols/*/Cargo.toml; do
+            crate=$(sed -n 's/^name = "\(.*\)"$/\1/p' "$manifest" | head -n 1)
+            if [ "$(cargo tree -p "$crate" -e normal | grep -oE 'termconnect-[a-z]+' | sort -u | grep -vxE "$crate|termconnect-vfs")" != "" ]; then
+              echo "$crate must depend on termconnect-vfs only"
+              exit 1
+            fi
+          done
+          if [ "$(cargo tree -p termconnect-tui -e normal --depth 1 | grep -c 'termconnect-')" != 2 ]; then
+            echo "termconnect-tui must depend on termconnect-core only"
+            exit 1
+          fi

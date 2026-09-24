@@ -36,6 +36,24 @@ instead of prompting for it again.
 **Platform:** Linux and macOS only — the app relies on Unix file
 permissions and process APIs throughout.
 
+## Project layout
+
+The repository is a Cargo workspace:
+
+- `termconnect-vfs` — the virtual filesystem contract every protocol
+  implements (`FileSystem`, `Protocol`, `Prompter`) and the shared file types.
+- `termconnect-lfs` — the local file system as a `FileSystem`.
+- `protocols/` — one crate per remote protocol, each depending only on
+  `termconnect-vfs`:
+  - `protocols/sftp` (`termconnect-sftp`) — SSH/SFTP: connecting,
+    authentication, host keys, `~/.ssh/config` discovery and the `ssh`
+    terminal hand-off.
+- `termconnect-core` — the UI-free engine: connections, listings, transfers,
+  search, profiles, bookmarks and settings. A frontend drives it by sending
+  commands and receiving events.
+- `termconnect-tui` — the terminal interface, built as the `termconnect`
+  binary.
+
 ## Keybindings
 
 | Key | Action |
@@ -71,7 +89,9 @@ actual configured bindings rather than this table.
 Settings, saved connections, and bookmarks live under
 `$XDG_CONFIG_HOME/termconnect` (or `~/.config/termconnect` if unset):
 
-- `config.toml` — panel and key-binding settings.
+- `config.toml` — panel, transfer and key-binding settings. See
+  [`config/config.example.toml`](config/config.example.toml) for every
+  option with its default.
 - `connections.toml` — saved connection profiles.
 - `bookmarks.toml` — saved bookmarks.
 

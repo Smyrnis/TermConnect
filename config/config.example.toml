@@ -1,0 +1,49 @@
+# TermConnect settings.
+# Copy this file to ~/.config/termconnect/config.toml
+# (or $XDG_CONFIG_HOME/termconnect/config.toml). Every value below is the default.
+
+[panel]
+# Show dotfiles when a folder is opened.
+show_hidden = false
+# "name" or "size"
+sort_key = "name"
+# "ascending" or "descending"
+sort_order = "ascending"
+
+[transfers]
+# How many files are copied at the same time, from 1 to 16.
+max_parallel = 4
+# What to do when a file already exists at the destination:
+# "ask", "overwrite", "skip" or "rename".
+on_conflict = "ask"
+
+# Key bindings. A key is written as a name ("f5", "tab", "enter", "esc",
+# "space", "up", "down", "left", "right", "home", "end", "backspace",
+# "delete" or a single character), optionally prefixed with "ctrl+", "alt+"
+# or "shift+". Leave an action out to keep its default.
+[keys]
+quit = "f10"
+switch_panel = "tab"
+up = "up"
+down = "down"
+open = "enter"
+toggle_select = "space"
+rename = "f2"
+open_terminal = "f4"
+copy = "f5"
+add_connection = "f6"
+mkdir = "f7"
+delete = "f8"
+open_connections = "f9"
+delete_connection = "delete"
+back = "esc"
+refresh = "ctrl+r"
+cancel_transfer = "ctrl+c"
+toggle_hidden = "ctrl+h"
+cycle_sort = "ctrl+s"
+bookmark_here = "ctrl+d"
+open_bookmarks = "ctrl+b"
+open_search = "ctrl+f"
+open_transfers = "ctrl+t"
+cycle_session = "ctrl+n"
+help = "f1"

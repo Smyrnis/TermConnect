@@ -1,0 +1,26 @@
+[package]
+name = "termconnect-tui"
+description = "A terminal file manager for browsing local files alongside SSH/SFTP connections"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "termconnect"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+termconnect-core.workspace = true
+crossterm.workspace = true
+futures-util.workspace = true
+ratatui.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+unicode-width.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
