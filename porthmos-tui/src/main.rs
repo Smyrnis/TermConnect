@@ -41,6 +41,7 @@ fn init_tracing(log_file: Option<&std::path::Path>) {
 fn start_app(
     env: Environment, paths: Paths,
 ) -> Result<(App, tokio::sync::mpsc::UnboundedReceiver<porthmos_core::Event>)> {
+    paths.migrate_legacy_config();
     let (settings, config_warnings) = config::load(&paths)?;
     let (key_bindings, key_warnings) = input::KeyBindings::from_frontend(&settings.frontend);
     let panel = settings.panel.clone();

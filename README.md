@@ -95,6 +95,10 @@ Settings, saved connections, and bookmarks live under
 - `connections.toml` — saved connection profiles.
 - `bookmarks.toml` — saved bookmarks.
 
+If you used this app under its old name, TermConnect, your old
+`termconnect` config folder is moved to the new location on first start,
+unless a `porthmos` folder already exists.
+
 Logs go to `$XDG_STATE_HOME/porthmos/porthmos.log` (or
 `~/.local/state/porthmos/porthmos.log`); set `RUST_LOG` to control
 verbosity.

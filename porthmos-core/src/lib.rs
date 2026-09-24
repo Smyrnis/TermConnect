@@ -11,7 +11,7 @@ pub mod transfer;
 
 pub use engine::{Command, Event, Location, RequestId, SessionId};
 pub use error::{Severity, connect_failure_message, user_message};
-pub use paths::Paths;
+pub use paths::{ConfigMigration, Paths};
 pub use porthmos_vfs::{
     Answer, DirItem, Entry, Environment, ErrorKind, FileKind, FileSystem, Metadata, Protocol, ProtocolError, Question,
     SearchEvent, SearchQuery, ShellInvocation, Target, path_to_remote_string,

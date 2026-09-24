@@ -12,7 +12,16 @@ pub struct Paths {
     pub state_dir: PathBuf,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConfigMigration {
+    NothingToMigrate,
+    Moved { from: PathBuf, to: PathBuf },
+    KeptBoth { legacy: PathBuf },
+    Failed { from: PathBuf, error: String },
+}
+
 const APP_DIR: &str = "porthmos";
+const LEGACY_APP_DIR: &str = "termconnect";
 const MISSING_HOME: &str = "HOME environment variable is not set";
 
 fn resolve_dir(xdg: Option<OsString>, home: Option<&Path>, fallback: &[&str]) -> Result<PathBuf> {
@@ -53,6 +62,29 @@ impl Paths {
 
     pub fn log_file(&self) -> PathBuf {
         self.state_dir.join("porthmos.log")
+    }
+
+    pub fn migrate_legacy_config(&self) -> ConfigMigration {
+        let Some(legacy) = self.config_dir.parent().map(|parent| parent.join(LEGACY_APP_DIR)) else {
+            return ConfigMigration::NothingToMigrate;
+        };
+        if !legacy.is_dir() {
+            return ConfigMigration::NothingToMigrate;
+        }
+        if self.config_dir.exists() {
+            tracing::info!(legacy = %legacy.display(), "both the old and the new config folder exist; using the new one");
+            return ConfigMigration::KeptBoth { legacy };
+        }
+        match std::fs::rename(&legacy, &self.config_dir) {
+            Ok(()) => {
+                tracing::info!(from = %legacy.display(), to = %self.config_dir.display(), "moved the old config folder");
+                ConfigMigration::Moved { from: legacy, to: self.config_dir.clone() }
+            }
+            Err(err) => {
+                tracing::warn!(from = %legacy.display(), to = %self.config_dir.display(), "could not move the old config folder, starting with an empty config: {err}");
+                ConfigMigration::Failed { from: legacy, error: err.to_string() }
+            }
+        }
     }
 }
 
