@@ -3,3 +3,5 @@
 docs/
 .superpowers/
 Roadmap.md
+assets/icon/png/*
+!assets/icon/png/.gitkeep

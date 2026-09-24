@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/icon/porthmos.svg" alt="Porthmos icon" width="128" height="128">
+</p>
+
 # Porthmos
 
 A dual-panel file manager: local files in one panel, an SSH/SFTP connection
@@ -102,6 +106,20 @@ unless a `porthmos` folder already exists.
 Logs go to `$XDG_STATE_HOME/porthmos/porthmos.log` (or
 `~/.local/state/porthmos/porthmos.log`); set `RUST_LOG` to control
 verbosity.
+
+## Icon and brand colors
+
+The icon, `assets/icon/porthmos.svg`, shows a glowing blue strait flowing
+between dark, layered land. *Porthmos* (πορθμός) is Greek for "strait".
+
+Run `scripts/icons/generateIcons.sh` to export it as PNGs (16–1024 px) into
+`assets/icon/png/`; the PNGs are not committed. The script needs `rsvg-convert` or `resvg`, because the
+glow uses a blur filter.
+
+| Color | Hex |
+| --- | --- |
+| Land (dark charcoal) | `#101012` → `#2b2a30` |
+| Water (cyan to blue) | `#4fe3ff` → `#2fd8f8` → `#1aa6f2` → `#1668e6` |
 
 ## License
 
