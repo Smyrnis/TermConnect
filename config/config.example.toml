@@ -1,6 +1,6 @@
-# TermConnect settings.
-# Copy this file to ~/.config/termconnect/config.toml
-# (or $XDG_CONFIG_HOME/termconnect/config.toml). Every value below is the default.
+# Porthmos settings.
+# Copy this file to ~/.config/porthmos/config.toml
+# (or $XDG_CONFIG_HOME/porthmos/config.toml). Every value below is the default.
 
 [panel]
 # Show dotfiles when a folder is opened.

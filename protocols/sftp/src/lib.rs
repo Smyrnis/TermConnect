@@ -1,5 +1,5 @@
 #[cfg(not(unix))]
-compile_error!("termconnect only supports Unix-like platforms (Linux/macOS)");
+compile_error!("porthmos only supports Unix-like platforms (Linux/macOS)");
 
 mod client;
 mod fs;
@@ -10,20 +10,20 @@ pub mod ssh_config;
 use std::{collections::BTreeMap, path::Path, sync::Arc};
 
 use anyhow::anyhow;
-use russh::client::Handle;
-use termconnect_vfs::{
+use porthmos_vfs::{
     Answer, Environment, ErrorKind, FileSystem, Prompter, Protocol, ProtocolError, Question, ShellInvocation, Target,
     async_trait,
 };
+use russh::client::Handle;
 
-use crate::{client::TermConnectHandler, fs::SftpFs};
+use crate::{client::PorthmosHandler, fs::SftpFs};
 
 const DEFAULT_PORT: u16 = 22;
 const FALLBACK_USERNAME: &str = "root";
 
 pub struct Sftp;
 
-async fn start_sftp(handle: Handle<TermConnectHandler>) -> Result<Arc<dyn FileSystem>, ProtocolError> {
+async fn start_sftp(handle: Handle<PorthmosHandler>) -> Result<Arc<dyn FileSystem>, ProtocolError> {
     let sftp = client::open_sftp(&handle).await.map_err(|err| ProtocolError::new(ErrorKind::SessionStart, err))?;
     Ok(Arc::new(SftpFs::new(Arc::new(handle), Arc::new(sftp))))
 }

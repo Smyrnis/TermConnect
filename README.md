@@ -1,8 +1,8 @@
-# TermConnect
+# Porthmos
 
-A terminal file manager: local files in one panel, an SSH/SFTP connection in
-the other, with saved connection profiles, bookmarks, search, and background
-file transfers between the two.
+A dual-panel file manager: local files in one panel, an SSH/SFTP connection
+in the other, with saved connection profiles, bookmarks, search, and background
+file transfers between the two. It currently runs in the terminal.
 
 ## Features
 
@@ -27,7 +27,7 @@ Requires a Rust toolchain supporting the 2024 edition (stable is fine).
 cargo build --release
 ```
 
-The binary is written to `target/release/termconnect`.
+The binary is written to `target/release/porthmos`.
 
 Optional: install [`sshpass`](https://linux.die.net/man/1/sshpass) if you
 want the F4 terminal handoff to use a saved profile password automatically,
@@ -40,18 +40,18 @@ permissions and process APIs throughout.
 
 The repository is a Cargo workspace:
 
-- `termconnect-vfs` — the virtual filesystem contract every protocol
+- `porthmos-vfs` — the virtual filesystem contract every protocol
   implements (`FileSystem`, `Protocol`, `Prompter`) and the shared file types.
-- `termconnect-lfs` — the local file system as a `FileSystem`.
+- `porthmos-lfs` — the local file system as a `FileSystem`.
 - `protocols/` — one crate per remote protocol, each depending only on
-  `termconnect-vfs`:
-  - `protocols/sftp` (`termconnect-sftp`) — SSH/SFTP: connecting,
+  `porthmos-vfs`:
+  - `protocols/sftp` (`porthmos-sftp`) — SSH/SFTP: connecting,
     authentication, host keys, `~/.ssh/config` discovery and the `ssh`
     terminal hand-off.
-- `termconnect-core` — the UI-free engine: connections, listings, transfers,
+- `porthmos-core` — the UI-free engine: connections, listings, transfers,
   search, profiles, bookmarks and settings. A frontend drives it by sending
   commands and receiving events.
-- `termconnect-tui` — the terminal interface, built as the `termconnect`
+- `porthmos-tui` — the terminal interface, built as the `porthmos`
   binary.
 
 ## Keybindings
@@ -87,7 +87,7 @@ actual configured bindings rather than this table.
 ## Configuration
 
 Settings, saved connections, and bookmarks live under
-`$XDG_CONFIG_HOME/termconnect` (or `~/.config/termconnect` if unset):
+`$XDG_CONFIG_HOME/porthmos` (or `~/.config/porthmos` if unset):
 
 - `config.toml` — panel, transfer and key-binding settings. See
   [`config/config.example.toml`](config/config.example.toml) for every
@@ -95,8 +95,8 @@ Settings, saved connections, and bookmarks live under
 - `connections.toml` — saved connection profiles.
 - `bookmarks.toml` — saved bookmarks.
 
-Logs go to `$XDG_STATE_HOME/termconnect/termconnect.log` (or
-`~/.local/state/termconnect/termconnect.log`); set `RUST_LOG` to control
+Logs go to `$XDG_STATE_HOME/porthmos/porthmos.log` (or
+`~/.local/state/porthmos/porthmos.log`); set `RUST_LOG` to control
 verbosity.
 
 ## License

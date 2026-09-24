@@ -16,18 +16,18 @@ const SFTP_MAX_CONCURRENT_READS: usize = 8;
 pub const SFTP_MAX_CONCURRENT_WRITES: usize = 16;
 pub const SFTP_MAX_WRITE_PACKET_LEN: u32 = 32 * 1024;
 
-pub struct TermConnectHandler {
+pub struct PorthmosHandler {
     host: String,
     port: u16,
 }
 
-impl client::Handler for TermConnectHandler {
+impl client::Handler for PorthmosHandler {
     type Error = anyhow::Error;
 
     async fn check_server_key(&mut self, server_public_key: &PublicKeyOrCertificate) -> Result<bool, Self::Error> {
         let PublicKeyOrCertificate::PublicKey { key, .. } = server_public_key else {
             return Err(anyhow!(
-                "the host key for {} is a certificate, which TermConnect does not yet support",
+                "the host key for {} is a certificate, which Porthmos does not yet support",
                 self.host
             ));
         };
@@ -50,7 +50,7 @@ impl client::Handler for TermConnectHandler {
     }
 }
 
-pub async fn open_sftp(handle: &Handle<TermConnectHandler>) -> Result<russh_sftp::client::SftpSession> {
+pub async fn open_sftp(handle: &Handle<PorthmosHandler>) -> Result<russh_sftp::client::SftpSession> {
     let channel = handle.channel_open_session().await?;
     channel.request_subsystem(true, "sftp").await?;
     let config = russh_sftp::client::Config {
@@ -64,15 +64,15 @@ pub async fn open_sftp(handle: &Handle<TermConnectHandler>) -> Result<russh_sftp
     Ok(sftp)
 }
 
-pub async fn connect(host: &str, port: u16) -> Result<Handle<TermConnectHandler>> {
+pub async fn connect(host: &str, port: u16) -> Result<Handle<PorthmosHandler>> {
     let config = Arc::new(client::Config::default());
-    let handler = TermConnectHandler { host: host.to_string(), port };
+    let handler = PorthmosHandler { host: host.to_string(), port };
 
     client::connect(config, (host, port), handler).await
 }
 
 pub async fn authenticate_non_interactive(
-    handle: &mut Handle<TermConnectHandler>, username: &str, identity_file: Option<&Path>, password: Option<&str>,
+    handle: &mut Handle<PorthmosHandler>, username: &str, identity_file: Option<&Path>, password: Option<&str>,
 ) -> Result<bool> {
     if authenticate_with_agent(handle, username).await? {
         return Ok(true);
@@ -93,7 +93,7 @@ pub async fn authenticate_non_interactive(
     Ok(false)
 }
 
-async fn authenticate_with_agent(handle: &mut Handle<TermConnectHandler>, username: &str) -> Result<bool> {
+async fn authenticate_with_agent(handle: &mut Handle<PorthmosHandler>, username: &str) -> Result<bool> {
     let Ok(mut agent) = AgentClient::connect_env().await else {
         return Ok(false);
     };
@@ -117,7 +117,7 @@ async fn authenticate_with_agent(handle: &mut Handle<TermConnectHandler>, userna
 }
 
 async fn authenticate_with_key_file(
-    handle: &mut Handle<TermConnectHandler>, username: &str, identity_file: &Path,
+    handle: &mut Handle<PorthmosHandler>, username: &str, identity_file: &Path,
 ) -> Result<bool> {
     let Ok(private_key) = PrivateKey::read_openssh_file(identity_file) else {
         return Ok(false);
@@ -136,7 +136,7 @@ async fn authenticate_with_key_file(
 }
 
 pub async fn authenticate_password(
-    handle: &mut Handle<TermConnectHandler>, username: &str, password: &str,
+    handle: &mut Handle<PorthmosHandler>, username: &str, password: &str,
 ) -> Result<bool> {
     match handle.authenticate_password(username, password).await? {
         AuthResult::Success => Ok(true),

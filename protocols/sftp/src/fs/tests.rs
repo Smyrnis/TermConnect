@@ -1,5 +1,5 @@
+use porthmos_vfs::{ErrorKind, FileKind};
 use russh_sftp::protocol::{FileAttributes, Status, StatusCode};
-use termconnect_vfs::{ErrorKind, FileKind};
 
 use super::*;
 

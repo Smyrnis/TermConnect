@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use termconnect_vfs::{Answer, Environment, ErrorKind, Prompter, Protocol, Question, Target};
+use porthmos_vfs::{Answer, Environment, ErrorKind, Prompter, Protocol, Question, Target};
 
 use super::*;
 

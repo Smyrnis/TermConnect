@@ -1938,6 +1938,74 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
 
 [[package]]
+name = "porthmos-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "futures-util",
+ "porthmos-lfs",
+ "porthmos-sftp",
+ "porthmos-vfs",
+ "serde",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tracing",
+]
+
+[[package]]
+name = "porthmos-lfs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "porthmos-vfs",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "porthmos-sftp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures-util",
+ "porthmos-vfs",
+ "russh",
+ "russh-sftp",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "porthmos-tui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "crossterm",
+ "futures-util",
+ "porthmos-core",
+ "ratatui",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "unicode-width",
+]
+
+[[package]]
+name = "porthmos-vfs"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "porthmos-vfs",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "powerfmt"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2758,74 +2826,6 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys",
-]
-
-[[package]]
-name = "termconnect-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "futures-util",
- "serde",
- "tempfile",
- "termconnect-lfs",
- "termconnect-sftp",
- "termconnect-vfs",
- "tokio",
- "toml",
- "tracing",
-]
-
-[[package]]
-name = "termconnect-lfs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "tempfile",
- "termconnect-vfs",
- "tokio",
-]
-
-[[package]]
-name = "termconnect-sftp"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "futures-util",
- "russh",
- "russh-sftp",
- "tempfile",
- "termconnect-vfs",
- "tokio",
-]
-
-[[package]]
-name = "termconnect-tui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "crossterm",
- "futures-util",
- "ratatui",
- "tempfile",
- "termconnect-core",
- "tokio",
- "toml",
- "tracing",
- "tracing-subscriber",
- "unicode-width",
-]
-
-[[package]]
-name = "termconnect-vfs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "tempfile",
- "termconnect-vfs",
- "tokio",
 ]
 
 [[package]]

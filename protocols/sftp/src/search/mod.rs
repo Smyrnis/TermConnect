@@ -10,19 +10,19 @@ use russh::{ChannelMsg, client::Handle};
 use russh_sftp::client::SftpSession;
 use tokio::sync::mpsc;
 
-use termconnect_vfs::Entry;
-pub use termconnect_vfs::SearchEvent;
-use termconnect_vfs::{SearchQuery, glob_match, join_remote, path_to_remote_string};
+use porthmos_vfs::Entry;
+pub use porthmos_vfs::SearchEvent;
+use porthmos_vfs::{SearchQuery, glob_match, join_remote, path_to_remote_string};
 
-use crate::client::TermConnectHandler;
+use crate::client::PorthmosHandler;
 
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
 }
 
 pub async fn search_remote(
-    handle: &Handle<TermConnectHandler>, sftp: &SftpSession, query: SearchQuery,
-    tx: mpsc::UnboundedSender<SearchEvent>, cancel: Arc<AtomicBool>,
+    handle: &Handle<PorthmosHandler>, sftp: &SftpSession, query: SearchQuery, tx: mpsc::UnboundedSender<SearchEvent>,
+    cancel: Arc<AtomicBool>,
 ) {
     let root = path_to_remote_string(&query.root);
     let SearchQuery { pattern, max_depth, max_results, .. } = query;
@@ -62,7 +62,7 @@ pub async fn search_remote(
 }
 
 async fn run_find(
-    handle: &Handle<TermConnectHandler>, root: &str, pattern: &str, max_depth: usize, cancel: &Arc<AtomicBool>,
+    handle: &Handle<PorthmosHandler>, root: &str, pattern: &str, max_depth: usize, cancel: &Arc<AtomicBool>,
 ) -> Option<Vec<String>> {
     let mut channel = handle.channel_open_session().await.ok()?;
     let command = format!("find {} -maxdepth {max_depth} -iname {}", shell_quote(root), shell_quote(pattern));

@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
 };
 
-use termconnect_vfs::{ShellInvocation, Target};
+use porthmos_vfs::{ShellInvocation, Target};
 
 pub fn invocation_for(target: &Target, sshpass: Option<PathBuf>) -> ShellInvocation {
     let (program, mut args, env) = match (&target.password, sshpass) {

@@ -1,4 +1,4 @@
-# TermConnect
+# Porthmos
 
 ## Commit messages
 

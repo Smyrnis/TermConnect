@@ -1,0 +1,16 @@
+[package]
+name = "porthmos-lfs"
+description = "The local file system for Porthmos"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+porthmos-vfs.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util", "rt"] }
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio.workspace = true
