@@ -53,6 +53,7 @@ enum PendingAction {
     AddBookmark,
     SubmitPassword { request_id: RequestId },
     TrustHostKey { request_id: RequestId },
+    TrustCertificate { request_id: RequestId },
     AddConnection,
     EditConnection { original: ConnectionEntry },
     DeleteConnection { name: String },
@@ -251,6 +252,16 @@ impl App {
                 );
                 self.dialog = Some(Dialog::Confirm(ConfirmDialog::new(message)));
                 self.pending_action = Some(PendingAction::TrustHostKey { request_id });
+            }
+            Question::TrustCertificate { name, host, port, fingerprint, subject, expires } => {
+                let message = format!(
+                    "{name} ({host}:{port}) presented a certificate that isn't trusted.\n\
+                     Subject: {subject}   Expires: {expires}\n\
+                     {fingerprint}\n\
+                     Trust it and remember it?"
+                );
+                self.dialog = Some(Dialog::Confirm(ConfirmDialog::new(message)));
+                self.pending_action = Some(PendingAction::TrustCertificate { request_id });
             }
         }
     }

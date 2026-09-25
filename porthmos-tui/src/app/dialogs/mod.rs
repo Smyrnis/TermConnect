@@ -98,8 +98,11 @@ impl App {
             DialogOutcome::Pending => {}
             DialogOutcome::Cancelled => {
                 self.dialog = None;
-                if let Some(PendingAction::SubmitPassword { request_id } | PendingAction::TrustHostKey { request_id }) =
-                    self.pending_action.take()
+                if let Some(
+                    PendingAction::SubmitPassword { request_id }
+                    | PendingAction::TrustHostKey { request_id }
+                    | PendingAction::TrustCertificate { request_id },
+                ) = self.pending_action.take()
                 {
                     self.core.send(Command::Answer { request_id, answer: None });
                     self.connection_status = ConnectionStatus::Disconnected;
@@ -112,7 +115,9 @@ impl App {
                     Some(PendingAction::DeleteConnection { name }) => {
                         self.core.send(Command::DeleteProfile { name });
                     }
-                    Some(PendingAction::TrustHostKey { request_id }) => {
+                    Some(
+                        PendingAction::TrustHostKey { request_id } | PendingAction::TrustCertificate { request_id },
+                    ) => {
                         self.core.send(Command::Answer { request_id, answer: Some(Answer::Confirmed) });
                     }
                     _ => {}
@@ -129,6 +134,7 @@ impl App {
                     Some(PendingAction::AddBookmark) => self.add_bookmark(value),
                     Some(PendingAction::Delete)
                     | Some(PendingAction::TrustHostKey { .. })
+                    | Some(PendingAction::TrustCertificate { .. })
                     | Some(PendingAction::AddConnection)
                     | Some(PendingAction::EditConnection { .. })
                     | Some(PendingAction::DeleteConnection { .. })

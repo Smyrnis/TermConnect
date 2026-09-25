@@ -526,3 +526,59 @@ const SECURITY_CHOICES: &[porthmos_core::Choice] = &[
     porthmos_core::Choice { value: "none", label: "None" },
     porthmos_core::Choice { value: "explicit", label: "Explicit TLS" },
 ];
+
+fn ask_to_trust_a_certificate(test: &mut TestApp) {
+    test.app.connection_status = ConnectionStatus::Connecting("nas".to_string());
+    test.app.apply_core_event(Event::Question {
+        request_id: 11,
+        question: Question::TrustCertificate {
+            name: "nas".to_string(),
+            host: "192.168.1.10".to_string(),
+            port: 21,
+            fingerprint: "SHA256:abc".to_string(),
+            subject: "CN=nas.local".to_string(),
+            expires: "2027-03-01".to_string(),
+        },
+    });
+}
+
+#[test]
+fn a_certificate_question_shows_subject_expiry_and_fingerprint_with_no_focused() {
+    let mut test = app();
+    ask_to_trust_a_certificate(&mut test);
+
+    match test.app.dialog {
+        Some(Dialog::Confirm(ref dialog)) => {
+            assert_eq!(
+                dialog.message,
+                "nas (192.168.1.10:21) presented a certificate that isn't trusted.\n\
+                 Subject: CN=nas.local   Expires: 2027-03-01\n\
+                 SHA256:abc\n\
+                 Trust it and remember it?"
+            );
+            assert_eq!(dialog.focus, ConfirmFocus::No);
+        }
+        _ => panic!("expected the certificate confirmation"),
+    }
+}
+
+#[test]
+fn confirming_the_certificate_trusts_it() {
+    let mut test = app();
+    ask_to_trust_a_certificate(&mut test);
+
+    test.app.apply_dialog_key(key(KeyCode::Char('y')));
+
+    assert_eq!(test.sent(), vec![Command::Answer { request_id: 11, answer: Some(Answer::Confirmed) }]);
+}
+
+#[test]
+fn declining_the_certificate_cancels_the_connection() {
+    let mut test = app();
+    ask_to_trust_a_certificate(&mut test);
+
+    test.app.apply_dialog_key(key(KeyCode::Esc));
+
+    assert_eq!(test.sent(), vec![Command::Answer { request_id: 11, answer: None }]);
+    assert_eq!(test.app.connection_status, ConnectionStatus::Disconnected);
+}
