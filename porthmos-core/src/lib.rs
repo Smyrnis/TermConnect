@@ -7,15 +7,18 @@ pub mod error;
 pub mod listing;
 pub mod paths;
 pub mod profiles;
+mod protocol_info;
 pub mod transfer;
 
 pub use engine::{Command, Event, Location, RequestId, SessionId};
 pub use error::{Severity, connect_failure_message, user_message};
 pub use paths::{ConfigMigration, Paths};
 pub use porthmos_vfs::{
-    Answer, DirItem, Entry, Environment, ErrorKind, FileKind, FileSystem, Metadata, Protocol, ProtocolError, Question,
-    SearchEvent, SearchQuery, ShellInvocation, Target, path_to_remote_string,
+    Answer, Choice, CommonField, ConnectionForm, DirItem, Entry, Environment, ErrorKind, FileKind, FileSystem,
+    Metadata, OptionField, OptionKind, PortField, Protocol, ProtocolError, Question, SearchEvent, SearchQuery,
+    ShellInvocation, Target, path_to_remote_string,
 };
+pub use protocol_info::ProtocolInfo;
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -38,6 +41,7 @@ pub fn builtin_protocols() -> Vec<Arc<dyn Protocol>> {
 #[derive(Clone)]
 pub struct CoreHandle {
     commands: UnboundedSender<Command>,
+    protocols: Arc<[ProtocolInfo]>,
 }
 
 impl CoreHandle {
@@ -45,9 +49,17 @@ impl CoreHandle {
         let _ = self.commands.send(command);
     }
 
+    pub fn protocols(&self) -> &[ProtocolInfo] {
+        &self.protocols
+    }
+
     pub fn detached() -> (CoreHandle, UnboundedReceiver<Command>) {
+        Self::detached_with(Vec::new())
+    }
+
+    pub fn detached_with(protocols: Vec<ProtocolInfo>) -> (CoreHandle, UnboundedReceiver<Command>) {
         let (commands, receiver) = unbounded_channel();
-        (CoreHandle { commands }, receiver)
+        (CoreHandle { commands, protocols: protocols.into() }, receiver)
     }
 }
 
@@ -98,9 +110,12 @@ impl CoreBuilder {
         let paths = self.paths.context("the core needs its configuration paths")?;
         let (bookmarks, bookmark_warnings) = config::bookmarks::load(&paths)?;
         let local_home = self.local_home.or_else(|| self.env.home.clone()).unwrap_or_else(|| PathBuf::from("/"));
+        let protocols = self.protocols.unwrap_or_else(builtin_protocols);
+        let infos: Arc<[ProtocolInfo]> =
+            protocols.iter().map(|protocol| ProtocolInfo::from_protocol(protocol.as_ref())).collect();
         let parts = EngineParts {
             paths,
-            protocols: self.protocols.unwrap_or_else(builtin_protocols),
+            protocols,
             local_fs: Arc::new(porthmos_lfs::LocalFs::new(local_home)),
             env: self.env,
             transfers: self.settings.transfers,
@@ -116,6 +131,6 @@ impl CoreBuilder {
         }
         engine.publish_bookmarks();
         tokio::spawn(engine.run(command_receiver, internal_receiver));
-        Ok((CoreHandle { commands }, event_receiver))
+        Ok((CoreHandle { commands, protocols: infos }, event_receiver))
     }
 }

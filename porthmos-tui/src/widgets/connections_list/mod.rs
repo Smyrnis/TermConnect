@@ -7,17 +7,18 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState},
 };
 
-use porthmos_core::profiles::ConnectionEntry;
+use porthmos_core::{ProtocolInfo, profiles::ConnectionEntry};
 
 pub fn render_connections_list(
     frame: &mut Frame, area: Rect, entries: &[ConnectionEntry], cursor: usize, connected_names: &HashSet<&str>,
-    active_name: Option<&str>,
+    active_name: Option<&str>, protocols: &[ProtocolInfo],
 ) {
     let block = Block::default().title("Connections").borders(Borders::ALL);
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
+    let column = entries.iter().map(|entry| protocol_label(entry, protocols).chars().count()).max().unwrap_or(0);
     let items: Vec<ListItem> = entries
         .iter()
         .map(|entry| {
@@ -30,7 +31,11 @@ pub fn render_connections_list(
             } else {
                 "  "
             };
-            ListItem::new(format!("{marker}{} ({}@{}:{})", entry.name, entry.username, entry.host, entry.port))
+            let protocol = protocol_label(entry, protocols);
+            ListItem::new(format!(
+                "{marker}{protocol:<column$} {} ({}@{}:{})",
+                entry.name, entry.username, entry.host, entry.port
+            ))
         })
         .collect();
 
@@ -42,6 +47,10 @@ pub fn render_connections_list(
     }
 
     frame.render_stateful_widget(list, inner, &mut state);
+}
+
+fn protocol_label<'a>(entry: &'a ConnectionEntry, protocols: &'a [ProtocolInfo]) -> &'a str {
+    protocols.iter().find(|info| info.id == entry.protocol).map_or(entry.protocol.as_str(), |info| info.display_name)
 }
 
 #[cfg(test)]

@@ -162,3 +162,22 @@ fn a_blank_remote_path_means_no_start_path() {
 fn a_profile_without_a_remote_path_has_no_start_path() {
     assert_eq!(entry_with_options(&[]).start_path(), None);
 }
+
+#[test]
+fn profile_and_entry_debug_show_option_keys_but_never_their_values() {
+    let profile = ConnectionProfile {
+        name: "s3".to_string(),
+        host: "h".to_string(),
+        protocol: "s3".to_string(),
+        port: None,
+        username: "u".to_string(),
+        password: None,
+        options: BTreeMap::from([("secret_key".to_string(), "s3cr3t".to_string())]),
+    };
+    let entry = ConnectionEntry::from_profile(profile.clone(), 443);
+
+    for printed in [format!("{profile:?}"), format!("{entry:?}")] {
+        assert!(printed.contains("secret_key"), "{printed}");
+        assert!(!printed.contains("s3cr3t"), "{printed}");
+    }
+}

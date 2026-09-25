@@ -38,7 +38,7 @@ impl std::fmt::Debug for ConnectionProfile {
             .field("port", &self.port)
             .field("username", &self.username)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
-            .field("options", &self.options)
+            .field("options", &self.options.keys().collect::<Vec<_>>())
             .finish()
     }
 }
@@ -70,7 +70,7 @@ impl std::fmt::Debug for ConnectionEntry {
             .field("port", &self.port)
             .field("username", &self.username)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
-            .field("options", &self.options)
+            .field("options", &self.options.keys().collect::<Vec<_>>())
             .field("source", &self.source)
             .finish()
     }

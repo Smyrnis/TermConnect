@@ -157,6 +157,7 @@ impl App {
                 }
                 _ => self.dialog = None,
             },
+            DialogOutcome::FormChoiceChanged { key } => self.form_choice_changed(key),
             DialogOutcome::Resolved { resolution, apply_to_rest } => {
                 self.dialog = None;
                 self.pending_action = None;

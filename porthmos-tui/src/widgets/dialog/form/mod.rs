@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     Frame,
@@ -7,24 +9,68 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldKind {
+    Text,
+    Masked,
+    Choice { choices: Vec<(String, String)>, selected: usize },
+}
+
 pub struct FormField {
-    pub label: &'static str,
+    pub key: &'static str,
+    pub label: String,
     pub value: String,
     pub cursor: usize,
-    pub masked: bool,
+    pub kind: FieldKind,
 }
 
 impl FormField {
-    pub fn new(label: &'static str, initial_value: impl Into<String>) -> Self {
+    pub fn text(key: &'static str, label: impl Into<String>, initial_value: impl Into<String>) -> Self {
         let value = initial_value.into();
         let cursor = value.chars().count();
-        Self { label, value, cursor, masked: false }
+        Self { key, label: label.into(), value, cursor, kind: FieldKind::Text }
     }
 
-    pub fn new_masked(label: &'static str, initial_value: impl Into<String>) -> Self {
-        let mut field = Self::new(label, initial_value);
-        field.masked = true;
-        field
+    pub fn masked(key: &'static str, label: impl Into<String>, initial_value: impl Into<String>) -> Self {
+        Self { kind: FieldKind::Masked, ..Self::text(key, label, initial_value) }
+    }
+
+    pub fn choice(
+        key: &'static str, label: impl Into<String>, choices: Vec<(String, String)>, selected_value: &str,
+    ) -> Self {
+        let selected = choices.iter().position(|(value, _)| value == selected_value).unwrap_or(0);
+        Self {
+            key,
+            label: label.into(),
+            value: String::new(),
+            cursor: 0,
+            kind: FieldKind::Choice { choices, selected },
+        }
+    }
+
+    pub fn submitted_value(&self) -> String {
+        match &self.kind {
+            FieldKind::Choice { choices, selected } => {
+                choices.get(*selected).map(|(value, _)| value.clone()).unwrap_or_default()
+            }
+            FieldKind::Text | FieldKind::Masked => self.value.clone(),
+        }
+    }
+
+    fn is_choice(&self) -> bool {
+        matches!(self.kind, FieldKind::Choice { .. })
+    }
+
+    fn shift_choice(&mut self, forward: bool) -> bool {
+        let FieldKind::Choice { choices, selected } = &mut self.kind else {
+            return false;
+        };
+        if choices.len() < 2 {
+            return false;
+        }
+        *selected =
+            if forward { (*selected + 1) % choices.len() } else { (*selected + choices.len() - 1) % choices.len() };
+        true
     }
 
     fn insert_char_at(&mut self, index: usize, ch: char) {
@@ -47,24 +93,52 @@ pub struct FormDialog {
     pub fields: Vec<FormField>,
     pub focused: usize,
     pub error: Option<String>,
+    pub remembered: BTreeMap<String, String>,
+    pub prefilled: BTreeMap<&'static str, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FormOutcome {
     Pending,
-    Submitted(Vec<String>),
+    Submitted(Vec<(&'static str, String)>),
+    ChoiceChanged { key: &'static str },
     Cancelled,
 }
 
 impl FormDialog {
     pub fn new(title: impl Into<String>, fields: Vec<FormField>) -> Self {
-        Self { title: title.into(), fields, focused: 0, error: None }
+        Self {
+            title: title.into(),
+            fields,
+            focused: 0,
+            error: None,
+            remembered: BTreeMap::new(),
+            prefilled: BTreeMap::new(),
+        }
+    }
+
+    pub fn value(&self, key: &str) -> Option<String> {
+        self.fields.iter().find(|field| field.key == key).map(FormField::submitted_value)
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> FormOutcome {
+        let on_choice = self.fields[self.focused].is_choice();
         match key.code {
             KeyCode::Esc => FormOutcome::Cancelled,
-            KeyCode::Enter => FormOutcome::Submitted(self.fields.iter().map(|f| f.value.clone()).collect()),
+            KeyCode::Enter => {
+                FormOutcome::Submitted(self.fields.iter().map(|field| (field.key, field.submitted_value())).collect())
+            }
+            KeyCode::Left | KeyCode::Right if on_choice => {
+                let field = &mut self.fields[self.focused];
+                if field.shift_choice(key.code == KeyCode::Right) {
+                    FormOutcome::ChoiceChanged { key: field.key }
+                } else {
+                    FormOutcome::Pending
+                }
+            }
+            KeyCode::Home | KeyCode::End | KeyCode::Backspace | KeyCode::Delete | KeyCode::Char(_) if on_choice => {
+                FormOutcome::Pending
+            }
             KeyCode::Tab => {
                 self.focused = (self.focused + 1) % self.fields.len();
                 FormOutcome::Pending
@@ -128,13 +202,12 @@ pub fn render_form(frame: &mut Frame, area: Rect, dialog: &FormDialog) {
         })
         .collect();
 
-    let mut width_lines: Vec<&str> = vec!["Protocol: SFTP"];
-    width_lines.extend(field_display_lines.iter().map(String::as_str));
+    let mut width_lines: Vec<&str> = field_display_lines.iter().map(String::as_str).collect();
     if let Some(error) = &dialog.error {
         width_lines.push(error.as_str());
     }
     let width = super::content_width(&width_lines);
-    let height = 1 + dialog.fields.len() as u16 + if dialog.error.is_some() { 1 } else { 0 } + 2;
+    let height = dialog.fields.len() as u16 + if dialog.error.is_some() { 1 } else { 0 } + 2;
 
     let popup = centered_popup(area, width, height);
 
@@ -143,8 +216,8 @@ pub fn render_form(frame: &mut Frame, area: Rect, dialog: &FormDialog) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow));
 
-    let mut lines: Vec<Line> = vec![Line::from("Protocol: SFTP")];
-    lines.extend(dialog.fields.iter().enumerate().map(|(i, field)| field_line(field, i == dialog.focused)));
+    let mut lines: Vec<Line> =
+        dialog.fields.iter().enumerate().map(|(i, field)| field_line(field, i == dialog.focused)).collect();
     if let Some(error) = &dialog.error {
         lines.push(Line::styled(error.as_str(), Style::default().fg(Color::Red)));
     }
@@ -156,14 +229,22 @@ pub fn render_form(frame: &mut Frame, area: Rect, dialog: &FormDialog) {
 }
 
 fn displayed_value(field: &FormField) -> String {
-    if field.masked { "*".repeat(field.value.chars().count()) } else { field.value.clone() }
+    match &field.kind {
+        FieldKind::Text => field.value.clone(),
+        FieldKind::Masked => "*".repeat(field.value.chars().count()),
+        FieldKind::Choice { choices, selected } => {
+            format!("\u{25c0} {} \u{25b6}", choices.get(*selected).map(|(_, label)| label.as_str()).unwrap_or(""))
+        }
+    }
 }
 
 fn field_line(field: &FormField, focused: bool) -> Line<'static> {
     let displayed = displayed_value(field);
     let mut spans = vec![Span::raw(format!("{}: ", field.label))];
 
-    if focused {
+    if focused && field.is_choice() {
+        spans.push(Span::styled(displayed, Style::default().add_modifier(Modifier::REVERSED)));
+    } else if focused {
         let chars: Vec<char> = displayed.chars().collect();
         for (i, ch) in chars.iter().enumerate() {
             let style =

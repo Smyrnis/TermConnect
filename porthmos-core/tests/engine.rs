@@ -116,3 +116,18 @@ async fn a_protocol_without_a_shell_is_announced_on_connect() {
 
     assert!(!shell_available);
 }
+
+#[tokio::test]
+async fn the_handle_lists_registered_protocols_in_order() {
+    let config = tempfile::tempdir().unwrap();
+    let (core, _events) = porthmos_core::Core::builder()
+        .paths(porthmos_core::Paths::in_dir(config.path()))
+        .protocol(std::sync::Arc::new(FakeProtocol::new(porthmos_vfs::testing::FakeFs::new()).with_id("one")))
+        .protocol(std::sync::Arc::new(FakeProtocol::new(porthmos_vfs::testing::FakeFs::new()).with_id("two")))
+        .start()
+        .unwrap();
+
+    let ids: Vec<&str> = core.protocols().iter().map(|info| info.id).collect();
+
+    assert_eq!(ids, ["one", "two"]);
+}

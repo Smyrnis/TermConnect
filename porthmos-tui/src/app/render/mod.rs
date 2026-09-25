@@ -110,6 +110,7 @@ impl App {
             self.connections_cursor,
             &connected_names,
             active_name,
+            self.core.protocols(),
         );
     }
 

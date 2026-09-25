@@ -7,7 +7,7 @@ pub mod text_input;
 pub use confirm::ConfirmDialog;
 pub use conflict::ConflictDialog;
 use crossterm::event::KeyEvent;
-pub use form::{FormDialog, FormField};
+pub use form::{FieldKind, FormDialog, FormField};
 pub use list::ListDialog;
 use ratatui::{Frame, layout::Rect};
 pub use text_input::TextInputDialog;
@@ -33,7 +33,8 @@ pub enum DialogOutcome {
     Submitted(String),
     Selected(usize),
     Removed(usize),
-    FormSubmitted(Vec<String>),
+    FormSubmitted(Vec<(&'static str, String)>),
+    FormChoiceChanged { key: &'static str },
     Resolved { resolution: Option<porthmos_core::transfer::conflicts::Resolution>, apply_to_rest: bool },
 }
 
@@ -59,6 +60,7 @@ impl Dialog {
             Dialog::Form(dialog) => match dialog.handle_key(key) {
                 form::FormOutcome::Pending => DialogOutcome::Pending,
                 form::FormOutcome::Submitted(values) => DialogOutcome::FormSubmitted(values),
+                form::FormOutcome::ChoiceChanged { key } => DialogOutcome::FormChoiceChanged { key },
                 form::FormOutcome::Cancelled => DialogOutcome::Cancelled,
             },
             Dialog::Conflict(dialog) => match dialog.handle_key(key) {

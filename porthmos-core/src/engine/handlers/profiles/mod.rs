@@ -1,3 +1,5 @@
+use porthmos_vfs::ConnectionForm;
+
 use super::super::{Engine, Event};
 use crate::{
     Severity,
@@ -19,7 +21,19 @@ impl Engine {
     pub(crate) fn save_profile(&mut self, original: Option<String>, draft: ProfileDraft) {
         let preserve_from =
             original.as_ref().and_then(|name| self.all_profiles().ok()?.into_iter().find(|entry| &entry.name == name));
-        let profile = match draft.validate(preserve_from.as_ref()) {
+        let registered = self.protocols.iter().find(|protocol| protocol.id() == draft.protocol);
+        let unavailable = preserve_from.as_ref().filter(|entry| entry.protocol == draft.protocol);
+        let form = match (registered, unavailable) {
+            (Some(protocol), _) => protocol.connection_form(),
+            (None, Some(entry)) => ConnectionForm::standard(entry.port),
+            (None, None) => {
+                self.emit(Event::ProfileRejected {
+                    message: format!("No \"{}\" protocol is available", draft.protocol),
+                });
+                return;
+            }
+        };
+        let profile = match draft.validate(&form, preserve_from.as_ref()) {
             Ok(profile) => profile,
             Err(message) => {
                 self.emit(Event::ProfileRejected { message });

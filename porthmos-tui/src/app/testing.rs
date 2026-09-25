@@ -12,7 +12,11 @@ pub(crate) struct TestApp {
 }
 
 pub(crate) fn test_app(path: &Path) -> TestApp {
-    let (core, commands) = CoreHandle::detached();
+    test_app_with_protocols(path, Vec::new())
+}
+
+pub(crate) fn test_app_with_protocols(path: &Path, protocols: Vec<porthmos_core::ProtocolInfo>) -> TestApp {
+    let (core, commands) = CoreHandle::detached_with(protocols);
     let mut test = TestApp {
         app: App::new(core, path.to_path_buf(), &PanelSettings::default(), KeyBindings::defaults()),
         commands,

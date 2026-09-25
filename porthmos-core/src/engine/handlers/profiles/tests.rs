@@ -9,13 +9,29 @@ use crate::{
     profiles::ConnectionProfile,
 };
 
+fn engine_with_sftp() -> TestEngine {
+    let mut t = test_engine();
+    let mut form = porthmos_vfs::ConnectionForm::standard(22);
+    form.options.push(porthmos_vfs::OptionField {
+        key: "identity_file",
+        label: "Identity file",
+        required: false,
+        kind: porthmos_vfs::OptionKind::Text { default: "" },
+    });
+    let protocol =
+        porthmos_vfs::testing::FakeProtocol::new(porthmos_vfs::testing::FakeFs::new()).with_id("sftp").with_form(form);
+    t.engine.protocols = vec![std::sync::Arc::new(protocol)];
+    t
+}
+
 fn draft(name: &str, host: &str, port: &str) -> ProfileDraft {
     ProfileDraft {
         name: name.to_string(),
         host: host.to_string(),
         port: port.to_string(),
         username: "deploy".to_string(),
-        password: String::new(),
+        protocol: "sftp".to_string(),
+        ..Default::default()
     }
 }
 
@@ -43,7 +59,7 @@ fn seed(t: &TestEngine, name: &str, host: &str, options: BTreeMap<String, String
 
 #[test]
 fn saving_a_new_profile_stores_it_and_lists_the_profiles() {
-    let mut t = test_engine();
+    let mut t = engine_with_sftp();
     let mut new = draft("prod", "server.example.com", "2222");
     new.password = "hunter2".to_string();
 
@@ -62,7 +78,7 @@ fn saving_a_new_profile_stores_it_and_lists_the_profiles() {
 
 #[test]
 fn an_invalid_draft_is_rejected_with_the_reason() {
-    let mut t = test_engine();
+    let mut t = engine_with_sftp();
 
     t.engine.handle_command(Command::SaveProfile { original: None, draft: draft("prod", "h", "not-a-port") });
 
@@ -74,7 +90,7 @@ fn an_invalid_draft_is_rejected_with_the_reason() {
 
 #[test]
 fn add_connection_dialog_rejects_a_name_that_already_exists() {
-    let mut t = test_engine();
+    let mut t = engine_with_sftp();
     seed(&t, "prod", "original.example.com", BTreeMap::new());
 
     t.engine.handle_command(Command::SaveProfile { original: None, draft: draft("prod", "new.example.com", "22") });
@@ -87,7 +103,7 @@ fn add_connection_dialog_rejects_a_name_that_already_exists() {
 
 #[test]
 fn edit_connection_rejects_renaming_onto_an_existing_name() {
-    let mut t = test_engine();
+    let mut t = engine_with_sftp();
     seed(&t, "prod", "prod.example.com", BTreeMap::new());
     seed(&t, "staging", "staging.example.com", BTreeMap::new());
 
@@ -103,18 +119,19 @@ fn edit_connection_rejects_renaming_onto_an_existing_name() {
 }
 
 #[test]
-fn edit_connection_preserves_identity_file_and_remote_path_not_shown_in_the_form() {
-    let mut t = test_engine();
+fn edit_connection_saves_the_identity_file_and_remote_path_sent_by_the_form() {
+    let mut t = engine_with_sftp();
     let options = BTreeMap::from([
         ("identity_file".to_string(), "/home/user/.ssh/id_ed25519".to_string()),
         ("remote_path".to_string(), "/var/www".to_string()),
     ]);
     seed(&t, "prod", "old.example.com", options.clone());
 
-    t.engine.handle_command(Command::SaveProfile {
-        original: Some("prod".to_string()),
-        draft: draft("prod", "new.example.com", "22"),
-    });
+    let mut edit = draft("prod", "new.example.com", "22");
+    edit.remote_path = "/var/www".to_string();
+    edit.options.insert("identity_file".to_string(), "/home/user/.ssh/id_ed25519".to_string());
+
+    t.engine.handle_command(Command::SaveProfile { original: Some("prod".to_string()), draft: edit });
 
     let saved = saved(&t);
     assert_eq!(saved.len(), 1);
@@ -124,7 +141,7 @@ fn edit_connection_preserves_identity_file_and_remote_path_not_shown_in_the_form
 
 #[test]
 fn renaming_a_connection_to_a_new_name_deletes_the_old_profile() {
-    let mut t = test_engine();
+    let mut t = engine_with_sftp();
     seed(&t, "prod", "server.example.com", BTreeMap::new());
 
     t.engine.handle_command(Command::SaveProfile {
@@ -139,7 +156,7 @@ fn renaming_a_connection_to_a_new_name_deletes_the_old_profile() {
 
 #[test]
 fn a_save_that_fails_reports_the_error_without_closing_the_form() {
-    let mut t = test_engine();
+    let mut t = engine_with_sftp();
     std::fs::write(&t.engine.paths.config_dir, b"not a directory").ok();
     std::fs::create_dir_all(t.engine.paths.config_dir.parent().unwrap()).unwrap();
     std::fs::write(&t.engine.paths.config_dir, b"not a directory").unwrap();
@@ -152,7 +169,7 @@ fn a_save_that_fails_reports_the_error_without_closing_the_form() {
 
 #[test]
 fn confirming_delete_connection_removes_the_saved_profile() {
-    let mut t = test_engine();
+    let mut t = engine_with_sftp();
     seed(&t, "prod", "server.example.com", BTreeMap::new());
 
     t.engine.handle_command(Command::DeleteProfile { name: "prod".to_string() });
@@ -163,7 +180,7 @@ fn confirming_delete_connection_removes_the_saved_profile() {
 
 #[test]
 fn listing_profiles_sends_every_saved_profile() {
-    let mut t = test_engine();
+    let mut t = engine_with_sftp();
     seed(&t, "b", "b.example.com", BTreeMap::new());
     seed(&t, "a", "a.example.com", BTreeMap::new());
 
@@ -175,4 +192,68 @@ fn listing_profiles_sends_every_saved_profile() {
         }
         other => panic!("unexpected {other:?}"),
     }
+}
+
+#[test]
+fn saving_a_draft_for_an_unknown_protocol_is_rejected() {
+    let mut t = engine_with_sftp();
+    let mut unknown = draft("web", "h", "22");
+    unknown.protocol = "gopher".to_string();
+
+    t.engine.handle_command(Command::SaveProfile { original: None, draft: unknown });
+
+    assert!(matches!(
+        t.drain().as_slice(),
+        [Event::ProfileRejected { message }] if message == "No \"gopher\" protocol is available"
+    ));
+    assert!(saved(&t).is_empty());
+}
+
+#[test]
+fn saving_validates_against_the_protocols_own_form() {
+    let mut t = engine_with_sftp();
+    let mut with_key = draft("web", "h", "");
+    with_key.options.insert("identity_file".to_string(), " /k ".to_string());
+
+    t.engine.handle_command(Command::SaveProfile { original: None, draft: with_key });
+
+    let profiles = saved(&t);
+    assert_eq!(profiles[0].port, Some(22));
+    assert_eq!(profiles[0].options.get("identity_file").map(String::as_str), Some("/k"));
+}
+
+#[test]
+fn editing_keeps_hand_written_options_of_the_same_protocol() {
+    let mut t = engine_with_sftp();
+    seed(&t, "web", "h", BTreeMap::from([("foo".to_string(), "bar".to_string())]));
+
+    t.engine.handle_command(Command::SaveProfile { original: Some("web".into()), draft: draft("web", "h2", "22") });
+
+    assert_eq!(saved(&t)[0].options.get("foo").map(String::as_str), Some("bar"));
+}
+
+#[test]
+fn editing_an_entry_of_a_protocol_missing_from_this_build_keeps_its_options() {
+    let mut t = engine_with_sftp();
+    store::save(
+        &t.engine.paths,
+        &ConnectionProfile {
+            name: "files".to_string(),
+            protocol: "ftp".to_string(),
+            host: "h".to_string(),
+            port: Some(21),
+            username: "u".to_string(),
+            password: None,
+            options: BTreeMap::from([("security".to_string(), "explicit".to_string())]),
+        },
+    )
+    .unwrap();
+    let mut edit = draft("files", "h2", "21");
+    edit.protocol = "ftp".to_string();
+
+    t.engine.handle_command(Command::SaveProfile { original: Some("files".into()), draft: edit });
+
+    let profiles = saved(&t);
+    assert_eq!((profiles[0].protocol.as_str(), profiles[0].host.as_str()), ("ftp", "h2"));
+    assert_eq!(profiles[0].options.get("security").map(String::as_str), Some("explicit"));
 }

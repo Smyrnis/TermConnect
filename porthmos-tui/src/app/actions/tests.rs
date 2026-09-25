@@ -271,11 +271,11 @@ fn rename_action_on_connections_screen_opens_the_edit_connection_form() {
 
     match test.app.dialog {
         Some(Dialog::Form(ref form)) => {
-            assert_eq!(form.fields[0].value, "prod");
-            assert_eq!(form.fields[1].value, "server.example.com");
-            assert_eq!(form.fields[2].value, "2222");
-            assert_eq!(form.fields[3].value, "deploy");
-            assert_eq!(form.fields[4].value, "hunter2");
+            assert_eq!(form.value("name").as_deref(), Some("prod"));
+            assert_eq!(form.value("host").as_deref(), Some("server.example.com"));
+            assert_eq!(form.value("port").as_deref(), Some("2222"));
+            assert_eq!(form.value("username").as_deref(), Some("deploy"));
+            assert_eq!(form.value("password").as_deref(), Some("hunter2"));
         }
         _ => panic!("expected the edit form to open"),
     }

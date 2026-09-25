@@ -1,11 +1,13 @@
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
 use crossterm::event::KeyEventState;
 use porthmos_core::{Answer, profiles::ProfileDraft};
 
 use super::*;
+use porthmos_core::{ConnectionForm, OptionField, OptionKind, ProtocolInfo};
+
 use crate::{
-    app::testing::{TestApp, test_app},
+    app::testing::{TestApp, test_app, test_app_with_protocols},
     widgets::dialog::confirm::ConfirmFocus,
 };
 
@@ -30,19 +32,43 @@ fn connection(name: &str, source: ConnectionSource) -> ConnectionEntry {
     }
 }
 
-fn on_connections_screen(entries: Vec<ConnectionEntry>) -> TestApp {
-    let mut test = app();
+fn sample_protocols() -> Vec<ProtocolInfo> {
+    let mut sftp = ConnectionForm::standard(22);
+    sftp.options.push(OptionField {
+        key: "identity_file",
+        label: "Identity file",
+        required: false,
+        kind: OptionKind::Text { default: "" },
+    });
+    vec![
+        ProtocolInfo { id: "sftp", display_name: "SFTP", form: sftp },
+        ProtocolInfo { id: "ftp", display_name: "FTP", form: ConnectionForm::standard(21) },
+    ]
+}
+
+fn screen_with(protocols: Vec<ProtocolInfo>, entries: Vec<ConnectionEntry>) -> TestApp {
+    let mut test = test_app_with_protocols(Path::new("/d"), protocols);
     test.app.screen = Screen::Connections;
     test.app.connections = entries;
     test.app.connections_cursor = 0;
     test
 }
 
+fn on_connections_screen(entries: Vec<ConnectionEntry>) -> TestApp {
+    screen_with(sample_protocols(), entries)
+}
+
+fn set_field(test: &mut TestApp, key: &str, value: &str) {
+    if let Some(Dialog::Form(form)) = test.app.dialog.as_mut()
+        && let Some(field) = form.fields.iter_mut().find(|field| field.key == key)
+    {
+        field.value = value.to_string();
+    }
+}
+
 fn fill_form(test: &mut TestApp, values: [&str; 4]) {
-    if let Some(Dialog::Form(form)) = test.app.dialog.as_mut() {
-        for (field, value) in form.fields.iter_mut().zip(values) {
-            field.value = value.to_string();
-        }
+    for (key, value) in ["name", "host", "port", "username"].into_iter().zip(values) {
+        set_field(test, key, value);
     }
 }
 
@@ -277,9 +303,7 @@ fn add_connection_dialog_saves_a_new_profile_on_submit() {
     test.app.apply_action(Action::AddConnection);
     assert!(matches!(test.app.dialog, Some(Dialog::Form(_))));
     fill_form(&mut test, ["prod", "server.example.com", "2222", "deploy"]);
-    if let Some(Dialog::Form(form)) = test.app.dialog.as_mut() {
-        form.fields[4].value = "hunter2".to_string();
-    }
+    set_field(&mut test, "password", "hunter2");
     test.app.apply_dialog_key(key(KeyCode::Enter));
 
     assert_eq!(
@@ -292,6 +316,9 @@ fn add_connection_dialog_saves_a_new_profile_on_submit() {
                 port: "2222".to_string(),
                 username: "deploy".to_string(),
                 password: "hunter2".to_string(),
+                protocol: "sftp".to_string(),
+                remote_path: String::new(),
+                options: BTreeMap::from([("identity_file".to_string(), String::new())]),
             },
         }]
     );
@@ -349,9 +376,7 @@ fn add_connection_dialog_rejects_a_name_that_already_exists() {
 fn edit_connection_rejects_renaming_onto_an_existing_name() {
     let mut test = on_connections_screen(vec![connection("prod", ConnectionSource::Profile)]);
     test.app.apply_action(Action::Rename);
-    if let Some(Dialog::Form(form)) = test.app.dialog.as_mut() {
-        form.fields[0].value = "staging".to_string();
-    }
+    set_field(&mut test, "name", "staging");
     test.app.apply_dialog_key(key(KeyCode::Enter));
 
     assert!(matches!(
@@ -385,19 +410,52 @@ fn add_connection_dialog_stays_open_when_saving_fails() {
 }
 
 #[test]
-fn edit_connection_preserves_identity_file_and_remote_path_not_shown_in_the_form() {
-    let mut test = on_connections_screen(vec![connection("prod", ConnectionSource::Profile)]);
+fn editing_a_connection_sends_its_identity_file_and_remote_folder_from_the_form() {
+    let mut entry = connection("prod", ConnectionSource::Profile);
+    entry.options = BTreeMap::from([
+        ("identity_file".to_string(), "/home/user/.ssh/id_ed25519".to_string()),
+        ("remote_path".to_string(), "/var/www".to_string()),
+    ]);
+    let mut test = on_connections_screen(vec![entry]);
 
     test.app.apply_action(Action::Rename);
-    if let Some(Dialog::Form(form)) = test.app.dialog.as_mut() {
-        form.fields[1].value = "new.example.com".to_string();
-    }
+    set_field(&mut test, "host", "new.example.com");
     test.app.apply_dialog_key(key(KeyCode::Enter));
 
     assert!(matches!(
         test.sent().as_slice(),
-        [Command::SaveProfile { original: Some(original), draft }] if original == "prod" && draft.host == "new.example.com"
+        [Command::SaveProfile { original: Some(original), draft }]
+            if original == "prod"
+                && draft.host == "new.example.com"
+                && draft.remote_path == "/var/www"
+                && draft.options.get("identity_file").map(String::as_str) == Some("/home/user/.ssh/id_ed25519")
     ));
+}
+
+#[test]
+fn adding_a_connection_without_any_protocol_shows_a_notice_instead_of_a_form() {
+    let mut test = screen_with(Vec::new(), Vec::new());
+
+    test.app.apply_action(Action::AddConnection);
+
+    assert!(test.app.dialog.is_none());
+    assert_eq!(
+        test.app.notifications.current().map(|notification| notification.message.as_str()),
+        Some("No protocols are available in this build")
+    );
+}
+
+#[test]
+fn changing_the_protocol_choice_rebuilds_the_open_form() {
+    let mut test = on_connections_screen(Vec::new());
+    test.app.apply_action(Action::AddConnection);
+
+    test.app.apply_dialog_key(key(KeyCode::Right));
+
+    let Some(Dialog::Form(form)) = &test.app.dialog else { panic!("the form closed") };
+    assert_eq!(form.value("protocol").as_deref(), Some("ftp"));
+    assert_eq!(form.value("port").as_deref(), Some("21"));
+    assert!(form.value("identity_file").is_none());
 }
 
 #[test]
@@ -405,9 +463,7 @@ fn renaming_a_connection_to_a_new_name_deletes_the_old_profile() {
     let mut test = on_connections_screen(vec![connection("prod", ConnectionSource::Profile)]);
 
     test.app.apply_action(Action::Rename);
-    if let Some(Dialog::Form(form)) = test.app.dialog.as_mut() {
-        form.fields[0].value = "production".to_string();
-    }
+    set_field(&mut test, "name", "production");
     test.app.apply_dialog_key(key(KeyCode::Enter));
 
     assert!(matches!(
@@ -445,3 +501,28 @@ fn delete_connection_on_an_ssh_config_entry_does_not_open_a_dialog() {
     assert!(test.app.dialog.is_none());
     assert!(test.app.notifications.current().is_some());
 }
+
+#[test]
+fn editing_a_profile_with_an_unknown_saved_choice_opens_on_the_default() {
+    let mut protocols = sample_protocols();
+    protocols[1].form.options.push(OptionField {
+        key: "security",
+        label: "Security",
+        required: false,
+        kind: OptionKind::Choice { choices: SECURITY_CHOICES, default: "explicit" },
+    });
+    let mut entry = connection("files", ConnectionSource::Profile);
+    entry.protocol = "ftp".to_string();
+    entry.options = BTreeMap::from([("security".to_string(), "weird".to_string())]);
+    let mut test = screen_with(protocols, vec![entry]);
+
+    test.app.apply_action(Action::Rename);
+
+    let Some(Dialog::Form(form)) = &test.app.dialog else { panic!("the edit form did not open") };
+    assert_eq!(form.value("security").as_deref(), Some("explicit"));
+}
+
+const SECURITY_CHOICES: &[porthmos_core::Choice] = &[
+    porthmos_core::Choice { value: "none", label: "None" },
+    porthmos_core::Choice { value: "explicit", label: "Explicit TLS" },
+];

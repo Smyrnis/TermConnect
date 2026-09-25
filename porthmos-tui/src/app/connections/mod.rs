@@ -1,7 +1,6 @@
-use porthmos_core::profiles::ProfileDraft;
+mod form;
 
 use super::*;
-use crate::widgets::dialog::{FormDialog, FormField};
 
 impl App {
     pub(super) fn request_shell(&mut self) {
@@ -51,15 +50,26 @@ impl App {
             return;
         }
 
-        self.dialog = Some(build_connection_form("Add connection", None));
+        let Some(dialog) = form::build("Add connection", self.core.protocols(), None) else {
+            self.notifications.push(Severity::Warning, "No protocols are available in this build");
+            return;
+        };
+        self.dialog = Some(Dialog::Form(dialog));
         self.pending_action = Some(PendingAction::AddConnection);
     }
 
-    pub(super) fn submit_connection_form(&mut self, values: Vec<String>, original: Option<String>) {
-        match draft_from_form(&values) {
-            Ok(draft) => self.core.send(Command::SaveProfile { original, draft }),
-            Err(message) => self.set_form_error(message),
+    pub(super) fn form_choice_changed(&mut self, key: &'static str) {
+        if key != "protocol" {
+            return;
         }
+        let core = self.core.clone();
+        if let Some(Dialog::Form(dialog)) = self.dialog.as_mut() {
+            form::rebuild_for_protocol(dialog, core.protocols());
+        }
+    }
+
+    pub(super) fn submit_connection_form(&mut self, values: Vec<(&'static str, String)>, original: Option<String>) {
+        self.core.send(Command::SaveProfile { original, draft: form::draft(values) });
     }
 
     pub(super) fn open_edit_connection_dialog(&mut self) {
@@ -75,7 +85,10 @@ impl App {
             return;
         }
 
-        self.dialog = Some(build_connection_form("Edit connection", Some(&entry)));
+        let Some(dialog) = form::build("Edit connection", self.core.protocols(), Some(&entry)) else {
+            return;
+        };
+        self.dialog = Some(Dialog::Form(dialog));
         self.pending_action = Some(PendingAction::EditConnection { original: entry });
     }
 
@@ -135,43 +148,6 @@ impl App {
         let placeholder_panel = PanelView::from_listing(PathBuf::from("/"), Vec::new());
         self.sessions.insert(session, name, shell_available, placeholder_panel);
     }
-}
-
-fn draft_from_form(values: &[String]) -> Result<ProfileDraft, String> {
-    let [name, host, port, username, password] = values else {
-        return Err("Unexpected number of fields".to_string());
-    };
-    Ok(ProfileDraft {
-        name: name.clone(),
-        host: host.clone(),
-        port: port.clone(),
-        username: username.clone(),
-        password: password.clone(),
-    })
-}
-
-fn build_connection_form(title: &str, existing: Option<&ConnectionEntry>) -> Dialog {
-    let (name, host, port, username, password) = match existing {
-        Some(entry) => (
-            entry.name.clone(),
-            entry.host.clone(),
-            entry.port.to_string(),
-            entry.username.clone(),
-            entry.password.clone().unwrap_or_default(),
-        ),
-        None => (String::new(), String::new(), "22".to_string(), String::new(), String::new()),
-    };
-
-    Dialog::Form(FormDialog::new(
-        title,
-        vec![
-            FormField::new("Name", name),
-            FormField::new("Host", host),
-            FormField::new("Port", port),
-            FormField::new("Username", username),
-            FormField::new_masked("Password", password),
-        ],
-    ))
 }
 
 #[cfg(test)]
