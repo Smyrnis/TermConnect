@@ -7,12 +7,17 @@ mod search;
 mod shell;
 pub mod ssh_config;
 
-use std::{collections::BTreeMap, future::Future, path::Path, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    future::Future,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::anyhow;
 use porthmos_vfs::{
-    Answer, Environment, ErrorKind, FileSystem, Prompter, Protocol, ProtocolError, Question, ShellInvocation, Target,
-    async_trait,
+    Answer, ConnectionForm, Environment, ErrorKind, FileSystem, OptionField, OptionKind, Prompter, Protocol,
+    ProtocolError, Question, ShellInvocation, Target, async_trait,
 };
 use russh::client::Handle;
 use tokio::sync::mpsc;
@@ -54,6 +59,14 @@ fn matches_its_ssh_config_alias(target: &Target, env: &Environment) -> bool {
                 && configured.option("identity_file") == target.option("identity_file")
         },
     )
+}
+
+fn identity_path(path: &str, home: Option<&Path>) -> PathBuf {
+    match (path.strip_prefix('~'), home) {
+        (Some(""), Some(home)) => home.to_path_buf(),
+        (Some(rest), Some(home)) if rest.starts_with('/') => home.join(rest.trim_start_matches('/')),
+        _ => PathBuf::from(path),
+    }
 }
 
 fn connect_error(err: anyhow::Error) -> ProtocolError {
@@ -106,6 +119,17 @@ impl Protocol for Sftp {
         DEFAULT_PORT
     }
 
+    fn connection_form(&self) -> ConnectionForm {
+        let mut form = ConnectionForm::standard(DEFAULT_PORT);
+        form.options.push(OptionField {
+            key: "identity_file",
+            label: "Identity file",
+            required: false,
+            kind: OptionKind::Text { default: "" },
+        });
+        form
+    }
+
     fn discover(&self, env: &Environment) -> Result<Vec<Target>, ProtocolError> {
         let hosts = ssh_config::load(env.home.as_deref())?;
         Ok(hosts.into_iter().map(|host| discovered_target(host, env)).collect())
@@ -120,11 +144,12 @@ impl Protocol for Sftp {
             .await
             .map_err(connect_error)?;
 
-        let identity_file = target.option("identity_file").map(Path::new);
+        let home = std::env::home_dir();
+        let identity_file = target.option("identity_file").map(|path| identity_path(path, home.as_deref()));
         match client::authenticate_non_interactive(
             &mut handle,
             &target.username,
-            identity_file,
+            identity_file.as_deref(),
             target.password.as_deref(),
         )
         .await

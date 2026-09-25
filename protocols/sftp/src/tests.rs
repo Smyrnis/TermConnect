@@ -266,3 +266,41 @@ fn a_declined_host_key_is_reported_as_a_cancelled_connection() {
 fn any_other_handshake_failure_is_a_connect_error() {
     assert_eq!(connect_error(anyhow!("connection refused")).kind(), ErrorKind::Connect);
 }
+
+#[test]
+fn the_sftp_form_offers_an_optional_identity_file() {
+    let form = Sftp.connection_form();
+
+    assert_eq!(form.port.default, 22);
+    assert_eq!(
+        form.option("identity_file"),
+        Some(&porthmos_vfs::OptionField {
+            key: "identity_file",
+            label: "Identity file",
+            required: false,
+            kind: porthmos_vfs::OptionKind::Text { default: "" },
+        })
+    );
+}
+
+#[test]
+fn the_sftp_form_uses_no_reserved_keys() {
+    assert!(Sftp.connection_form().reserved_key_collisions().is_empty());
+}
+
+#[test]
+fn an_identity_file_under_the_home_tilde_is_expanded() {
+    let home = Path::new("/home/alice");
+
+    assert_eq!(identity_path("~/.ssh/id_ed25519", Some(home)), Path::new("/home/alice/.ssh/id_ed25519"));
+    assert_eq!(identity_path("~", Some(home)), Path::new("/home/alice"));
+}
+
+#[test]
+fn other_identity_file_paths_are_used_as_written() {
+    let home = Path::new("/home/alice");
+
+    assert_eq!(identity_path("/keys/id", Some(home)), Path::new("/keys/id"));
+    assert_eq!(identity_path("~bob/id", Some(home)), Path::new("~bob/id"));
+    assert_eq!(identity_path("~/.ssh/id", None), Path::new("~/.ssh/id"));
+}
