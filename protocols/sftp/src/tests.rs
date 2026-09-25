@@ -54,6 +54,90 @@ fn shell_command_is_always_available_for_sftp() {
     assert_eq!(invocation.program, "ssh");
 }
 
+fn home_with_ssh_config(config: &str) -> (tempfile::TempDir, Environment) {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join(".ssh")).unwrap();
+    std::fs::write(dir.path().join(".ssh/config"), config).unwrap();
+    let env = Environment {
+        home: Some(dir.path().into()),
+        user: Some("alice".into()),
+        path: Some(Path::new("/nonexistent").as_os_str().to_owned()),
+    };
+    (dir, env)
+}
+
+fn shell_args(target: &Target, env: &Environment) -> Vec<String> {
+    let invocation = Sftp.shell_command(target, env).unwrap();
+    invocation.args.iter().map(|arg| arg.to_string_lossy().into_owned()).collect()
+}
+
+const JUMP_CONFIG: &str = "Host box\n  HostName 10.0.0.2\n  Port 2200\n  ProxyJump bastion\n";
+
+#[test]
+fn the_shell_for_a_discovered_host_goes_through_its_ssh_config_alias() {
+    let (_dir, env) = home_with_ssh_config(JUMP_CONFIG);
+    let target = Sftp.discover(&env).unwrap().remove(0);
+
+    assert_eq!(shell_args(&target, &env), ["-o", "HostName=10.0.0.2", "-p", "2200", "-l", "alice", "box"]);
+}
+
+#[test]
+fn the_shell_through_an_alias_keeps_the_sessions_user_and_port_over_wildcard_defaults() {
+    let (_dir, env) = home_with_ssh_config("Host box\n  HostName 10.0.0.2\nHost *\n  User deploy\n  Port 2222\n");
+    let target = Sftp.discover(&env).unwrap().remove(0);
+
+    assert_eq!(shell_args(&target, &env), ["-o", "HostName=10.0.0.2", "-p", "22", "-l", "alice", "box"]);
+}
+
+#[test]
+fn the_shell_for_a_saved_profile_matching_its_alias_goes_through_the_alias() {
+    let (_dir, env) = home_with_ssh_config(JUMP_CONFIG);
+    let target = Target {
+        name: "box".into(),
+        host: "10.0.0.2".into(),
+        port: 2200,
+        username: "alice".into(),
+        password: None,
+        options: Default::default(),
+    };
+
+    assert_eq!(shell_args(&target, &env), ["-o", "HostName=10.0.0.2", "-p", "2200", "-l", "alice", "box"]);
+}
+
+#[test]
+fn the_shell_uses_the_explicit_address_when_the_connection_no_longer_matches_its_alias() {
+    let (_dir, env) = home_with_ssh_config(JUMP_CONFIG);
+    let mut target = Sftp.discover(&env).unwrap().remove(0);
+    target.host = "10.0.0.9".into();
+
+    assert_eq!(shell_args(&target, &env), ["-p", "2200", "alice@10.0.0.9"]);
+}
+
+#[test]
+fn the_shell_uses_the_explicit_address_when_the_identity_file_was_changed() {
+    let (dir, env) = home_with_ssh_config("Host box\n  HostName 10.0.0.2\n  IdentityFile ~/.ssh/id\n");
+    let mut target = Sftp.discover(&env).unwrap().remove(0);
+    let other_key = dir.path().join(".ssh/other").to_string_lossy().into_owned();
+    target.options.insert("identity_file".into(), other_key.clone());
+
+    assert_eq!(shell_args(&target, &env), ["-p", "22", "-i", other_key.as_str(), "alice@10.0.0.2"]);
+}
+
+#[test]
+fn the_shell_uses_the_explicit_address_when_no_ssh_config_names_the_connection() {
+    let (_dir, env) = home_with_ssh_config(JUMP_CONFIG);
+    let target = Target {
+        name: "web".into(),
+        host: "10.0.0.2".into(),
+        port: 2200,
+        username: "alice".into(),
+        password: None,
+        options: Default::default(),
+    };
+
+    assert_eq!(shell_args(&target, &env), ["-p", "2200", "alice@10.0.0.2"]);
+}
+
 struct NeverAsked;
 
 #[async_trait::async_trait]

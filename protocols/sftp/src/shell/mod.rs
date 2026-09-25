@@ -6,7 +6,7 @@ use std::{
 
 use porthmos_vfs::{ShellInvocation, Target};
 
-pub fn invocation_for(target: &Target, sshpass: Option<PathBuf>) -> ShellInvocation {
+pub fn invocation_for(target: &Target, ssh_config_alias: Option<&str>, sshpass: Option<PathBuf>) -> ShellInvocation {
     let (program, mut args, env) = match (&target.password, sshpass) {
         (Some(password), Some(sshpass_path)) => (
             sshpass_path.into_os_string(),
@@ -16,13 +16,24 @@ pub fn invocation_for(target: &Target, sshpass: Option<PathBuf>) -> ShellInvocat
         _ => (OsString::from("ssh"), Vec::new(), Vec::new()),
     };
 
+    if ssh_config_alias.is_some() {
+        args.push(OsString::from("-o"));
+        args.push(OsString::from(format!("HostName={}", target.host)));
+    }
     args.push(OsString::from("-p"));
     args.push(OsString::from(target.port.to_string()));
+    if ssh_config_alias.is_some() {
+        args.push(OsString::from("-l"));
+        args.push(OsString::from(&target.username));
+    }
     if let Some(identity_file) = target.option("identity_file") {
         args.push(OsString::from("-i"));
         args.push(OsString::from(identity_file));
     }
-    args.push(OsString::from(format!("{}@{}", target.username, target.host)));
+    match ssh_config_alias {
+        Some(alias) => args.push(OsString::from(alias)),
+        None => args.push(OsString::from(format!("{}@{}", target.username, target.host))),
+    }
     ShellInvocation { program, args, env }
 }
 

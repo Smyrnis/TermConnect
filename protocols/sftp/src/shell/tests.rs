@@ -21,7 +21,7 @@ fn args_of(invocation: &ShellInvocation) -> Vec<String> {
 
 #[test]
 fn command_includes_port_identity_and_user_at_host() {
-    let invocation = invocation_for(&sample_target(), None);
+    let invocation = invocation_for(&sample_target(), None, None);
 
     assert_eq!(invocation.program, "ssh");
     assert_eq!(
@@ -35,7 +35,7 @@ fn command_omits_identity_flag_when_none_is_set() {
     let mut target = sample_target();
     target.options.clear();
 
-    let invocation = invocation_for(&target, None);
+    let invocation = invocation_for(&target, None, None);
 
     assert_eq!(args_of(&invocation), vec!["-p", "2222", "deploy@server.example.com"]);
 }
@@ -45,7 +45,7 @@ fn command_wraps_with_sshpass_when_password_and_sshpass_are_both_present() {
     let mut target = sample_target();
     target.password = Some("hunter2".to_string());
 
-    let invocation = invocation_for(&target, Some(PathBuf::from("/usr/bin/sshpass")));
+    let invocation = invocation_for(&target, None, Some(PathBuf::from("/usr/bin/sshpass")));
 
     assert_eq!(invocation.program, "/usr/bin/sshpass");
     assert_eq!(
@@ -60,7 +60,7 @@ fn command_falls_back_to_plain_ssh_when_sshpass_is_not_found() {
     let mut target = sample_target();
     target.password = Some("hunter2".to_string());
 
-    let invocation = invocation_for(&target, None);
+    let invocation = invocation_for(&target, None, None);
 
     assert_eq!(invocation.program, "ssh");
     assert!(invocation.env.is_empty());
@@ -68,10 +68,44 @@ fn command_falls_back_to_plain_ssh_when_sshpass_is_not_found() {
 
 #[test]
 fn command_falls_back_to_plain_ssh_when_there_is_no_password() {
-    let invocation = invocation_for(&sample_target(), Some(PathBuf::from("/usr/bin/sshpass")));
+    let invocation = invocation_for(&sample_target(), None, Some(PathBuf::from("/usr/bin/sshpass")));
 
     assert_eq!(invocation.program, "ssh");
     assert!(invocation.env.is_empty());
+}
+
+#[test]
+fn command_for_an_ssh_config_alias_pins_the_host_port_user_and_identity() {
+    let invocation = invocation_for(&sample_target(), Some("production"), None);
+
+    assert_eq!(invocation.program, "ssh");
+    assert_eq!(
+        args_of(&invocation),
+        vec![
+            "-o",
+            "HostName=server.example.com",
+            "-p",
+            "2222",
+            "-l",
+            "deploy",
+            "-i",
+            "/home/user/.ssh/id_ed25519",
+            "production"
+        ]
+    );
+}
+
+#[test]
+fn command_for_an_ssh_config_alias_still_wraps_with_sshpass_when_a_password_is_saved() {
+    let mut target = sample_target();
+    target.password = Some("hunter2".to_string());
+
+    let invocation = invocation_for(&target, Some("production"), Some(PathBuf::from("/usr/bin/sshpass")));
+
+    assert_eq!(invocation.program, "/usr/bin/sshpass");
+    assert_eq!(args_of(&invocation)[..2], ["-e", "ssh"]);
+    assert_eq!(args_of(&invocation).last().map(String::as_str), Some("production"));
+    assert_eq!(invocation.env, vec![(OsString::from("SSHPASS"), OsString::from("hunter2"))]);
 }
 
 #[test]
