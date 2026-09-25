@@ -152,3 +152,13 @@ async fn a_failing_home_reports_permission_denied() {
     let error = fs.home().await.unwrap_err();
     assert_eq!(error.kind(), ErrorKind::PermissionDenied);
 }
+
+#[test]
+fn a_fake_protocol_can_take_another_id_and_form() {
+    let mut form = crate::ConnectionForm::standard(21);
+    form.host.label = "Server";
+    let protocol = FakeProtocol::new(FakeFs::new()).with_id("ftp").with_form(form.clone());
+
+    assert_eq!(protocol.id(), "ftp");
+    assert_eq!(protocol.connection_form(), form);
+}

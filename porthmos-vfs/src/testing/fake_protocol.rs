@@ -4,10 +4,13 @@ use async_trait::async_trait;
 
 use super::FakeFs;
 use crate::{
-    Answer, Environment, ErrorKind, FileSystem, Prompter, Protocol, ProtocolError, Question, ShellInvocation, Target,
+    Answer, ConnectionForm, Environment, ErrorKind, FileSystem, Prompter, Protocol, ProtocolError, Question,
+    ShellInvocation, Target,
 };
 
 pub struct FakeProtocol {
+    id: &'static str,
+    form: Option<ConnectionForm>,
     fs: FakeFs,
     password: Option<String>,
     connect_failure: Option<String>,
@@ -16,7 +19,7 @@ pub struct FakeProtocol {
 
 impl FakeProtocol {
     pub fn new(fs: FakeFs) -> Self {
-        Self { fs, password: None, connect_failure: None, shell: None }
+        Self { id: "fake", form: None, fs, password: None, connect_failure: None, shell: None }
     }
 
     pub fn requiring_password(mut self, password: &str) -> Self {
@@ -29,6 +32,16 @@ impl FakeProtocol {
         self
     }
 
+    pub fn with_id(mut self, id: &'static str) -> Self {
+        self.id = id;
+        self
+    }
+
+    pub fn with_form(mut self, form: ConnectionForm) -> Self {
+        self.form = Some(form);
+        self
+    }
+
     pub fn with_shell(mut self, invocation: ShellInvocation) -> Self {
         self.shell = Some(invocation);
         self
@@ -38,7 +51,7 @@ impl FakeProtocol {
 #[async_trait]
 impl Protocol for FakeProtocol {
     fn id(&self) -> &'static str {
-        "fake"
+        self.id
     }
 
     fn display_name(&self) -> &'static str {
@@ -47,6 +60,10 @@ impl Protocol for FakeProtocol {
 
     fn default_port(&self) -> u16 {
         2222
+    }
+
+    fn connection_form(&self) -> ConnectionForm {
+        self.form.clone().unwrap_or_else(|| ConnectionForm::standard(self.default_port()))
     }
 
     async fn connect(

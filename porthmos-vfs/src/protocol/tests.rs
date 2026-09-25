@@ -51,3 +51,48 @@ fn shell_invocation_builds_a_command_with_its_program_args_and_env() {
         [(std::ffi::OsStr::new("SSHPASS"), Some(std::ffi::OsStr::new("x")))]
     );
 }
+
+struct Minimal;
+
+#[async_trait]
+impl Protocol for Minimal {
+    fn id(&self) -> &'static str {
+        "minimal"
+    }
+
+    fn display_name(&self) -> &'static str {
+        "Minimal"
+    }
+
+    fn default_port(&self) -> u16 {
+        4242
+    }
+
+    async fn connect(
+        &self, _target: &Target, _prompter: &mut dyn Prompter,
+    ) -> Result<Arc<dyn FileSystem>, ProtocolError> {
+        unimplemented!()
+    }
+}
+
+#[test]
+fn the_default_connection_form_is_the_standard_form_on_the_default_port() {
+    assert_eq!(Minimal.connection_form(), crate::ConnectionForm::standard(4242));
+}
+
+#[test]
+fn target_debug_shows_option_keys_but_never_their_values() {
+    let target = Target {
+        name: "web".into(),
+        host: "example.com".into(),
+        port: 22,
+        username: "deploy".into(),
+        password: None,
+        options: BTreeMap::from([("token".to_string(), "s3cr3t".to_string())]),
+    };
+
+    let printed = format!("{target:?}");
+
+    assert!(printed.contains("token"));
+    assert!(!printed.contains("s3cr3t"));
+}

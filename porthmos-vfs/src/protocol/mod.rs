@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, ffi::OsString, fmt, path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
 
-use crate::{FileSystem, Prompter, ProtocolError};
+use crate::{ConnectionForm, FileSystem, Prompter, ProtocolError};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Target {
@@ -28,7 +28,7 @@ impl fmt::Debug for Target {
             .field("port", &self.port)
             .field("username", &self.username)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
-            .field("options", &self.options)
+            .field("options", &self.options.keys().collect::<Vec<_>>())
             .finish()
     }
 }
@@ -82,6 +82,9 @@ pub trait Protocol: Send + Sync {
     fn id(&self) -> &'static str;
     fn display_name(&self) -> &'static str;
     fn default_port(&self) -> u16;
+    fn connection_form(&self) -> ConnectionForm {
+        ConnectionForm::standard(self.default_port())
+    }
     fn discover(&self, _env: &Environment) -> Result<Vec<Target>, ProtocolError> {
         Ok(Vec::new())
     }
