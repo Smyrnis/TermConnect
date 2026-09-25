@@ -162,3 +162,12 @@ fn a_fake_protocol_can_take_another_id_and_form() {
     assert_eq!(protocol.id(), "ftp");
     assert_eq!(protocol.connection_form(), form);
 }
+
+#[tokio::test]
+async fn a_writer_on_a_failing_shutdown_path_errors_on_shutdown() {
+    let fs = FakeFs::new();
+    fs.fail_shutdown("/f");
+    let mut writer = fs.open_write(Path::new("/f"), 0).await.unwrap();
+    writer.stream.write_all(b"abc").await.unwrap();
+    assert!(writer.stream.shutdown().await.is_err());
+}

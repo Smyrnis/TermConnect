@@ -222,3 +222,25 @@ async fn resuming_from_a_partial_with_a_bad_tail_reproduces_the_source() {
     assert!(reported[0] > 0);
     assert_eq!(destination.contents("/dst/big.bin").unwrap(), content);
 }
+
+#[tokio::test]
+async fn an_upload_whose_final_shutdown_fails_is_reported_and_not_renamed() {
+    let source = source_with(b"payload");
+    let destination = empty_destination();
+    destination.fail_shutdown("/dst/f.part");
+
+    let result = execute(
+        &source,
+        Path::new("/src/f"),
+        &destination,
+        Path::new("/dst/f"),
+        &AtomicBool::new(false),
+        false,
+        |_| {},
+    )
+    .await;
+
+    assert!(result.is_err());
+    assert!(!destination.exists("/dst/f"));
+    assert!(destination.exists("/dst/f.part"));
+}

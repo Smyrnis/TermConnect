@@ -40,7 +40,11 @@ pub async fn execute(
     let mut writer = destination.open_write(&part, offset).await?;
     let mut reader = source.open_read(source_path, writer.offset).await?;
     let result = copy_with_progress(&mut reader, &mut writer.stream, writer.offset, cancel, on_progress).await;
-    let _ = writer.stream.shutdown().await;
+    let shutdown = writer.stream.shutdown().await;
+    let result = match (result, shutdown) {
+        (Ok(TransferOutcome::Completed), Err(err)) => Err(ProtocolError::from(err)),
+        (result, _) => result,
+    };
     if let Ok(TransferOutcome::Completed) = result {
         destination.rename(&part, destination_path).await?;
     }
