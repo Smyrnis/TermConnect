@@ -56,6 +56,10 @@ impl Paths {
         self.config_dir.join("connections.toml")
     }
 
+    pub fn known_certificates_file(&self) -> PathBuf {
+        self.config_dir.join("known_certificates.toml")
+    }
+
     pub fn bookmarks_file(&self) -> PathBuf {
         self.config_dir.join("bookmarks.toml")
     }

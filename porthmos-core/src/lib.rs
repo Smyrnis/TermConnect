@@ -30,12 +30,28 @@ use crate::{
     engine::{Engine, EngineParts},
 };
 
-pub fn builtin_protocols() -> Vec<Arc<dyn Protocol>> {
-    #[cfg(feature = "sftp")]
-    let protocols: Vec<Arc<dyn Protocol>> = vec![Arc::new(porthmos_sftp::Sftp)];
-    #[cfg(not(feature = "sftp"))]
-    let protocols: Vec<Arc<dyn Protocol>> = Vec::new();
-    protocols
+#[cfg(feature = "sftp")]
+fn sftp_protocol() -> Option<Arc<dyn Protocol>> {
+    Some(Arc::new(porthmos_sftp::Sftp))
+}
+
+#[cfg(not(feature = "sftp"))]
+fn sftp_protocol() -> Option<Arc<dyn Protocol>> {
+    None
+}
+
+#[cfg(feature = "ftp")]
+fn ftp_protocol(paths: &Paths) -> Option<Arc<dyn Protocol>> {
+    Some(Arc::new(porthmos_ftp::Ftp::new(paths.known_certificates_file())))
+}
+
+#[cfg(not(feature = "ftp"))]
+fn ftp_protocol(_paths: &Paths) -> Option<Arc<dyn Protocol>> {
+    None
+}
+
+pub fn builtin_protocols(paths: &Paths) -> Vec<Arc<dyn Protocol>> {
+    [sftp_protocol(), ftp_protocol(paths)].into_iter().flatten().collect()
 }
 
 #[derive(Clone)]
@@ -110,7 +126,7 @@ impl CoreBuilder {
         let paths = self.paths.context("the core needs its configuration paths")?;
         let (bookmarks, bookmark_warnings) = config::bookmarks::load(&paths)?;
         let local_home = self.local_home.or_else(|| self.env.home.clone()).unwrap_or_else(|| PathBuf::from("/"));
-        let protocols = self.protocols.unwrap_or_else(builtin_protocols);
+        let protocols = self.protocols.unwrap_or_else(|| builtin_protocols(&paths));
         let infos: Arc<[ProtocolInfo]> =
             protocols.iter().map(|protocol| ProtocolInfo::from_protocol(protocol.as_ref())).collect();
         let parts = EngineParts {

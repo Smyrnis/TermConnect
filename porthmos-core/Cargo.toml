@@ -7,8 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = ["sftp"]
+default = ["sftp", "ftp"]
 sftp = ["dep:porthmos-sftp"]
+ftp = ["dep:porthmos-ftp"]
 testing = ["porthmos-vfs/testing"]
 
 [dependencies]
@@ -18,6 +19,7 @@ serde.workspace = true
 porthmos-lfs.workspace = true
 porthmos-vfs.workspace = true
 porthmos-sftp = { workspace = true, optional = true }
+porthmos-ftp = { workspace = true, optional = true }
 tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
