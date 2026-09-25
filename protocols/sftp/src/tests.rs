@@ -34,7 +34,36 @@ fn discover_falls_back_to_root_when_no_user_is_known() {
 
     let targets = Sftp.discover(&env).unwrap();
 
-    assert_eq!((targets[0].username.as_str(), targets[0].host.as_str()), ("root", ""));
+    assert_eq!(targets[0].username, "root");
+}
+
+#[test]
+fn discover_uses_the_alias_as_the_host_when_no_hostname_is_set() {
+    let (_dir, env) = home_with_ssh_config("Host box\n  User deploy\n");
+
+    let targets = Sftp.discover(&env).unwrap();
+
+    assert_eq!((targets[0].name.as_str(), targets[0].host.as_str()), ("box", "box"));
+}
+
+#[test]
+fn the_shell_for_a_discovered_host_without_a_hostname_goes_through_its_alias() {
+    let (_dir, env) = home_with_ssh_config("Host box\n  User deploy\n");
+    let target = Sftp.discover(&env).unwrap().remove(0);
+
+    assert_eq!(shell_args(&target, &env), ["-o", "HostName=box", "-p", "22", "-l", "deploy", "box"]);
+}
+
+#[test]
+fn discover_applies_wildcard_defaults_and_hostname_tokens() {
+    let (_dir, env) =
+        home_with_ssh_config("Host box\nHost *\n  HostName %h.corp.example.com\n  User deploy\n  Port 2222\n");
+
+    let target = Sftp.discover(&env).unwrap().remove(0);
+
+    assert_eq!(target.host, "box.corp.example.com");
+    assert_eq!((target.username.as_str(), target.port), ("deploy", 2222));
+    assert_eq!(shell_args(&target, &env), ["-o", "HostName=box.corp.example.com", "-p", "2222", "-l", "deploy", "box"]);
 }
 
 #[test]
@@ -82,8 +111,8 @@ fn the_shell_for_a_discovered_host_goes_through_its_ssh_config_alias() {
 }
 
 #[test]
-fn the_shell_through_an_alias_keeps_the_sessions_user_and_port_over_wildcard_defaults() {
-    let (_dir, env) = home_with_ssh_config("Host box\n  HostName 10.0.0.2\nHost *\n  User deploy\n  Port 2222\n");
+fn the_shell_through_an_alias_keeps_the_sessions_user_and_port_over_match_blocks() {
+    let (_dir, env) = home_with_ssh_config("Host box\n  HostName 10.0.0.2\nMatch all\n  User deploy\n  Port 2222\n");
     let target = Sftp.discover(&env).unwrap().remove(0);
 
     assert_eq!(shell_args(&target, &env), ["-o", "HostName=10.0.0.2", "-p", "22", "-l", "alice", "box"]);

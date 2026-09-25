@@ -33,8 +33,8 @@ fn discovered_target(host: ssh_config::SshConfigHost, env: &Environment) -> Targ
         options.insert("identity_file".to_string(), identity_file.to_string_lossy().into_owned());
     }
     Target {
+        host: host.host_name.unwrap_or_else(|| host.name.clone()),
         name: host.name,
-        host: host.host_name.unwrap_or_default(),
         port: host.port.unwrap_or(DEFAULT_PORT),
         username: host.user.or_else(|| env.user.clone()).unwrap_or_else(|| FALLBACK_USERNAME.to_string()),
         password: None,
