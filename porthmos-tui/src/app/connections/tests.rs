@@ -4,7 +4,10 @@ use crossterm::event::KeyEventState;
 use porthmos_core::{Answer, profiles::ProfileDraft};
 
 use super::*;
-use crate::app::testing::{TestApp, test_app};
+use crate::{
+    app::testing::{TestApp, test_app},
+    widgets::dialog::confirm::ConfirmFocus,
+};
 
 fn app() -> TestApp {
     test_app(Path::new("/d"))
@@ -206,6 +209,64 @@ fn escaping_the_password_prompt_cancels_the_connection() {
 
     assert!(test.app.dialog.is_none());
     assert_eq!(test.sent(), vec![Command::Answer { request_id: 4, answer: None }]);
+    assert_eq!(test.app.connection_status, ConnectionStatus::Disconnected);
+}
+
+fn ask_to_trust_a_host_key(test: &mut TestApp) {
+    test.app.connection_status = ConnectionStatus::Connecting("web".to_string());
+    test.app.apply_core_event(Event::Question {
+        request_id: 9,
+        question: Question::TrustHostKey {
+            name: "web".to_string(),
+            host: "example.com".to_string(),
+            port: 2222,
+            key_type: "ssh-ed25519".to_string(),
+            fingerprint: "SHA256:abc".to_string(),
+        },
+    });
+}
+
+#[test]
+fn a_host_key_question_shows_the_host_and_fingerprint_with_no_focused() {
+    let mut test = app();
+
+    ask_to_trust_a_host_key(&mut test);
+
+    match test.app.dialog {
+        Some(Dialog::Confirm(ref dialog)) => {
+            assert_eq!(
+                dialog.message,
+                "web (example.com:2222) is not a known host.\n\
+                 ssh-ed25519 SHA256:abc\n\
+                 Trust this key and add it to ~/.ssh/known_hosts?"
+            );
+            assert_eq!(dialog.focus, ConfirmFocus::No);
+        }
+        _ => panic!("expected the host key confirmation"),
+    }
+}
+
+#[test]
+fn confirming_the_host_key_trusts_it() {
+    let mut test = app();
+    ask_to_trust_a_host_key(&mut test);
+
+    test.app.apply_dialog_key(key(KeyCode::Char('y')));
+
+    assert!(test.app.dialog.is_none());
+    assert_eq!(test.sent(), vec![Command::Answer { request_id: 9, answer: Some(Answer::Confirmed) }]);
+    assert_eq!(test.app.connection_status, ConnectionStatus::Connecting("web".to_string()));
+}
+
+#[test]
+fn declining_the_host_key_cancels_the_connection() {
+    let mut test = app();
+    ask_to_trust_a_host_key(&mut test);
+
+    test.app.apply_dialog_key(key(KeyCode::Enter));
+
+    assert!(test.app.dialog.is_none());
+    assert_eq!(test.sent(), vec![Command::Answer { request_id: 9, answer: None }]);
     assert_eq!(test.app.connection_status, ConnectionStatus::Disconnected);
 }
 

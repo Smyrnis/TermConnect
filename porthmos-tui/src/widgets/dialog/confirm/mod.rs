@@ -52,7 +52,12 @@ impl ConfirmDialog {
 }
 
 pub fn render_confirm(frame: &mut Frame, area: Rect, dialog: &ConfirmDialog) {
-    let popup = centered_popup(area, super::content_width(&[dialog.message.as_str(), "[y] Yes   [n] No"]), 5);
+    let message_lines: Vec<&str> = dialog.message.lines().collect();
+    let mut widest = message_lines.clone();
+    widest.push("[y] Yes   [n] No");
+    let width = super::content_width(&widest).min(area.width);
+    let rows = split_to_width(&message_lines, usize::from(width.saturating_sub(2)));
+    let popup = centered_popup(area, width, rows.len() as u16 + 4);
 
     let block = Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Yellow));
 
@@ -67,16 +72,33 @@ pub fn render_confirm(frame: &mut Frame, area: Rect, dialog: &ConfirmDialog) {
         Style::default()
     };
 
-    let text = Text::from(vec![
-        Line::from(dialog.message.as_str()),
-        Line::from(""),
-        Line::from(vec![Span::styled("[y] Yes", yes_style), Span::raw("   "), Span::styled("[n] No", no_style)]),
-    ]);
+    let mut lines: Vec<Line> = rows.into_iter().map(Line::from).collect();
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("[y] Yes", yes_style),
+        Span::raw("   "),
+        Span::styled("[n] No", no_style),
+    ]));
+    let text = Text::from(lines);
 
     let paragraph = Paragraph::new(text).block(block).alignment(Alignment::Center);
 
     frame.render_widget(Clear, popup);
     frame.render_widget(paragraph, popup);
+}
+
+fn split_to_width(lines: &[&str], width: usize) -> Vec<String> {
+    let width = width.max(1);
+    lines
+        .iter()
+        .flat_map(|line| {
+            let chars: Vec<char> = line.chars().collect();
+            if chars.is_empty() {
+                return vec![String::new()];
+            }
+            chars.chunks(width).map(|chunk| chunk.iter().collect()).collect()
+        })
+        .collect()
 }
 
 fn centered_popup(area: Rect, width: u16, height: u16) -> Rect {

@@ -13,6 +13,7 @@ russh.workspace = true
 russh-sftp.workspace = true
 porthmos-vfs.workspace = true
 tokio.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

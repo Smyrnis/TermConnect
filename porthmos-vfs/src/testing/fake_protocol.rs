@@ -64,7 +64,7 @@ impl Protocol for FakeProtocol {
                     return Err(ProtocolError::new(ErrorKind::Cancelled, anyhow::anyhow!("Connection cancelled")));
                 }
                 Some(Answer::Password(given)) if &given == expected => {}
-                Some(Answer::Password(_)) => {
+                Some(_) => {
                     return Err(ProtocolError::new(ErrorKind::AuthRejected, anyhow::anyhow!("rejected")));
                 }
             }

@@ -7,7 +7,7 @@ mod search;
 mod shell;
 pub mod ssh_config;
 
-use std::{collections::BTreeMap, path::Path, sync::Arc};
+use std::{collections::BTreeMap, future::Future, path::Path, sync::Arc};
 
 use anyhow::anyhow;
 use porthmos_vfs::{
@@ -15,13 +15,48 @@ use porthmos_vfs::{
     async_trait,
 };
 use russh::client::Handle;
+use tokio::sync::mpsc;
 
-use crate::{client::PorthmosHandler, fs::SftpFs};
+use crate::{
+    client::{HostKeyCheck, HostKeyDeclined, HostKeyQuestion, PorthmosHandler},
+    fs::SftpFs,
+};
 
 const DEFAULT_PORT: u16 = 22;
 const FALLBACK_USERNAME: &str = "root";
 
 pub struct Sftp;
+
+fn connect_error(err: anyhow::Error) -> ProtocolError {
+    if err.downcast_ref::<HostKeyDeclined>().is_some() {
+        return ProtocolError::new(ErrorKind::Cancelled, anyhow!("Connection cancelled"));
+    }
+    ProtocolError::new(ErrorKind::Connect, err)
+}
+
+async fn answer_host_key_questions<T>(
+    connecting: impl Future<Output = T>, asked: &mut mpsc::Receiver<HostKeyQuestion>, prompter: &mut dyn Prompter,
+    target: &Target,
+) -> T {
+    tokio::pin!(connecting);
+    loop {
+        tokio::select! {
+            result = &mut connecting => return result,
+            Some(question) = asked.recv() => {
+                let HostKeyQuestion { key_type, fingerprint, reply } = question;
+                let trust = Question::TrustHostKey {
+                    name: target.name.clone(),
+                    host: target.host.clone(),
+                    port: target.port,
+                    key_type,
+                    fingerprint,
+                };
+                let trusted = matches!(prompter.ask(trust).await, Some(Answer::Confirmed));
+                let _ = reply.send(trusted);
+            }
+        }
+    }
+}
 
 async fn start_sftp(handle: Handle<PorthmosHandler>) -> Result<Arc<dyn FileSystem>, ProtocolError> {
     let sftp = client::open_sftp(&handle).await.map_err(|err| ProtocolError::new(ErrorKind::SessionStart, err))?;
@@ -66,9 +101,11 @@ impl Protocol for Sftp {
     async fn connect(
         &self, target: &Target, prompter: &mut dyn Prompter,
     ) -> Result<Arc<dyn FileSystem>, ProtocolError> {
-        let mut handle = client::connect(&target.host, target.port)
+        let (questions, mut asked) = mpsc::channel(1);
+        let host_key = HostKeyCheck::new(&target.host, target.port, client::default_known_hosts(), questions);
+        let mut handle = answer_host_key_questions(client::connect(host_key), &mut asked, prompter, target)
             .await
-            .map_err(|err| ProtocolError::new(ErrorKind::Connect, err))?;
+            .map_err(connect_error)?;
 
         let identity_file = target.option("identity_file").map(Path::new);
         match client::authenticate_non_interactive(

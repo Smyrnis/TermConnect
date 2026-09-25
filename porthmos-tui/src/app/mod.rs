@@ -52,6 +52,7 @@ enum PendingAction {
     Delete,
     AddBookmark,
     SubmitPassword { request_id: RequestId },
+    TrustHostKey { request_id: RequestId },
     AddConnection,
     EditConnection { original: ConnectionEntry },
     DeleteConnection { name: String },
@@ -236,9 +237,22 @@ impl App {
     }
 
     fn ask(&mut self, request_id: RequestId, question: Question) {
-        let Question::Password { username, name } = question;
-        self.dialog = Some(Dialog::TextInput(TextInputDialog::new_masked(format!("Password for {username}@{name}"))));
-        self.pending_action = Some(PendingAction::SubmitPassword { request_id });
+        match question {
+            Question::Password { username, name } => {
+                let title = format!("Password for {username}@{name}");
+                self.dialog = Some(Dialog::TextInput(TextInputDialog::new_masked(title)));
+                self.pending_action = Some(PendingAction::SubmitPassword { request_id });
+            }
+            Question::TrustHostKey { name, host, port, key_type, fingerprint } => {
+                let message = format!(
+                    "{name} ({host}:{port}) is not a known host.\n\
+                     {key_type} {fingerprint}\n\
+                     Trust this key and add it to ~/.ssh/known_hosts?"
+                );
+                self.dialog = Some(Dialog::Confirm(ConfirmDialog::new(message)));
+                self.pending_action = Some(PendingAction::TrustHostKey { request_id });
+            }
+        }
     }
 
     fn apply_listing(&mut self, location: Location, path: PathBuf, entries: Vec<porthmos_core::Entry>) {
