@@ -144,3 +144,11 @@ async fn fake_protocol_accepts_a_saved_password_without_asking() {
     let protocol = FakeProtocol::new(FakeFs::new()).requiring_password("s3cret");
     assert!(protocol.connect(&target(Some("s3cret")), &mut Scripted(None)).await.is_ok());
 }
+
+#[tokio::test]
+async fn a_failing_home_reports_permission_denied() {
+    let fs = FakeFs::new();
+    fs.fail_home();
+    let error = fs.home().await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::PermissionDenied);
+}

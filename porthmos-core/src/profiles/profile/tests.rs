@@ -127,3 +127,38 @@ fn an_entry_hands_its_fields_and_options_to_the_protocol_target() {
     assert_eq!(target.password.as_deref(), Some("pw"));
     assert_eq!(target.option("identity_file"), Some("/k"));
 }
+
+fn entry_with_options(options: &[(&str, &str)]) -> ConnectionEntry {
+    ConnectionEntry::from_profile(
+        ConnectionProfile {
+            name: "prod".to_string(),
+            host: "server.example.com".to_string(),
+            protocol: "sftp".to_string(),
+            port: None,
+            username: "deploy".to_string(),
+            password: None,
+            options: options.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect(),
+        },
+        22,
+    )
+}
+
+#[test]
+fn the_start_path_is_the_profiles_remote_path() {
+    assert_eq!(entry_with_options(&[("remote_path", "/var/www")]).start_path(), Some("/var/www"));
+}
+
+#[test]
+fn the_start_path_ignores_surrounding_whitespace() {
+    assert_eq!(entry_with_options(&[("remote_path", "  /var/www \t")]).start_path(), Some("/var/www"));
+}
+
+#[test]
+fn a_blank_remote_path_means_no_start_path() {
+    assert_eq!(entry_with_options(&[("remote_path", "   ")]).start_path(), None);
+}
+
+#[test]
+fn a_profile_without_a_remote_path_has_no_start_path() {
+    assert_eq!(entry_with_options(&[]).start_path(), None);
+}

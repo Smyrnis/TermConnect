@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use porthmos_vfs::{FileSystem, Protocol};
 
-use super::super::{Engine, Event, Internal, LiveSession, Location, SessionId, prompter::EnginePrompter};
+use super::super::{Engine, Event, Internal, LiveSession, SessionId, prompter::EnginePrompter};
 use crate::{Severity, connect_failure_message, profiles::ConnectionEntry};
 
 impl Engine {
@@ -60,7 +60,7 @@ impl Engine {
         let name = entry.name.clone();
         self.sessions.insert(session, LiveSession { name: name.clone(), entry, protocol, fs });
         self.emit(Event::Connected { session, name, shell_available });
-        self.list(Location::Session(session), None);
+        self.open_start_directory(session);
     }
 
     pub(crate) fn disconnect(&mut self, session: SessionId) {

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::engine::{Command, testing::test_engine};
@@ -155,4 +155,29 @@ async fn deleting_stops_at_the_first_failure() {
     }
     assert!(!remote.exists("/a"));
     assert!(remote.exists("/c"));
+}
+
+#[test]
+fn an_absolute_start_directory_is_used_as_is() {
+    assert_eq!(start_directory(Path::new("/home/user"), "/var/www"), PathBuf::from("/var/www"));
+}
+
+#[test]
+fn a_relative_start_directory_is_under_home() {
+    assert_eq!(start_directory(Path::new("/home/user"), "projects/app"), PathBuf::from("/home/user/projects/app"));
+}
+
+#[test]
+fn a_tilde_start_directory_is_home() {
+    assert_eq!(start_directory(Path::new("/home/user"), "~"), PathBuf::from("/home/user"));
+}
+
+#[test]
+fn a_tilde_slash_start_directory_is_under_home() {
+    assert_eq!(start_directory(Path::new("/home/user"), "~/projects"), PathBuf::from("/home/user/projects"));
+}
+
+#[test]
+fn a_tilde_followed_by_a_name_is_a_relative_directory_not_another_users_home() {
+    assert_eq!(start_directory(Path::new("/home/user"), "~backup"), PathBuf::from("/home/user/~backup"));
 }

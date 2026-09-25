@@ -14,18 +14,22 @@ use porthmos_vfs::{
 use super::*;
 use crate::{
     engine::{
-        Command, PlanningScan,
+        Command, Location, PlanningScan,
         testing::{TestEngine, test_engine},
     },
     transfer::{Direction, JobStatus},
 };
 
 fn with_fake_profile(protocol: impl FnOnce(FakeFs) -> FakeProtocol) -> (TestEngine, FakeFs) {
+    with_fake_profile_lines("", protocol)
+}
+
+fn with_fake_profile_lines(extra_lines: &str, protocol: impl FnOnce(FakeFs) -> FakeProtocol) -> (TestEngine, FakeFs) {
     let mut t = test_engine();
     std::fs::create_dir_all(&t.engine.paths.config_dir).unwrap();
     std::fs::write(
         t.engine.paths.connections_file(),
-        "[connections.srv]\nprotocol = \"fake\"\nhost = \"h\"\nusername = \"u\"\n",
+        format!("[connections.srv]\nprotocol = \"fake\"\nhost = \"h\"\nusername = \"u\"\n{extra_lines}"),
     )
     .unwrap();
     let remote = FakeFs::new();
@@ -64,6 +68,92 @@ async fn connecting_lists_the_remote_home() {
     })
     .await;
     assert_eq!(names, ["notes.txt"]);
+}
+
+async fn first_session_listing(t: &mut TestEngine) -> (PathBuf, Vec<String>) {
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    t.run_internal().await;
+    let session = next_matching(t, |event| match event {
+        Event::Connected { session, .. } => Some(*session),
+        _ => None,
+    })
+    .await;
+    next_matching(t, |event| match event {
+        Event::Listed { location: Location::Session(id), path, entries } if *id == session => {
+            Some((path.clone(), entries.iter().map(|entry| entry.name.clone()).collect()))
+        }
+        _ => None,
+    })
+    .await
+}
+
+#[tokio::test]
+async fn connecting_opens_the_profiles_absolute_remote_path() {
+    let (mut t, remote) = with_fake_profile_lines("remote_path = \"/var/www\"\n", FakeProtocol::new);
+    remote.file("/var/www/index.html", b"<html>", None);
+
+    let (path, names) = first_session_listing(&mut t).await;
+
+    assert_eq!(path, PathBuf::from("/var/www"));
+    assert_eq!(names, ["index.html"]);
+}
+
+#[tokio::test]
+async fn connecting_opens_a_relative_remote_path_under_the_remote_home() {
+    let (mut t, remote) = with_fake_profile_lines("remote_path = \"projects\"\n", FakeProtocol::new);
+    remote.file("/home/user/projects/app.rs", b"fn main() {}", None);
+
+    let (path, names) = first_session_listing(&mut t).await;
+
+    assert_eq!(path, PathBuf::from("/home/user/projects"));
+    assert_eq!(names, ["app.rs"]);
+}
+
+#[tokio::test]
+async fn connecting_opens_a_tilde_remote_path_under_the_remote_home() {
+    let (mut t, remote) = with_fake_profile_lines("remote_path = \"~/projects\"\n", FakeProtocol::new);
+    remote.dir("/home/user/projects");
+
+    let (path, _) = first_session_listing(&mut t).await;
+
+    assert_eq!(path, PathBuf::from("/home/user/projects"));
+}
+
+#[tokio::test]
+async fn a_missing_remote_path_warns_and_falls_back_to_the_remote_home() {
+    let (mut t, remote) = with_fake_profile_lines("remote_path = \"/var/www\"\n", FakeProtocol::new);
+    remote.file("/home/user/notes.txt", b"hi", None);
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    t.run_internal().await;
+    let warning = next_matching(&mut t, |event| match event {
+        Event::Notice { severity: Severity::Warning, message } => Some(message.clone()),
+        Event::Listed { .. } => panic!("listed before warning about the missing remote path"),
+        _ => None,
+    })
+    .await;
+    let (path, names) = next_matching(&mut t, |event| match event {
+        Event::Listed { location: Location::Session(_), path, entries } => {
+            Some((path.clone(), entries.iter().map(|entry| entry.name.clone()).collect::<Vec<_>>()))
+        }
+        _ => None,
+    })
+    .await;
+
+    assert!(warning.starts_with("Unable to open /var/www on srv, showing the home directory instead:\n"), "{warning}");
+    assert_eq!(path, PathBuf::from("/home/user"));
+    assert_eq!(names, ["notes.txt"]);
+}
+
+#[tokio::test]
+async fn an_absolute_remote_path_opens_even_when_the_remote_home_is_unavailable() {
+    let (mut t, remote) = with_fake_profile_lines("remote_path = \"/var/www\"\n", FakeProtocol::new);
+    remote.file("/var/www/index.html", b"<html>", None).fail_home();
+
+    let (path, names) = first_session_listing(&mut t).await;
+
+    assert_eq!(path, PathBuf::from("/var/www"));
+    assert_eq!(names, ["index.html"]);
 }
 
 #[tokio::test]

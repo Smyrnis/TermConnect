@@ -107,6 +107,10 @@ impl ConnectionEntry {
         self.options.get(key).map(String::as_str)
     }
 
+    pub fn start_path(&self) -> Option<&str> {
+        self.option("remote_path").map(str::trim).filter(|path| !path.is_empty())
+    }
+
     pub fn target(&self) -> Target {
         Target {
             name: self.name.clone(),

@@ -24,6 +24,7 @@ struct Tree {
     nodes: BTreeMap<PathBuf, Node>,
     failing_read_dirs: BTreeSet<PathBuf>,
     failing_reads: BTreeSet<PathBuf>,
+    failing_home: bool,
 }
 
 const MAX_SYMLINK_HOPS: usize = 8;
@@ -125,6 +126,11 @@ impl FakeFs {
 
     pub fn fail_reads(&self, path: impl AsRef<Path>) -> &Self {
         self.tree.lock().unwrap().failing_reads.insert(path.as_ref().to_path_buf());
+        self
+    }
+
+    pub fn fail_home(&self) -> &Self {
+        self.tree.lock().unwrap().failing_home = true;
         self
     }
 
@@ -272,6 +278,9 @@ impl FileSystem for FakeFs {
     }
 
     async fn home(&self) -> Result<PathBuf, ProtocolError> {
+        if self.tree.lock().unwrap().failing_home {
+            return Err(ProtocolError::new(ErrorKind::PermissionDenied, anyhow::anyhow!("Permission denied")));
+        }
         Ok(self.home.clone())
     }
 
