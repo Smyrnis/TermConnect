@@ -27,6 +27,7 @@ unicode-width = "0.2.2"
 porthmos-vfs = { path = "porthmos-vfs" }
 porthmos-lfs = { path = "porthmos-lfs" }
 porthmos-sftp = { path = "protocols/sftp" }
+porthmos-ftp = { path = "protocols/ftp" }
 porthmos-core = { path = "porthmos-core" }
 
 [profile.release]
