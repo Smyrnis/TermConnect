@@ -30,6 +30,9 @@ pub trait FileSystem: Send + Sync {
     async fn open_write_sized(&self, path: &Path, offset: u64, _size: u64) -> Result<Writer, ProtocolError> {
         self.open_write(path, offset).await
     }
+    fn transfer_limit(&self) -> Option<usize> {
+        None
+    }
     fn resume_backoff(&self) -> u64 {
         0
     }

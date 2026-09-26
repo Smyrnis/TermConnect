@@ -256,6 +256,10 @@ impl FileSystem for ScpFs {
         self.run_ok(&commands::remove_tree(path), path).await.map(|_| ())
     }
 
+    fn transfer_limit(&self) -> Option<usize> {
+        Some(TRANSFER_CHANNELS)
+    }
+
     async fn home(&self) -> Result<PathBuf, ProtocolError> {
         Ok(self.home.clone())
     }

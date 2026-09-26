@@ -118,14 +118,27 @@ impl TransferQueue {
     }
 
     pub fn startable(&self, limit: usize) -> Vec<u64> {
+        self.startable_limited(limit, |_| None)
+    }
+
+    pub fn startable_limited(&self, limit: usize, session_limit: impl Fn(u64) -> Option<usize>) -> Vec<u64> {
         let free_slots = limit.saturating_sub(self.active_count());
         let mut busy_destinations: HashSet<Destination> = self.active_jobs().map(TransferJob::destination).collect();
+        let mut per_session: HashMap<u64, usize> = HashMap::new();
+        for job in self.active_jobs() {
+            *per_session.entry(job.session_id).or_default() += 1;
+        }
         let mut startable = Vec::new();
         for job in self.jobs.values().filter(|job| job.status == JobStatus::Queued) {
             if startable.len() == free_slots {
                 break;
             }
+            let running = per_session.get(&job.session_id).copied().unwrap_or(0);
+            if session_limit(job.session_id).is_some_and(|cap| running >= cap) {
+                continue;
+            }
             if busy_destinations.insert(job.destination()) {
+                *per_session.entry(job.session_id).or_default() += 1;
                 startable.push(job.id);
             }
         }

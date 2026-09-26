@@ -82,7 +82,10 @@ impl Engine {
 
     pub(crate) fn fill_transfer_slots(&mut self) {
         loop {
-            let startable = self.transfers.startable(self.max_parallel);
+            let sessions = &self.sessions;
+            let startable = self.transfers.startable_limited(self.max_parallel, |session_id| {
+                sessions.get(&session_id).and_then(|session| session.fs.transfer_limit())
+            });
             if startable.is_empty() {
                 return;
             }

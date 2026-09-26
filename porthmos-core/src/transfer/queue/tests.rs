@@ -441,3 +441,26 @@ fn a_manual_retry_of_a_job_that_never_started_does_not_resume() {
 
     assert!(!queue.get(id).unwrap().resume);
 }
+
+#[test]
+fn a_session_limit_holds_back_that_sessions_jobs_but_not_others() {
+    let mut queue = TransferQueue::new();
+    let first = enqueue_for(&mut queue, 1, Direction::Upload, "a.txt");
+    enqueue_for(&mut queue, 1, Direction::Upload, "b.txt");
+    let other = enqueue_for(&mut queue, 2, Direction::Upload, "c.txt");
+
+    let limits = |session: u64| (session == 1).then_some(1);
+
+    assert_eq!(queue.startable_limited(4, limits), vec![first, other]);
+}
+
+#[test]
+fn a_session_limit_counts_that_sessions_active_jobs() {
+    let mut queue = TransferQueue::new();
+    let active = enqueue_for(&mut queue, 1, Direction::Upload, "a.txt");
+    queue.get_mut(active).unwrap().status = JobStatus::InProgress;
+    enqueue_for(&mut queue, 1, Direction::Upload, "b.txt");
+
+    assert!(queue.startable_limited(4, |_| Some(1)).is_empty());
+    assert_eq!(queue.startable_limited(4, |_| Some(2)).len(), 1);
+}

@@ -234,3 +234,8 @@ async fn by_default_a_sized_write_is_a_plain_write() {
     assert_eq!(fs.contents("/d/f").unwrap(), b"xy");
     assert!(fs.written_sizes().is_empty());
 }
+
+#[test]
+fn by_default_a_file_system_has_no_transfer_limit() {
+    assert_eq!(OnlyWrites(FakeFs::new()).transfer_limit(), None);
+}
