@@ -2309,24 +2309,19 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "base64 0.22.1",
  "futures-util",
  "libunftp",
+ "porthmos-tls",
  "porthmos-vfs",
  "rcgen",
  "rustls",
- "serde",
- "sha2 0.10.9",
  "suppaftp",
  "tempfile",
  "tokio",
  "tokio-rustls",
- "toml",
  "tracing",
  "unftp-core",
  "unftp-sbe-fs",
- "webpki-roots",
- "x509-parser",
 ]
 
 [[package]]
@@ -2352,6 +2347,24 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "porthmos-tls"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "porthmos-vfs",
+ "rcgen",
+ "rustls",
+ "serde",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "toml",
+ "webpki-roots",
+ "x509-parser",
 ]
 
 [[package]]

@@ -32,8 +32,8 @@ fn the_passive_address_is_replaced_only_for_servers_outside_the_local_network() 
 #[tokio::test]
 async fn a_trust_problem_from_an_earlier_handshake_does_not_label_a_later_network_error() {
     let dir = tempfile::tempdir().unwrap();
-    let store = crate::certificates::KnownCertificates::new(dir.path().join("k.toml"));
-    let (tls, problem) = crate::certificates::client_config("127.0.0.1", 1, store);
+    let store = porthmos_tls::KnownCertificates::new(dir.path().join("k.toml"));
+    let (tls, problem) = porthmos_tls::client_config("127.0.0.1", 1, store);
     *problem.lock().unwrap() = Some(TrustProblem::Changed);
     let settings = crate::settings::FtpSettings::from_target(&porthmos_vfs::Target {
         name: "n".into(),

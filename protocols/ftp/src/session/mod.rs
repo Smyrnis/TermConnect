@@ -9,8 +9,9 @@ use suppaftp::{
     types::FileType,
 };
 
+use porthmos_tls::{ProblemSlot, TrustProblem};
+
 use crate::{
-    certificates::{ProblemSlot, TrustProblem},
     errors::ftp_error,
     settings::{FtpSettings, Security},
 };

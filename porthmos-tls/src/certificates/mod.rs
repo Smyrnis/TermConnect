@@ -21,15 +21,15 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct CertificateDetails {
-    pub(crate) fingerprint: String,
-    pub(crate) subject: String,
-    pub(crate) expires: String,
+pub struct CertificateDetails {
+    pub fingerprint: String,
+    pub subject: String,
+    pub expires: String,
 }
 
 const UNKNOWN: &str = "unknown";
 
-pub(crate) fn details(der: &[u8]) -> CertificateDetails {
+pub fn details(der: &[u8]) -> CertificateDetails {
     let fingerprint = format!("SHA256:{}", STANDARD_NO_PAD.encode(Sha256::digest(der)));
     match x509_parser::parse_x509_certificate(der) {
         Ok((_, certificate)) => {
@@ -52,7 +52,7 @@ struct Pinned {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct KnownCertificates {
+pub struct KnownCertificates {
     path: PathBuf,
 }
 
@@ -61,11 +61,11 @@ fn store_error(path: &std::path::Path, err: impl fmt::Display) -> ProtocolError 
 }
 
 impl KnownCertificates {
-    pub(crate) fn new(path: PathBuf) -> Self {
+    pub fn new(path: PathBuf) -> Self {
         Self { path }
     }
 
-    pub(crate) fn path(&self) -> &std::path::Path {
+    pub fn path(&self) -> &std::path::Path {
         &self.path
     }
 
@@ -77,11 +77,11 @@ impl KnownCertificates {
         }
     }
 
-    pub(crate) fn lookup(&self, host: &str, port: u16) -> Result<Option<String>, ProtocolError> {
+    pub fn lookup(&self, host: &str, port: u16) -> Result<Option<String>, ProtocolError> {
         Ok(self.load()?.remove(&format!("{host}:{port}")).map(|pinned| pinned.sha256))
     }
 
-    pub(crate) fn remember(&self, host: &str, port: u16, details: &CertificateDetails) -> Result<(), ProtocolError> {
+    pub fn remember(&self, host: &str, port: u16, details: &CertificateDetails) -> Result<(), ProtocolError> {
         let mut pinned = self.load()?;
         pinned.insert(
             format!("{host}:{port}"),
@@ -102,15 +102,15 @@ impl KnownCertificates {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum TrustProblem {
+pub enum TrustProblem {
     Unknown(CertificateDetails),
     Changed,
     Store(String),
 }
 
-pub(crate) type ProblemSlot = Arc<Mutex<Option<TrustProblem>>>;
+pub type ProblemSlot = Arc<Mutex<Option<TrustProblem>>>;
 
-pub(crate) struct TrustVerifier {
+pub struct TrustVerifier {
     host: String,
     port: u16,
     store: KnownCertificates,
@@ -130,7 +130,7 @@ fn provider() -> Arc<CryptoProvider> {
 }
 
 impl TrustVerifier {
-    pub(crate) fn new(host: &str, port: u16, store: KnownCertificates) -> (Self, ProblemSlot) {
+    pub fn new(host: &str, port: u16, store: KnownCertificates) -> (Self, ProblemSlot) {
         let provider = provider();
         let roots = RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
         let system = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider.clone())
@@ -181,7 +181,7 @@ impl ServerCertVerifier for TrustVerifier {
     }
 }
 
-pub(crate) fn client_config(host: &str, port: u16, store: KnownCertificates) -> (Arc<ClientConfig>, ProblemSlot) {
+pub fn client_config(host: &str, port: u16, store: KnownCertificates) -> (Arc<ClientConfig>, ProblemSlot) {
     let (verifier, problem) = TrustVerifier::new(host, port, store);
     let config = ClientConfig::builder_with_provider(provider())
         .with_safe_default_protocol_versions()

@@ -1,7 +1,6 @@
 #[cfg(not(unix))]
 compile_error!("porthmos only supports Unix-like platforms (Linux/macOS)");
 
-mod certificates;
 mod errors;
 mod fs;
 mod listing;
@@ -18,8 +17,9 @@ use porthmos_vfs::{
     Question, Target, async_trait,
 };
 
+use porthmos_tls::{KnownCertificates, ask_to_trust, client_config};
+
 use crate::{
-    certificates::{KnownCertificates, TrustProblem, client_config},
     fs::FtpFs,
     pool::Pool,
     session::{Connection, DEFAULT_TIMEOUT, Login, OpenError, SessionContext, bounded, login, open, prepare},
@@ -108,33 +108,8 @@ async fn open_trusted(
         let context = SessionContext { settings: settings.clone(), tls, problem, timeout };
         match open(&context).await {
             Ok(connection) => return Ok((context, connection)),
-            Err(OpenError::Trust(TrustProblem::Unknown(details))) => {
-                let question = Question::TrustCertificate {
-                    name: target.name.clone(),
-                    host: settings.host.clone(),
-                    port: settings.port,
-                    fingerprint: details.fingerprint.clone(),
-                    subject: details.subject.clone(),
-                    expires: details.expires.clone(),
-                };
-                if !matches!(prompter.ask(question).await, Some(Answer::Confirmed)) {
-                    return Err(cancelled());
-                }
-                store.remember(&settings.host, settings.port, &details)?;
-            }
-            Err(OpenError::Trust(TrustProblem::Changed)) => {
-                return Err(ProtocolError::new(
-                    ErrorKind::Connect,
-                    anyhow!(
-                        "CERTIFICATE CHANGED for {}:{} \u{2014} refusing to connect (see {})",
-                        settings.host,
-                        settings.port,
-                        store.path().display()
-                    ),
-                ));
-            }
-            Err(OpenError::Trust(TrustProblem::Store(message))) => {
-                return Err(ProtocolError::new(ErrorKind::Connect, anyhow!(message)));
+            Err(OpenError::Trust(problem)) => {
+                ask_to_trust(problem, &target.name, &settings.host, settings.port, store, prompter).await?;
             }
             Err(OpenError::Other(err)) => return Err(err),
         }
