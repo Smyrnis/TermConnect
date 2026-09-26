@@ -18,11 +18,6 @@ use russh::{
 };
 use tokio::sync::{mpsc, oneshot};
 
-const SFTP_REQUEST_TIMEOUT_SECS: u64 = 60;
-const SFTP_MAX_CONCURRENT_READS: usize = 8;
-pub const SFTP_MAX_CONCURRENT_WRITES: usize = 16;
-pub const SFTP_MAX_WRITE_PACKET_LEN: u32 = 32 * 1024;
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum HostKeyStatus {
     Known,
@@ -154,20 +149,6 @@ impl client::Handler for PorthmosHandler {
     }
 }
 
-pub async fn open_sftp(handle: &Handle<PorthmosHandler>) -> Result<russh_sftp::client::SftpSession> {
-    let channel = handle.channel_open_session().await?;
-    channel.request_subsystem(true, "sftp").await?;
-    let config = russh_sftp::client::Config {
-        request_timeout_secs: SFTP_REQUEST_TIMEOUT_SECS,
-        max_concurrent_reads: SFTP_MAX_CONCURRENT_READS,
-        max_concurrent_writes: SFTP_MAX_CONCURRENT_WRITES,
-        max_write_packet_len: SFTP_MAX_WRITE_PACKET_LEN,
-        ..russh_sftp::client::Config::default()
-    };
-    let sftp = russh_sftp::client::SftpSession::new_with_config(channel.into_stream(), config).await?;
-    Ok(sftp)
-}
-
 pub async fn connect(host_key: HostKeyCheck) -> Result<Handle<PorthmosHandler>> {
     let config = Arc::new(client::Config::default());
     let address = (host_key.host.clone(), host_key.port);
@@ -177,8 +158,9 @@ pub async fn connect(host_key: HostKeyCheck) -> Result<Handle<PorthmosHandler>> 
 
 pub async fn authenticate_non_interactive(
     handle: &mut Handle<PorthmosHandler>, username: &str, identity_file: Option<&Path>, password: Option<&str>,
+    use_agent: bool,
 ) -> Result<bool> {
-    if authenticate_with_agent(handle, username).await? {
+    if use_agent && authenticate_with_agent(handle, username).await? {
         return Ok(true);
     }
 

@@ -35,13 +35,14 @@ jobs:
           forbid_dependency porthmos-core ratatui
           forbid_dependency porthmos-core crossterm
           forbid_dependency porthmos-core russh --no-default-features
-          forbid_workspace_crates porthmos-vfs 'porthmos-(core|lfs|tls|sftp|ftp|webdav|s3|tui)'
-          forbid_workspace_crates porthmos-lfs 'porthmos-(core|tls|sftp|ftp|webdav|s3|tui)'
-          forbid_workspace_crates porthmos-tls 'porthmos-(core|lfs|sftp|ftp|webdav|s3|tui)'
+          forbid_workspace_crates porthmos-vfs 'porthmos-(core|lfs|tls|ssh|sftp|ftp|webdav|s3|scp|tui)'
+          forbid_workspace_crates porthmos-lfs 'porthmos-(core|tls|ssh|sftp|ftp|webdav|s3|scp|tui)'
+          forbid_workspace_crates porthmos-tls 'porthmos-(core|lfs|ssh|sftp|ftp|webdav|s3|scp|tui)'
+          forbid_workspace_crates porthmos-ssh 'porthmos-(core|lfs|tls|sftp|ftp|webdav|s3|scp|tui)'
           for manifest in protocols/*/Cargo.toml; do
             crate=$(sed -n 's/^name = "\(.*\)"$/\1/p' "$manifest" | head -n 1)
-            if [ "$(cargo tree -p "$crate" -e normal | grep -oE 'porthmos-[a-z]+' | sort -u | grep -vxE "$crate|porthmos-vfs|porthmos-tls")" != "" ]; then
-              echo "$crate must depend on porthmos-vfs and porthmos-tls only"
+            if [ "$(cargo tree -p "$crate" -e normal | grep -oE 'porthmos-[a-z]+' | sort -u | grep -vxE "$crate|porthmos-vfs|porthmos-tls|porthmos-ssh")" != "" ]; then
+              echo "$crate must depend on porthmos-vfs, porthmos-tls and porthmos-ssh only"
               exit 1
             fi
           done

@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn the_backoff_covers_every_pipelined_write() {
-    use crate::client::{SFTP_MAX_CONCURRENT_WRITES, SFTP_MAX_WRITE_PACKET_LEN};
+    use crate::subsystem::{SFTP_MAX_CONCURRENT_WRITES, SFTP_MAX_WRITE_PACKET_LEN};
 
     assert_eq!(SFTP_RESUME_BACKOFF_BYTES, SFTP_MAX_CONCURRENT_WRITES as u64 * SFTP_MAX_WRITE_PACKET_LEN as u64);
 }

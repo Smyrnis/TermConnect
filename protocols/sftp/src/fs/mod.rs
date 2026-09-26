@@ -9,25 +9,26 @@ use porthmos_vfs::{
     DirItem, Entry, ErrorKind, FileKind, FileSystem, Metadata, ProtocolError, Reader, SearchQuery, SearchSender,
     Writer, async_trait, join_remote, path_to_remote_string,
 };
-use russh::client::Handle;
 use russh_sftp::{
     client::{SftpSession, error::Error as SftpError, fs::Metadata as SftpMetadata},
     protocol::{FileAttributes, OpenFlags, StatusCode},
 };
 use tokio::io::AsyncSeekExt;
 
-use crate::client::{PorthmosHandler, SFTP_MAX_CONCURRENT_WRITES, SFTP_MAX_WRITE_PACKET_LEN};
+use porthmos_ssh::Session;
+
+use crate::subsystem::{SFTP_MAX_CONCURRENT_WRITES, SFTP_MAX_WRITE_PACKET_LEN};
 
 pub const SFTP_RESUME_BACKOFF_BYTES: u64 = SFTP_MAX_CONCURRENT_WRITES as u64 * SFTP_MAX_WRITE_PACKET_LEN as u64;
 
 pub struct SftpFs {
-    handle: Arc<Handle<PorthmosHandler>>,
+    session: Arc<Session>,
     sftp: Arc<SftpSession>,
 }
 
 impl SftpFs {
-    pub fn new(handle: Arc<Handle<PorthmosHandler>>, sftp: Arc<SftpSession>) -> Self {
-        Self { handle, sftp }
+    pub fn new(session: Arc<Session>, sftp: Arc<SftpSession>) -> Self {
+        Self { session, sftp }
     }
 }
 
@@ -195,7 +196,7 @@ impl FileSystem for SftpFs {
     }
 
     async fn search(&self, query: SearchQuery, tx: SearchSender, cancel: Arc<AtomicBool>) {
-        crate::search::search_remote(&self.handle, &self.sftp, query, tx, cancel).await;
+        crate::search::search_remote(&self.session, &self.sftp, query, tx, cancel).await;
     }
 }
 

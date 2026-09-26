@@ -26,6 +26,7 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 unicode-width = "0.2.2"
 porthmos-vfs = { path = "porthmos-vfs" }
 porthmos-lfs = { path = "porthmos-lfs" }
+porthmos-ssh = { path = "porthmos-ssh" }
 porthmos-tls = { path = "porthmos-tls" }
 porthmos-sftp = { path = "protocols/sftp" }
 porthmos-ftp = { path = "protocols/ftp" }

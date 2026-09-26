@@ -11,6 +11,7 @@ anyhow.workspace = true
 futures-util.workspace = true
 russh.workspace = true
 russh-sftp.workspace = true
+porthmos-ssh.workspace = true
 porthmos-vfs.workspace = true
 tokio.workspace = true
 tracing.workspace = true

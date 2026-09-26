@@ -2953,9 +2953,24 @@ dependencies = [
  "anyhow",
  "async-trait",
  "futures-util",
+ "porthmos-ssh",
  "porthmos-vfs",
  "russh",
  "russh-sftp",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "porthmos-ssh"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "porthmos-ssh",
+ "porthmos-vfs",
+ "russh",
  "tempfile",
  "tokio",
  "tracing",
