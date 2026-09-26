@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+pub const PART_SUFFIX: &str = ".part";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
     pub name: String,

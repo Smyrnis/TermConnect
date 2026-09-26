@@ -5,7 +5,7 @@ use std::{
 };
 
 use futures_util::future::BoxFuture;
-use porthmos_vfs::{Entry, FileKind, FileSystem, Metadata, ProtocolError};
+use porthmos_vfs::{Entry, FileKind, FileSystem, Metadata, PART_SUFFIX, ProtocolError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExistingFile {
@@ -221,7 +221,7 @@ pub(crate) fn mark_conflicts(files: &mut [PlannedFile], listings: &HashMap<PathB
         file.existing = listings.get(&parent).and_then(|listing| listing.get(&name)).copied();
         file.partial = listings
             .get(&parent)
-            .and_then(|listing| listing.get(&format!("{name}.part")))
+            .and_then(|listing| listing.get(&format!("{name}{PART_SUFFIX}")))
             .copied()
             .filter(|partial| !partial.is_dir);
     }

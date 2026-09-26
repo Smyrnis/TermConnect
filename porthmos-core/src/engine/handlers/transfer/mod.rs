@@ -7,7 +7,7 @@ use std::{
     },
 };
 
-use porthmos_vfs::{Entry, FileSystem, path_to_remote_string};
+use porthmos_vfs::{Entry, FileSystem, PART_SUFFIX, path_to_remote_string};
 
 use super::super::{ConflictReview, Engine, Event, Internal, Location, PlanningScan, TransferEvent};
 use crate::{
@@ -484,11 +484,11 @@ impl Engine {
             match job.direction {
                 Direction::Download => {
                     let mut part = job.local_path.into_os_string();
-                    part.push(".part");
+                    part.push(PART_SUFFIX);
                     removed_local |= std::fs::remove_file(PathBuf::from(part)).is_ok();
                 }
                 Direction::Upload => {
-                    remote_parts.entry(job.session_id).or_default().push(format!("{}.part", job.remote_path))
+                    remote_parts.entry(job.session_id).or_default().push(format!("{}{PART_SUFFIX}", job.remote_path))
                 }
             }
         }

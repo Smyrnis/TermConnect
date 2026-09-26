@@ -3,7 +3,7 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
-use porthmos_vfs::{FileSystem, ProtocolError};
+use porthmos_vfs::{FileSystem, PART_SUFFIX, ProtocolError};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 const CHUNK_SIZE: usize = 256 * 1024;
@@ -102,7 +102,7 @@ where
 
 pub fn part_path(path: &Path) -> PathBuf {
     let mut name = path.as_os_str().to_owned();
-    name.push(".part");
+    name.push(PART_SUFFIX);
     PathBuf::from(name)
 }
 

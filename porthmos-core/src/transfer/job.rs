@@ -1,5 +1,7 @@
 use std::path::PathBuf;
 
+use porthmos_vfs::PART_SUFFIX;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     Upload,
@@ -41,11 +43,11 @@ impl TransferJob {
     pub fn part_destination(&self) -> Destination {
         match self.direction {
             Direction::Upload => {
-                Destination::Remote { session_id: self.session_id, path: format!("{}.part", self.remote_path) }
+                Destination::Remote { session_id: self.session_id, path: format!("{}{PART_SUFFIX}", self.remote_path) }
             }
             Direction::Download => {
                 let mut part = self.local_path.clone().into_os_string();
-                part.push(".part");
+                part.push(PART_SUFFIX);
                 Destination::Local(PathBuf::from(part))
             }
         }
