@@ -244,3 +244,15 @@ async fn an_upload_whose_final_shutdown_fails_is_reported_and_not_renamed() {
     assert!(!destination.exists("/dst/f"));
     assert!(destination.exists("/dst/f.part"));
 }
+
+#[tokio::test]
+async fn the_destination_learns_the_size_of_the_transfer() {
+    let source = source_with(b"payload");
+    let destination = empty_destination();
+
+    execute(&source, Path::new("/src/f"), &destination, Path::new("/dst/f"), &AtomicBool::new(false), false, |_| {})
+        .await
+        .unwrap();
+
+    assert_eq!(destination.written_sizes(), vec![(PathBuf::from("/dst/f.part"), 7)]);
+}

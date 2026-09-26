@@ -37,7 +37,7 @@ pub async fn execute(
     } else {
         0
     };
-    let mut writer = destination.open_write(&part, offset).await?;
+    let mut writer = destination.open_write_sized(&part, offset, source_metadata.size).await?;
     let mut reader = source.open_read(source_path, writer.offset).await?;
     let result = copy_with_progress(&mut reader, &mut writer.stream, writer.offset, cancel, on_progress).await;
     let shutdown = writer.stream.shutdown().await;

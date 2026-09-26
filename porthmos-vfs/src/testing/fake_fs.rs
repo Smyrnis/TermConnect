@@ -26,6 +26,7 @@ struct Tree {
     failing_reads: BTreeSet<PathBuf>,
     failing_home: bool,
     failing_shutdowns: BTreeSet<PathBuf>,
+    written_sizes: Vec<(PathBuf, u64)>,
 }
 
 const MAX_SYMLINK_HOPS: usize = 8;
@@ -128,6 +129,10 @@ impl FakeFs {
     pub fn fail_reads(&self, path: impl AsRef<Path>) -> &Self {
         self.tree.lock().unwrap().failing_reads.insert(path.as_ref().to_path_buf());
         self
+    }
+
+    pub fn written_sizes(&self) -> Vec<(PathBuf, u64)> {
+        self.tree.lock().unwrap().written_sizes.clone()
     }
 
     pub fn fail_shutdown(&self, path: impl AsRef<Path>) -> &Self {
@@ -305,6 +310,11 @@ impl FileSystem for FakeFs {
             }
             _ => Err(not_found(path)),
         }
+    }
+
+    async fn open_write_sized(&self, path: &Path, offset: u64, size: u64) -> Result<Writer, ProtocolError> {
+        self.tree.lock().unwrap().written_sizes.push((path.to_path_buf(), size));
+        self.open_write(path, offset).await
     }
 
     async fn open_write(&self, path: &Path, offset: u64) -> Result<Writer, ProtocolError> {

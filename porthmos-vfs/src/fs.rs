@@ -27,6 +27,9 @@ pub trait FileSystem: Send + Sync {
     async fn home(&self) -> Result<PathBuf, ProtocolError>;
     async fn open_read(&self, path: &Path, offset: u64) -> Result<Reader, ProtocolError>;
     async fn open_write(&self, path: &Path, offset: u64) -> Result<Writer, ProtocolError>;
+    async fn open_write_sized(&self, path: &Path, offset: u64, _size: u64) -> Result<Writer, ProtocolError> {
+        self.open_write(path, offset).await
+    }
     fn resume_backoff(&self) -> u64 {
         0
     }

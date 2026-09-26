@@ -171,3 +171,66 @@ async fn a_writer_on_a_failing_shutdown_path_errors_on_shutdown() {
     writer.stream.write_all(b"abc").await.unwrap();
     assert!(writer.stream.shutdown().await.is_err());
 }
+
+#[tokio::test]
+async fn a_sized_write_writes_normally_and_records_the_size() {
+    let fs = FakeFs::new();
+    fs.dir("/d");
+
+    let mut writer = fs.open_write_sized(Path::new("/d/f"), 0, 3).await.unwrap();
+    writer.stream.write_all(b"abc").await.unwrap();
+    writer.stream.shutdown().await.unwrap();
+
+    assert_eq!(fs.contents("/d/f").unwrap(), b"abc");
+    assert_eq!(fs.written_sizes(), vec![(std::path::PathBuf::from("/d/f"), 3)]);
+}
+
+struct OnlyWrites(FakeFs);
+
+#[async_trait::async_trait]
+impl FileSystem for OnlyWrites {
+    async fn list(&self, dir: &Path) -> Result<Vec<crate::Entry>, crate::ProtocolError> {
+        self.0.list(dir).await
+    }
+    async fn read_dir(&self, dir: &Path) -> Result<Vec<crate::DirItem>, crate::ProtocolError> {
+        self.0.read_dir(dir).await
+    }
+    async fn stat(&self, path: &Path) -> Result<crate::Metadata, crate::ProtocolError> {
+        self.0.stat(path).await
+    }
+    async fn create_dir(&self, path: &Path) -> Result<(), crate::ProtocolError> {
+        self.0.create_dir(path).await
+    }
+    async fn rename(&self, from: &Path, to: &Path) -> Result<(), crate::ProtocolError> {
+        self.0.rename(from, to).await
+    }
+    async fn remove_file(&self, path: &Path) -> Result<(), crate::ProtocolError> {
+        self.0.remove_file(path).await
+    }
+    async fn delete(&self, path: &Path) -> Result<(), crate::ProtocolError> {
+        self.0.delete(path).await
+    }
+    async fn home(&self) -> Result<std::path::PathBuf, crate::ProtocolError> {
+        self.0.home().await
+    }
+    async fn open_read(&self, path: &Path, offset: u64) -> Result<crate::Reader, crate::ProtocolError> {
+        self.0.open_read(path, offset).await
+    }
+    async fn open_write(&self, path: &Path, offset: u64) -> Result<crate::Writer, crate::ProtocolError> {
+        self.0.open_write(path, offset).await
+    }
+}
+
+#[tokio::test]
+async fn by_default_a_sized_write_is_a_plain_write() {
+    let fs = FakeFs::new();
+    fs.dir("/d");
+    let plain = OnlyWrites(fs.clone());
+
+    let mut writer = plain.open_write_sized(Path::new("/d/f"), 0, 99).await.unwrap();
+    writer.stream.write_all(b"xy").await.unwrap();
+    writer.stream.shutdown().await.unwrap();
+
+    assert_eq!(fs.contents("/d/f").unwrap(), b"xy");
+    assert!(fs.written_sizes().is_empty());
+}
