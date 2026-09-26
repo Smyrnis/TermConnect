@@ -29,6 +29,7 @@ porthmos-lfs = { path = "porthmos-lfs" }
 porthmos-tls = { path = "porthmos-tls" }
 porthmos-sftp = { path = "protocols/sftp" }
 porthmos-ftp = { path = "protocols/ftp" }
+porthmos-webdav = { path = "protocols/webdav" }
 porthmos-core = { path = "porthmos-core" }
 
 [profile.release]
