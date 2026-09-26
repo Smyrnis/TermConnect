@@ -70,8 +70,21 @@ fn s3_protocol(_paths: &Paths) -> Option<Arc<dyn Protocol>> {
     None
 }
 
+#[cfg(feature = "scp")]
+fn scp_protocol() -> Option<Arc<dyn Protocol>> {
+    Some(Arc::new(porthmos_scp::Scp::default()))
+}
+
+#[cfg(not(feature = "scp"))]
+fn scp_protocol() -> Option<Arc<dyn Protocol>> {
+    None
+}
+
 pub fn builtin_protocols(paths: &Paths) -> Vec<Arc<dyn Protocol>> {
-    [sftp_protocol(), ftp_protocol(paths), webdav_protocol(paths), s3_protocol(paths)].into_iter().flatten().collect()
+    [sftp_protocol(), ftp_protocol(paths), webdav_protocol(paths), s3_protocol(paths), scp_protocol()]
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 #[derive(Clone)]

@@ -2873,6 +2873,7 @@ dependencies = [
  "porthmos-ftp",
  "porthmos-lfs",
  "porthmos-s3",
+ "porthmos-scp",
  "porthmos-sftp",
  "porthmos-vfs",
  "porthmos-webdav",
