@@ -60,8 +60,18 @@ fn webdav_protocol(_paths: &Paths) -> Option<Arc<dyn Protocol>> {
     None
 }
 
+#[cfg(feature = "s3")]
+fn s3_protocol(paths: &Paths) -> Option<Arc<dyn Protocol>> {
+    Some(Arc::new(porthmos_s3::S3::new(paths.known_certificates_file())))
+}
+
+#[cfg(not(feature = "s3"))]
+fn s3_protocol(_paths: &Paths) -> Option<Arc<dyn Protocol>> {
+    None
+}
+
 pub fn builtin_protocols(paths: &Paths) -> Vec<Arc<dyn Protocol>> {
-    [sftp_protocol(), ftp_protocol(paths), webdav_protocol(paths)].into_iter().flatten().collect()
+    [sftp_protocol(), ftp_protocol(paths), webdav_protocol(paths), s3_protocol(paths)].into_iter().flatten().collect()
 }
 
 #[derive(Clone)]

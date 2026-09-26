@@ -7,10 +7,11 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = ["sftp", "ftp", "webdav"]
+default = ["sftp", "ftp", "webdav", "s3"]
 sftp = ["dep:porthmos-sftp"]
 ftp = ["dep:porthmos-ftp"]
 webdav = ["dep:porthmos-webdav"]
+s3 = ["dep:porthmos-s3"]
 testing = ["porthmos-vfs/testing"]
 
 [dependencies]
@@ -22,6 +23,7 @@ porthmos-vfs.workspace = true
 porthmos-sftp = { workspace = true, optional = true }
 porthmos-ftp = { workspace = true, optional = true }
 porthmos-webdav = { workspace = true, optional = true }
+porthmos-s3 = { workspace = true, optional = true }
 tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true

@@ -2872,6 +2872,7 @@ dependencies = [
  "futures-util",
  "porthmos-ftp",
  "porthmos-lfs",
+ "porthmos-s3",
  "porthmos-sftp",
  "porthmos-vfs",
  "porthmos-webdav",
