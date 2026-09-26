@@ -31,6 +31,8 @@ toml.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+porthmos-scp.workspace = true
+porthmos-ssh = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
 porthmos-vfs = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["test-util"] }

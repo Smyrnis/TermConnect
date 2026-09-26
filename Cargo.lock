@@ -2875,6 +2875,7 @@ dependencies = [
  "porthmos-s3",
  "porthmos-scp",
  "porthmos-sftp",
+ "porthmos-ssh",
  "porthmos-vfs",
  "porthmos-webdav",
  "serde",
