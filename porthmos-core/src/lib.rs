@@ -50,8 +50,18 @@ fn ftp_protocol(_paths: &Paths) -> Option<Arc<dyn Protocol>> {
     None
 }
 
+#[cfg(feature = "webdav")]
+fn webdav_protocol(paths: &Paths) -> Option<Arc<dyn Protocol>> {
+    Some(Arc::new(porthmos_webdav::WebDav::new(paths.known_certificates_file())))
+}
+
+#[cfg(not(feature = "webdav"))]
+fn webdav_protocol(_paths: &Paths) -> Option<Arc<dyn Protocol>> {
+    None
+}
+
 pub fn builtin_protocols(paths: &Paths) -> Vec<Arc<dyn Protocol>> {
-    [sftp_protocol(), ftp_protocol(paths)].into_iter().flatten().collect()
+    [sftp_protocol(), ftp_protocol(paths), webdav_protocol(paths)].into_iter().flatten().collect()
 }
 
 #[derive(Clone)]
@@ -150,3 +160,6 @@ impl CoreBuilder {
         Ok((CoreHandle { commands, protocols: infos }, event_receiver))
     }
 }
+
+#[cfg(test)]
+mod tests;
