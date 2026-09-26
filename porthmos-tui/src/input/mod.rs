@@ -25,6 +25,7 @@ pub enum Action {
     BookmarkHere,
     OpenBookmarks,
     OpenSearch,
+    Filter,
     OpenTransfers,
     CycleSession,
     Help,
@@ -56,6 +57,7 @@ impl Action {
             Action::BookmarkHere => "bookmark_here",
             Action::OpenBookmarks => "open_bookmarks",
             Action::OpenSearch => "open_search",
+            Action::Filter => "filter",
             Action::OpenTransfers => "open_transfers",
             Action::CycleSession => "cycle_session",
             Action::Help => "help",
@@ -87,6 +89,7 @@ impl Action {
             "bookmark_here" => Action::BookmarkHere,
             "open_bookmarks" => Action::OpenBookmarks,
             "open_search" => Action::OpenSearch,
+            "filter" => Action::Filter,
             "open_transfers" => Action::OpenTransfers,
             "cycle_session" => Action::CycleSession,
             "help" => Action::Help,
@@ -232,6 +235,7 @@ impl KeyBindings {
         bind(Action::BookmarkHere, KeyCode::Char('d'), KeyModifiers::CONTROL);
         bind(Action::OpenBookmarks, KeyCode::Char('b'), KeyModifiers::CONTROL);
         bind(Action::OpenSearch, KeyCode::Char('f'), KeyModifiers::CONTROL);
+        bind(Action::Filter, KeyCode::Char('/'), KeyModifiers::NONE);
         bind(Action::OpenTransfers, KeyCode::Char('t'), KeyModifiers::CONTROL);
         bind(Action::CycleSession, KeyCode::Char('n'), KeyModifiers::CONTROL);
         bind(Action::Help, KeyCode::F(1), KeyModifiers::NONE);
@@ -313,6 +317,7 @@ pub const ALL_ACTIONS: &[Action] = &[
     Action::BookmarkHere,
     Action::OpenBookmarks,
     Action::OpenSearch,
+    Action::Filter,
     Action::OpenTransfers,
     Action::CycleSession,
     Action::Help,

@@ -52,6 +52,7 @@ fn defaults_cover_every_bindable_action_with_the_original_hardcoded_keys() {
         (Action::ToggleHidden, key_with_modifiers(KeyCode::Char('h'), KeyModifiers::CONTROL)),
         (Action::CycleSort, key_with_modifiers(KeyCode::Char('s'), KeyModifiers::CONTROL)),
         (Action::OpenTransfers, key_with_modifiers(KeyCode::Char('t'), KeyModifiers::CONTROL)),
+        (Action::Filter, key(KeyCode::Char('/'))),
     ];
     for (action, event) in cases {
         assert_eq!(bindings.map_key(event), action);
@@ -264,4 +265,10 @@ fn the_example_config_binds_every_action_to_its_default_key() {
     for action in ALL_ACTIONS {
         assert_eq!(bindings.key_for(*action), defaults.key_for(*action), "{}", action.name());
     }
+}
+
+#[test]
+fn the_filter_action_is_named_filter() {
+    assert_eq!(Action::Filter.name(), "filter");
+    assert!(ALL_ACTIONS.contains(&Action::Filter));
 }

@@ -70,3 +70,81 @@ fn replacing_keeps_the_view_settings() {
     assert_eq!(listing.path(), Path::new("/e"));
     assert_eq!(listing.rows().len(), 2);
 }
+
+fn names(listing: &Listing) -> Vec<String> {
+    listing
+        .rows()
+        .iter()
+        .map(|row| match row {
+            Row::Parent => "..".to_string(),
+            Row::Entry(entry) => entry.name.clone(),
+        })
+        .collect()
+}
+
+fn filterable() -> Listing {
+    Listing::new(
+        PathBuf::from("/d"),
+        vec![
+            entry("porthmos", true, 0),
+            entry("Report.pdf", false, 1),
+            entry("notes.txt", false, 2),
+            entry("app.log", false, 3),
+        ],
+        SortSpec::default(),
+        false,
+    )
+}
+
+#[test]
+fn a_filter_keeps_names_containing_the_text_in_any_case() {
+    let mut listing = filterable();
+
+    listing.set_filter(Some("PORT"));
+
+    assert_eq!(names(&listing), vec!["..", "porthmos", "Report.pdf"]);
+    assert_eq!(listing.filter(), Some("PORT"));
+}
+
+#[test]
+fn a_filter_with_wildcards_is_a_glob() {
+    let mut listing = filterable();
+
+    listing.set_filter(Some("*.LOG"));
+
+    assert_eq!(names(&listing), vec!["..", "app.log"]);
+}
+
+#[test]
+fn an_empty_filter_shows_everything() {
+    let mut listing = filterable();
+    listing.set_filter(Some("port"));
+
+    listing.set_filter(Some(""));
+
+    assert_eq!(names(&listing).len(), 5);
+    assert_eq!(listing.filter(), None);
+}
+
+#[test]
+fn the_filter_counts_matches_out_of_the_visible_entries() {
+    let mut listing = filterable();
+    listing.set_filter(Some("o"));
+
+    assert_eq!(listing.match_count(), (4, 4));
+    listing.set_filter(Some("pdf"));
+    assert_eq!(listing.match_count(), (1, 4));
+}
+
+#[test]
+fn a_new_folder_clears_the_filter_but_a_refresh_keeps_it() {
+    let mut listing = filterable();
+    listing.set_filter(Some("port"));
+
+    listing.replace(PathBuf::from("/d"), vec![entry("porthmos", true, 0), entry("other", false, 1)]);
+    assert_eq!(names(&listing), vec!["..", "porthmos"]);
+
+    listing.replace(PathBuf::from("/d/porthmos"), vec![entry("x", false, 1)]);
+    assert_eq!(listing.filter(), None);
+    assert_eq!(names(&listing), vec!["..", "x"]);
+}

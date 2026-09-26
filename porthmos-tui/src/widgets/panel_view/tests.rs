@@ -262,3 +262,184 @@ fn a_shrinking_listing_keeps_the_cursor_on_a_row() {
 
     assert_eq!(panel.cursor, 1);
 }
+
+fn filter_panel() -> PanelView {
+    PanelView::from_listing(
+        PathBuf::from("/d"),
+        vec![
+            folder("/d", "porthmos"),
+            file("/d", "Report.pdf", 1),
+            file("/d", "notes.txt", 2),
+            file("/d", "app.log", 3),
+        ],
+    )
+}
+
+fn type_text(panel: &mut PanelView, text: &str) {
+    for character in text.chars() {
+        panel.type_filter(character);
+    }
+}
+
+#[test]
+fn typing_in_the_filter_line_narrows_the_panel() {
+    let mut panel = filter_panel();
+
+    panel.start_filter();
+    type_text(&mut panel, "port");
+
+    assert!(panel.editing_filter());
+    assert_eq!(panel.filter(), Some("port"));
+    assert_eq!(names(&panel), vec!["porthmos".to_string(), "Report.pdf".to_string()]);
+}
+
+#[test]
+fn erasing_and_finishing_keep_the_filter_and_clearing_drops_it() {
+    let mut panel = filter_panel();
+    panel.start_filter();
+    type_text(&mut panel, "pdfx");
+
+    panel.erase_filter();
+    panel.finish_filter();
+    assert!(!panel.editing_filter());
+    assert_eq!(names(&panel), vec!["Report.pdf".to_string()]);
+
+    panel.clear_filter();
+    assert_eq!(panel.filter(), None);
+    assert_eq!(names(&panel).len(), 4);
+}
+
+#[test]
+fn the_cursor_stays_on_its_file_while_it_matches_and_jumps_to_the_first_match_otherwise() {
+    let mut panel = filter_panel();
+    let report =
+        panel.rows().iter().position(|row| matches!(row, Row::Entry(entry) if entry.name == "Report.pdf")).unwrap();
+    panel.cursor = report;
+
+    panel.start_filter();
+    type_text(&mut panel, "r");
+    assert_eq!(panel.current_entry_name(), Some("Report.pdf"));
+
+    type_text(&mut panel, "th");
+    assert_eq!(panel.current_entry_name(), Some("porthmos"));
+}
+
+#[test]
+fn only_visible_selected_files_are_targets() {
+    let mut panel = filter_panel();
+    for name in ["Report.pdf", "notes.txt"] {
+        panel.cursor =
+            panel.rows().iter().position(|row| matches!(row, Row::Entry(entry) if entry.name == name)).unwrap();
+        panel.toggle_selection();
+    }
+
+    panel.start_filter();
+    type_text(&mut panel, "pdf");
+
+    assert_eq!(panel.targets(), vec![PathBuf::from("/d/Report.pdf")]);
+    assert_eq!(panel.target_entries().iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>(), vec!["Report.pdf"]);
+    panel.clear_filter();
+    assert_eq!(panel.targets().len(), 2);
+}
+
+#[test]
+fn opening_another_folder_closes_the_filter_line() {
+    let mut panel = filter_panel();
+    panel.start_filter();
+    type_text(&mut panel, "port");
+
+    panel.replace_listing(PathBuf::from("/d/porthmos"), vec![file("/d/porthmos", "x", 1)]);
+
+    assert!(!panel.editing_filter());
+    assert_eq!(panel.filter(), None);
+}
+
+fn rendered(panel: &PanelView) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
+    terminal.draw(|frame| render_panel(frame, Rect::new(0, 0, 40, 8), "LOCAL", true, panel)).unwrap();
+    terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect()
+}
+
+#[test]
+fn the_bottom_border_shows_the_filter_line_or_the_active_filter() {
+    let mut panel = filter_panel();
+    panel.start_filter();
+    type_text(&mut panel, "port");
+
+    assert!(rendered(&panel).contains("/port\u{2588} (2 of 4)"), "{}", rendered(&panel));
+    panel.finish_filter();
+    assert!(rendered(&panel).contains("filter: port (2 of 4)"), "{}", rendered(&panel));
+}
+
+#[test]
+fn a_refresh_keeps_the_filter_and_the_open_line() {
+    let mut panel = filter_panel();
+    panel.start_filter();
+    type_text(&mut panel, "port");
+
+    panel.replace_listing(PathBuf::from("/d"), vec![folder("/d", "porthmos"), file("/d", "passport.txt", 1)]);
+
+    assert!(panel.editing_filter());
+    assert_eq!(panel.filter(), Some("port"));
+    assert_eq!(names(&panel), vec!["porthmos".to_string(), "passport.txt".to_string()]);
+}
+
+#[test]
+fn showing_hidden_files_counts_them_and_filters_them() {
+    let mut panel = PanelView::from_listing(
+        PathBuf::from("/d"),
+        vec![file("/d", ".profile", 1), file("/d", "profile.txt", 2), file("/d", "notes", 3)],
+    );
+    panel.start_filter();
+    type_text(&mut panel, "prof");
+    assert!(rendered(&panel).contains("(1 of 2)"), "{}", rendered(&panel));
+
+    panel.toggle_hidden();
+
+    assert_eq!(names(&panel), vec![".profile".to_string(), "profile.txt".to_string()]);
+    assert!(rendered(&panel).contains("(2 of 3)"), "{}", rendered(&panel));
+}
+
+#[test]
+fn clearing_the_filter_returns_the_cursor_to_the_parent_row() {
+    let mut panel = filter_panel();
+    panel.cursor = 0;
+
+    panel.start_filter();
+    type_text(&mut panel, "o");
+    assert_eq!(panel.current_entry_name(), Some("porthmos"));
+    panel.clear_filter();
+
+    assert_eq!(panel.cursor, 0);
+}
+
+#[test]
+fn the_cursor_returns_to_its_file_after_nothing_matched() {
+    let mut panel = filter_panel();
+    panel.cursor =
+        panel.rows().iter().position(|row| matches!(row, Row::Entry(entry) if entry.name == "notes.txt")).unwrap();
+
+    panel.start_filter();
+    type_text(&mut panel, "tz");
+    panel.erase_filter();
+
+    assert_eq!(panel.current_entry_name(), Some("notes.txt"));
+}
+
+fn rendered_at(panel: &PanelView, width: u16) -> String {
+    let mut terminal = Terminal::new(TestBackend::new(width, 8)).unwrap();
+    terminal.draw(|frame| render_panel(frame, Rect::new(0, 0, width, 8), "LOCAL", true, panel)).unwrap();
+    terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect()
+}
+
+#[test]
+fn a_narrow_panel_keeps_the_end_of_the_filter_the_caret_and_the_count() {
+    let mut panel = filter_panel();
+    panel.start_filter();
+    type_text(&mut panel, "a_really_long_filter_text");
+
+    let screen = rendered_at(&panel, 24);
+
+    assert!(screen.contains("/\u{2026}"), "{screen}");
+    assert!(screen.contains("_text\u{2588} (0 of 4)"), "{screen}");
+}

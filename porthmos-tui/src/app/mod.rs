@@ -41,6 +41,7 @@ mod bookmarks;
 mod conflicts;
 mod connections;
 mod dialogs;
+mod filter;
 mod render;
 mod search;
 mod transfer_queue;
@@ -183,6 +184,8 @@ impl App {
             self.apply_dialog_key(key);
         } else if self.screen == Screen::Search {
             self.apply_search_key(key);
+        } else if self.editing_filter() {
+            self.apply_filter_key(key);
         } else {
             let action = self.key_bindings.map_key(key);
             self.apply_action(action);

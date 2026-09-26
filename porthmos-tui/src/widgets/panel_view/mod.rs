@@ -12,6 +12,7 @@ use ratatui::{
     Frame,
     layout::Rect,
     style::{Color, Style},
+    text::Line,
     widgets::{Block, Borders},
 };
 
@@ -32,15 +33,29 @@ impl ActivePanel {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Anchor {
+    Parent,
+    Entry(PathBuf),
+}
+
 pub struct PanelView {
     listing: Listing,
     pub cursor: usize,
     pub selected: HashSet<PathBuf>,
+    editing_filter: bool,
+    anchor: Option<(Anchor, usize)>,
 }
 
 impl PanelView {
     pub fn new(path: PathBuf, sort_spec: SortSpec, show_hidden: bool) -> Self {
-        Self { listing: Listing::new(path, Vec::new(), sort_spec, show_hidden), cursor: 0, selected: HashSet::new() }
+        Self {
+            listing: Listing::new(path, Vec::new(), sort_spec, show_hidden),
+            cursor: 0,
+            selected: HashSet::new(),
+            editing_filter: false,
+            anchor: None,
+        }
     }
 
     pub fn from_listing(path: PathBuf, entries: Vec<Entry>) -> Self {
@@ -58,7 +73,11 @@ impl PanelView {
     }
 
     pub fn replace_listing(&mut self, path: PathBuf, entries: Vec<Entry>) {
+        if path != self.path() {
+            self.editing_filter = false;
+        }
         self.listing.replace(path, entries);
+        self.anchor = None;
         self.selected.clear();
         self.clamp_cursor();
     }
@@ -75,6 +94,98 @@ impl PanelView {
 
     pub fn sort_spec(&self) -> SortSpec {
         self.listing.sort_spec()
+    }
+
+    pub fn filter(&self) -> Option<&str> {
+        self.listing.filter()
+    }
+
+    pub fn editing_filter(&self) -> bool {
+        self.editing_filter
+    }
+
+    pub fn start_filter(&mut self) {
+        self.editing_filter = true;
+    }
+
+    pub fn finish_filter(&mut self) {
+        self.editing_filter = false;
+    }
+
+    pub fn type_filter(&mut self, character: char) {
+        let mut text = self.filter().unwrap_or_default().to_string();
+        text.push(character);
+        self.apply_filter(Some(text));
+    }
+
+    pub fn erase_filter(&mut self) {
+        let mut text = self.filter().unwrap_or_default().to_string();
+        text.pop();
+        self.apply_filter(Some(text));
+    }
+
+    pub fn clear_filter(&mut self) {
+        self.editing_filter = false;
+        self.apply_filter(None);
+        self.anchor = None;
+    }
+
+    fn apply_filter(&mut self, text: Option<String>) {
+        let anchor = match &self.anchor {
+            Some((anchor, placed)) if *placed == self.cursor => Some(anchor.clone()),
+            _ => self.anchor_at_cursor(),
+        };
+        self.listing.set_filter(text.as_deref());
+        let kept = anchor
+            .as_ref()
+            .filter(|anchor| self.filter().is_none() || **anchor != Anchor::Parent)
+            .and_then(|anchor| self.position_of(anchor));
+        let first_match = || self.rows().iter().position(|row| matches!(row, Row::Entry(_)));
+        self.cursor = kept.or_else(first_match).unwrap_or(0);
+        self.anchor = anchor.map(|anchor| (anchor, self.cursor));
+    }
+
+    fn anchor_at_cursor(&self) -> Option<Anchor> {
+        match self.rows().get(self.cursor)? {
+            Row::Parent => Some(Anchor::Parent),
+            Row::Entry(entry) => Some(Anchor::Entry(entry.path.clone())),
+        }
+    }
+
+    fn position_of(&self, anchor: &Anchor) -> Option<usize> {
+        self.rows().iter().position(|row| match (row, anchor) {
+            (Row::Parent, Anchor::Parent) => true,
+            (Row::Entry(entry), Anchor::Entry(path)) => entry.path == *path,
+            _ => false,
+        })
+    }
+
+    fn filter_status(&self, width: usize) -> Option<String> {
+        let (matched, total) = self.listing.match_count();
+        let (prefix, text, suffix) = match (self.editing_filter, self.filter()) {
+            (true, text) => ("/", text.unwrap_or_default(), format!("\u{2588} ({matched} of {total})")),
+            (false, Some(text)) => ("filter: ", text, format!(" ({matched} of {total})")),
+            (false, None) => return None,
+        };
+        let room = width.saturating_sub(prefix.chars().count() + suffix.chars().count());
+        let length = text.chars().count();
+        let shown = if length <= room {
+            text.to_string()
+        } else {
+            let tail: String = text.chars().skip(length - room.saturating_sub(1)).collect();
+            format!("\u{2026}{tail}")
+        };
+        Some(format!("{prefix}{shown}{suffix}"))
+    }
+
+    fn visible_selected(&self) -> Vec<&Entry> {
+        self.rows()
+            .iter()
+            .filter_map(|row| match row {
+                Row::Entry(entry) if self.selected.contains(&entry.path) => Some(entry),
+                _ => None,
+            })
+            .collect()
     }
 
     pub fn move_cursor(&mut self, delta: isize) {
@@ -112,8 +223,9 @@ impl PanelView {
     }
 
     pub fn targets(&self) -> Vec<PathBuf> {
-        if !self.selected.is_empty() {
-            return self.selected.iter().cloned().collect();
+        let selected = self.visible_selected();
+        if !selected.is_empty() {
+            return selected.into_iter().map(|entry| entry.path.clone()).collect();
         }
 
         match self.rows().get(self.cursor) {
@@ -123,15 +235,9 @@ impl PanelView {
     }
 
     pub fn target_entries(&self) -> Vec<Entry> {
-        if !self.selected.is_empty() {
-            return self
-                .rows()
-                .iter()
-                .filter_map(|row| match row {
-                    Row::Entry(entry) if self.selected.contains(&entry.path) => Some(entry.clone()),
-                    _ => None,
-                })
-                .collect();
+        let selected = self.visible_selected();
+        if !selected.is_empty() {
+            return selected.into_iter().cloned().collect();
         }
 
         match self.rows().get(self.cursor) {
@@ -153,10 +259,13 @@ impl PanelView {
 pub fn render_panel(frame: &mut Frame, area: Rect, title: &str, is_active: bool, panel: &PanelView) {
     let border_style = if is_active { Style::default().fg(Color::Yellow) } else { Style::default() };
 
-    let block = Block::default()
+    let mut block = Block::default()
         .title(format!("{title} {} [{}]", panel.path().display(), sort_indicator(panel.sort_spec())))
         .borders(Borders::ALL)
         .border_style(border_style);
+    if let Some(status) = panel.filter_status(area.width.saturating_sub(2) as usize) {
+        block = block.title_bottom(Line::from(status));
+    }
 
     let inner = block.inner(area);
     frame.render_widget(block, area);

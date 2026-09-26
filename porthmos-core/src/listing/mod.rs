@@ -2,7 +2,7 @@ pub mod sort;
 
 use std::path::{Path, PathBuf};
 
-use porthmos_vfs::Entry;
+use porthmos_vfs::{Entry, glob_match};
 pub use sort::{SortKey, SortOrder, SortSpec};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,11 +18,17 @@ pub struct Listing {
     rows: Vec<Row>,
     sort_spec: SortSpec,
     show_hidden: bool,
+    filter: Option<String>,
+    shown: usize,
+}
+
+fn name_matches(filter: &str, lowered: &str, name: &str) -> bool {
+    if filter.contains(['*', '?']) { glob_match(filter, name) } else { name.to_lowercase().contains(lowered) }
 }
 
 impl Listing {
     pub fn new(path: PathBuf, entries: Vec<Entry>, sort_spec: SortSpec, show_hidden: bool) -> Self {
-        let mut listing = Self { path, entries, rows: Vec::new(), sort_spec, show_hidden };
+        let mut listing = Self { path, entries, rows: Vec::new(), sort_spec, show_hidden, filter: None, shown: 0 };
         listing.recompute_rows();
         listing
     }
@@ -36,6 +42,9 @@ impl Listing {
     }
 
     pub fn replace(&mut self, path: PathBuf, entries: Vec<Entry>) {
+        if path != self.path {
+            self.filter = None;
+        }
         self.path = path;
         self.entries = entries;
         self.recompute_rows();
@@ -61,6 +70,20 @@ impl Listing {
         self.recompute_rows();
     }
 
+    pub fn set_filter(&mut self, filter: Option<&str>) {
+        self.filter = filter.filter(|text| !text.is_empty()).map(str::to_string);
+        self.recompute_rows();
+    }
+
+    pub fn filter(&self) -> Option<&str> {
+        self.filter.as_deref()
+    }
+
+    pub fn match_count(&self) -> (usize, usize) {
+        let matched = self.rows.iter().filter(|row| matches!(row, Row::Entry(_))).count();
+        (matched, self.shown)
+    }
+
     pub fn sort_spec(&self) -> SortSpec {
         self.sort_spec
     }
@@ -70,8 +93,15 @@ impl Listing {
     }
 
     fn recompute_rows(&mut self) {
-        let mut visible: Vec<Entry> =
-            self.entries.iter().filter(|entry| self.show_hidden || !entry.name.starts_with('.')).cloned().collect();
+        let shown: Vec<&Entry> =
+            self.entries.iter().filter(|entry| self.show_hidden || !entry.name.starts_with('.')).collect();
+        self.shown = shown.len();
+        let lowered = self.filter.as_deref().map(str::to_lowercase).unwrap_or_default();
+        let mut visible: Vec<Entry> = shown
+            .into_iter()
+            .filter(|entry| self.filter.as_deref().is_none_or(|filter| name_matches(filter, &lowered, &entry.name)))
+            .cloned()
+            .collect();
         sort::sort_entries(&mut visible, self.sort_spec);
 
         let mut rows = Vec::with_capacity(visible.len() + 1);

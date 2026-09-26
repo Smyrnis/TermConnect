@@ -23,6 +23,7 @@ impl App {
             Action::BookmarkHere => self.open_bookmark_add_dialog(),
             Action::OpenBookmarks => self.open_bookmarks_dialog(),
             Action::OpenSearch => self.open_search_screen(),
+            Action::Filter => self.start_filter(),
             Action::OpenTransfers => self.open_transfers_screen(),
             Action::CycleSession => {
                 if self.screen == Screen::Files {
@@ -46,6 +47,9 @@ impl App {
     }
 
     fn handle_back(&mut self) {
+        if self.clear_active_filter() {
+            return;
+        }
         let showing_error = matches!(self.notifications.current().map(|n| n.severity), Some(Severity::Error));
         if showing_error {
             self.notifications.dismiss_current();
