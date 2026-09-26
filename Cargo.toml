@@ -32,6 +32,7 @@ porthmos-sftp = { path = "protocols/sftp" }
 porthmos-ftp = { path = "protocols/ftp" }
 porthmos-webdav = { path = "protocols/webdav" }
 porthmos-s3 = { path = "protocols/s3" }
+porthmos-scp = { path = "protocols/scp" }
 porthmos-core = { path = "porthmos-core" }
 
 [profile.release]

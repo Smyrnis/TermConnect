@@ -2947,6 +2947,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "porthmos-scp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "porthmos-ssh",
+ "porthmos-vfs",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "porthmos-sftp"
 version = "0.1.0"
 dependencies = [
