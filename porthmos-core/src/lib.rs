@@ -10,6 +10,9 @@ pub mod profiles;
 mod protocol_info;
 pub mod transfer;
 
+use std::{path::PathBuf, sync::Arc};
+
+use anyhow::{Context, Result};
 pub use engine::{Command, Event, Location, RequestId, SessionId};
 pub use error::{Severity, connect_failure_message, user_message};
 pub use paths::{ConfigMigration, Paths};
@@ -19,10 +22,6 @@ pub use porthmos_vfs::{
     ShellInvocation, Target, path_to_remote_string,
 };
 pub use protocol_info::ProtocolInfo;
-
-use std::{path::PathBuf, sync::Arc};
-
-use anyhow::{Context, Result};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 use crate::{

@@ -1,6 +1,7 @@
 use std::{net::IpAddr, sync::Arc, time::Duration};
 
 use anyhow::anyhow;
+use porthmos_tls::{ProblemSlot, TrustProblem};
 use porthmos_vfs::{ErrorKind, ProtocolError};
 use rustls::ClientConfig;
 use suppaftp::{
@@ -8,8 +9,6 @@ use suppaftp::{
     tokio::{AsyncRustlsConnector, AsyncRustlsFtpStream},
     types::FileType,
 };
-
-use porthmos_tls::{ProblemSlot, TrustProblem};
 
 use crate::{
     errors::ftp_error,

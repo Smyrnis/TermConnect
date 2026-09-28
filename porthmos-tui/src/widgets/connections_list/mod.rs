@@ -1,13 +1,12 @@
 use std::collections::HashSet;
 
+use porthmos_core::{ProtocolInfo, profiles::ConnectionEntry};
 use ratatui::{
     Frame,
     layout::Rect,
     style::{Modifier, Style},
     widgets::{Block, Borders, List, ListItem, ListState},
 };
-
-use porthmos_core::{ProtocolInfo, profiles::ConnectionEntry};
 
 pub fn render_connections_list(
     frame: &mut Frame, area: Rect, entries: &[ConnectionEntry], cursor: usize, connected_names: &HashSet<&str>,

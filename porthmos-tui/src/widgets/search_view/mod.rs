@@ -1,4 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use porthmos_core::Entry;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
@@ -6,8 +7,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
-
-use porthmos_core::Entry;
 
 pub struct SearchView {
     pub pattern: String,

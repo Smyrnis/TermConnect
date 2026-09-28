@@ -1,11 +1,9 @@
 use std::{collections::BTreeMap, path::Path};
 
 use crossterm::event::KeyEventState;
-use porthmos_core::{Answer, profiles::ProfileDraft};
+use porthmos_core::{Answer, ConnectionForm, OptionField, OptionKind, ProtocolInfo, profiles::ProfileDraft};
 
 use super::*;
-use porthmos_core::{ConnectionForm, OptionField, OptionKind, ProtocolInfo};
-
 use crate::{
     app::testing::{TestApp, test_app, test_app_with_protocols},
     widgets::dialog::confirm::ConfirmFocus,

@@ -1,4 +1,5 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use porthmos_core::transfer::{conflicts::Resolution, plan::ExistingFile};
 use ratatui::{
     Frame,
     layout::{Constraint, Flex, Layout, Rect},
@@ -7,8 +8,6 @@ use ratatui::{
 };
 
 use super::content_width;
-use porthmos_core::transfer::{conflicts::Resolution, plan::ExistingFile};
-
 use crate::widgets::file_list::format_size;
 
 const MINUTE: i64 = 60;

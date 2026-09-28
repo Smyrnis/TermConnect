@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
+use porthmos_core::profiles::{ConnectionEntry, ConnectionSource};
 use ratatui::{Terminal, backend::TestBackend};
 
 use super::*;
-use porthmos_core::profiles::{ConnectionEntry, ConnectionSource};
 
 #[test]
 fn renders_connection_names() {

@@ -1,10 +1,10 @@
-use ratatui::{Terminal, backend::TestBackend};
-
-use super::*;
 use porthmos_core::transfer::{
     Direction,
     rows::{QueueRow, RowKind, RowState},
 };
+use ratatui::{Terminal, backend::TestBackend};
+
+use super::*;
 
 fn row(
     kind: RowKind, label: &str, direction: Direction, files: (usize, usize), bytes: (u64, u64), state: RowState,

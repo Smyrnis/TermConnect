@@ -192,30 +192,39 @@ impl FileSystem for OnlyWrites {
     async fn list(&self, dir: &Path) -> Result<Vec<crate::Entry>, crate::ProtocolError> {
         self.0.list(dir).await
     }
+
     async fn read_dir(&self, dir: &Path) -> Result<Vec<crate::DirItem>, crate::ProtocolError> {
         self.0.read_dir(dir).await
     }
+
     async fn stat(&self, path: &Path) -> Result<crate::Metadata, crate::ProtocolError> {
         self.0.stat(path).await
     }
+
     async fn create_dir(&self, path: &Path) -> Result<(), crate::ProtocolError> {
         self.0.create_dir(path).await
     }
+
     async fn rename(&self, from: &Path, to: &Path) -> Result<(), crate::ProtocolError> {
         self.0.rename(from, to).await
     }
+
     async fn remove_file(&self, path: &Path) -> Result<(), crate::ProtocolError> {
         self.0.remove_file(path).await
     }
+
     async fn delete(&self, path: &Path) -> Result<(), crate::ProtocolError> {
         self.0.delete(path).await
     }
+
     async fn home(&self) -> Result<std::path::PathBuf, crate::ProtocolError> {
         self.0.home().await
     }
+
     async fn open_read(&self, path: &Path, offset: u64) -> Result<crate::Reader, crate::ProtocolError> {
         self.0.open_read(path, offset).await
     }
+
     async fn open_write(&self, path: &Path, offset: u64) -> Result<crate::Writer, crate::ProtocolError> {
         self.0.open_write(path, offset).await
     }

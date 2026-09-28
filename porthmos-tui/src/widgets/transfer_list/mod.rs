@@ -1,3 +1,7 @@
+use porthmos_core::transfer::{
+    Direction,
+    rows::{QueueRow, RowKind, RowState, percent_of},
+};
 use ratatui::{
     Frame,
     layout::Rect,
@@ -5,11 +9,6 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
 };
 use unicode_width::UnicodeWidthStr;
-
-use porthmos_core::transfer::{
-    Direction,
-    rows::{QueueRow, RowKind, RowState, percent_of},
-};
 
 use crate::widgets::file_list::{format_size, truncate_name};
 

@@ -7,13 +7,11 @@ use std::{
 };
 
 use porthmos_ssh::{Session, shell_quote};
+pub use porthmos_vfs::SearchEvent;
+use porthmos_vfs::{Entry, SearchQuery, glob_match, join_remote, path_to_remote_string};
 use russh::ChannelMsg;
 use russh_sftp::client::SftpSession;
 use tokio::sync::mpsc;
-
-use porthmos_vfs::Entry;
-pub use porthmos_vfs::SearchEvent;
-use porthmos_vfs::{SearchQuery, glob_match, join_remote, path_to_remote_string};
 
 pub async fn search_remote(
     session: &Session, sftp: &SftpSession, query: SearchQuery, tx: mpsc::UnboundedSender<SearchEvent>,
