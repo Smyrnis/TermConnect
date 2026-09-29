@@ -7,13 +7,14 @@ license.workspace = true
 repository.workspace = true
 
 [features]
-default = ["sftp", "ftp", "webdav", "s3", "scp"]
+default = ["sftp", "ftp", "webdav", "s3", "scp", "keyring"]
 sftp = ["dep:porthmos-sftp"]
 ftp = ["dep:porthmos-ftp"]
 webdav = ["dep:porthmos-webdav"]
 s3 = ["dep:porthmos-s3"]
 scp = ["dep:porthmos-scp"]
 testing = ["porthmos-vfs/testing"]
+keyring = ["dep:keyring-core", "dep:zbus-secret-service-keyring-store", "dep:apple-native-keyring-store"]
 
 [dependencies]
 anyhow.workspace = true
@@ -29,6 +30,15 @@ porthmos-scp = { workspace = true, optional = true }
 tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
+zeroize.workspace = true
+libc.workspace = true
+keyring-core = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus-secret-service-keyring-store = { version = "1.0.1", optional = true, features = ["rt-tokio-crypto-rust"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1.0.2", optional = true, features = ["keychain"] }
 
 [dev-dependencies]
 porthmos-scp.workspace = true

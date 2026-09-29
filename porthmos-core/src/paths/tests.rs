@@ -143,3 +143,9 @@ fn a_failed_move_is_reported_and_leaves_an_empty_new_config() {
     assert_eq!(settings, crate::config::Settings::default());
     assert!(warnings.is_empty());
 }
+
+#[test]
+fn the_state_file_lives_in_the_state_folder() {
+    let root = Path::new("/r");
+    assert_eq!(Paths::in_dir(root).state_file(), root.join("state").join("state.toml"));
+}

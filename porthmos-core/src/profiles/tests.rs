@@ -136,3 +136,20 @@ fn hand_written_groups_and_tags_are_normalized_when_listed() {
     assert_eq!(groups, vec![Some("Prod"), None, Some("a/b")]);
     assert_eq!(entries[0].tags, vec!["x"]);
 }
+
+#[test]
+fn listed_entries_carry_the_marker_but_never_a_password() {
+    let (_dir, paths) = paths_with(
+        "[connections.web]\nhost = \"h\"\nusername = \"u\"\nin_keyring = [\"password\"]\npassword = \"leak\"\n\
+         [ssh_hosts.web1]\nin_keyring = [\"password\"]\n\
+         [ssh_hosts.gone]\nin_keyring = [\"password\"]\n",
+    );
+    let protocols: Vec<Arc<dyn Protocol>> = vec![Arc::new(Discovering(vec!["web1"]))];
+
+    let entries = list_all(&paths, &protocols, &Environment::default()).unwrap();
+
+    let summary: Vec<(&str, bool, bool)> =
+        entries.iter().map(|entry| (entry.name.as_str(), entry.saved_password, entry.password.is_none())).collect();
+    assert_eq!(summary, vec![("gone", true, true), ("web", true, true), ("web1", true, true)]);
+    assert!(entries.iter().all(|entry| !entry.options.values().any(|value| value == "leak")));
+}

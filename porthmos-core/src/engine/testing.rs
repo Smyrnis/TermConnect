@@ -8,6 +8,7 @@ use crate::{
     Paths, Severity,
     config::{bookmarks::Bookmarks, settings::TransferSettings},
     profiles::{ConnectionEntry, ConnectionSource},
+    secrets::{SecretBackend, Secrets, TestBackend},
 };
 
 pub(crate) struct TestEngine {
@@ -18,6 +19,18 @@ pub(crate) struct TestEngine {
 }
 
 pub(crate) fn test_engine() -> TestEngine {
+    engine_with(Secrets::new(None))
+}
+
+pub(crate) fn test_engine_with_secrets(backend: Arc<TestBackend>) -> TestEngine {
+    let backend: Arc<dyn SecretBackend> = backend;
+    engine_with(
+        Secrets::new(Some(backend))
+            .with_timing(std::time::Duration::from_millis(500), std::time::Duration::from_millis(20)),
+    )
+}
+
+fn engine_with(secrets: Secrets) -> TestEngine {
     let dir = tempfile::tempdir().unwrap();
     let (events_tx, events) = unbounded_channel();
     let (internal_tx, internal) = unbounded_channel();
@@ -28,6 +41,7 @@ pub(crate) fn test_engine() -> TestEngine {
         local_fs: Arc::new(porthmos_lfs::LocalFs::new(dir.path().to_path_buf())),
         transfers: TransferSettings::default(),
         bookmarks: Bookmarks::default(),
+        secrets,
     };
     TestEngine { engine: Engine::new(parts, events_tx, internal_tx), events, internal, dir }
 }
@@ -44,6 +58,8 @@ pub(crate) fn sample_entry(name: &str) -> ConnectionEntry {
         source: ConnectionSource::Profile,
         group: None,
         tags: Vec::new(),
+        saved_password: false,
+        in_keyring: Vec::new(),
     }
 }
 
@@ -92,6 +108,32 @@ impl TestEngine {
             .await
             .expect("an event within two seconds")
             .expect("the event channel is open")
+    }
+
+    pub(crate) async fn settle(&mut self) {
+        while let Ok(Some(done)) =
+            tokio::time::timeout(std::time::Duration::from_millis(300), self.internal.recv()).await
+        {
+            self.engine.handle_internal(done);
+        }
+    }
+
+    pub(crate) fn assert_secret_nowhere(&self, secret: &str, events: &[Event]) {
+        let mut folders = vec![self.dir.path().to_path_buf()];
+        while let Some(folder) = folders.pop() {
+            for item in std::fs::read_dir(&folder).unwrap().flatten() {
+                let path = item.path();
+                if path.is_dir() {
+                    folders.push(path);
+                } else {
+                    let bytes = std::fs::read(&path).unwrap();
+                    let found = bytes.windows(secret.len()).any(|window| window == secret.as_bytes());
+                    assert!(!found, "{} holds the secret", path.display());
+                }
+            }
+        }
+        let printed = format!("{events:?}");
+        assert!(!printed.contains(secret), "an event shows the secret: {printed}");
     }
 
     pub(crate) async fn run_internal(&mut self) {

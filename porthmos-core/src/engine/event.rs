@@ -31,4 +31,7 @@ pub enum Event {
     SearchFound(Entry),
     SearchDone { truncated: bool },
     SearchFailed(String),
+    KeyringStatus { available: bool },
+    KeyringWaiting { waiting: bool },
+    SaveChoice { save: bool },
 }

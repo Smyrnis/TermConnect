@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use porthmos_vfs::Target;
 use serde::{Deserialize, Serialize};
 
-use super::labels::Labels;
+use super::{PASSWORD_MARKER, labels::Labels};
 
 pub const DEFAULT_PROTOCOL: &str = "sftp";
 
@@ -16,6 +16,7 @@ fn is_default_protocol(protocol: &str) -> bool {
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(from = "StoredProfile")]
 pub struct ConnectionProfile {
     #[serde(skip)]
     pub name: String,
@@ -26,13 +27,48 @@ pub struct ConnectionProfile {
     pub port: Option<u16>,
     pub username: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub password: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub in_keyring: Vec<String>,
     #[serde(flatten)]
     pub options: BTreeMap<String, String>,
+}
+
+#[derive(Deserialize)]
+struct StoredProfile {
+    #[serde(default = "default_protocol")]
+    protocol: String,
+    host: String,
+    #[serde(default)]
+    port: Option<u16>,
+    username: String,
+    #[serde(default)]
+    group: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    in_keyring: Vec<String>,
+    #[serde(flatten)]
+    options: BTreeMap<String, String>,
+}
+
+impl From<StoredProfile> for ConnectionProfile {
+    fn from(mut stored: StoredProfile) -> Self {
+        stored.options.remove(PASSWORD_MARKER);
+        Self {
+            name: String::new(),
+            protocol: stored.protocol,
+            host: stored.host,
+            port: stored.port,
+            username: stored.username,
+            group: stored.group,
+            tags: stored.tags,
+            in_keyring: stored.in_keyring,
+            options: stored.options,
+        }
+    }
 }
 
 impl std::fmt::Debug for ConnectionProfile {
@@ -43,9 +79,9 @@ impl std::fmt::Debug for ConnectionProfile {
             .field("host", &self.host)
             .field("port", &self.port)
             .field("username", &self.username)
-            .field("password", &self.password.as_ref().map(|_| "<redacted>"))
             .field("group", &self.group)
             .field("tags", &self.tags)
+            .field("in_keyring", &self.in_keyring)
             .field("options", &self.options.keys().collect::<Vec<_>>())
             .finish()
     }
@@ -76,6 +112,8 @@ pub struct ConnectionEntry {
     pub options: BTreeMap<String, String>,
     pub group: Option<String>,
     pub tags: Vec<String>,
+    pub saved_password: bool,
+    pub in_keyring: Vec<String>,
     pub source: ConnectionSource,
 }
 
@@ -91,6 +129,8 @@ impl std::fmt::Debug for ConnectionEntry {
             .field("options", &self.options.keys().collect::<Vec<_>>())
             .field("group", &self.group)
             .field("tags", &self.tags)
+            .field("saved_password", &self.saved_password)
+            .field("in_keyring", &self.in_keyring)
             .field("source", &self.source)
             .finish()
     }
@@ -104,10 +144,12 @@ impl ConnectionEntry {
             host: profile.host,
             port: profile.port.unwrap_or(default_port),
             username: profile.username,
-            password: profile.password,
+            password: None,
             options: profile.options,
             group: profile.group,
             tags: profile.tags,
+            saved_password: profile.in_keyring.iter().any(|marker| marker == PASSWORD_MARKER),
+            in_keyring: profile.in_keyring,
             source: ConnectionSource::Profile,
         }
     }
@@ -123,6 +165,8 @@ impl ConnectionEntry {
             options: target.options,
             group: None,
             tags: Vec::new(),
+            saved_password: false,
+            in_keyring: Vec::new(),
             source: ConnectionSource::SshConfig,
         }
     }
@@ -138,6 +182,8 @@ impl ConnectionEntry {
             options: BTreeMap::new(),
             group: labels.group,
             tags: labels.tags,
+            saved_password: false,
+            in_keyring: Vec::new(),
             source,
         }
     }

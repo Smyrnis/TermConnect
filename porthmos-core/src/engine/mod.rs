@@ -22,6 +22,7 @@ use crate::{
     Paths, Severity,
     config::{bookmarks::Bookmarks, settings::TransferSettings},
     profiles::ConnectionEntry,
+    secrets::Secrets,
     transfer::{
         Direction, TransferOutcome, TransferQueue, TransferSnapshot,
         conflicts::ConflictPolicy,
@@ -43,9 +44,21 @@ pub(crate) enum TransferEvent {
 }
 
 pub(crate) enum Internal {
-    Connected { entry: ConnectionEntry, protocol: Arc<dyn Protocol>, fs: Arc<dyn FileSystem> },
-    ConnectFailed { name: String, message: String },
+    Connected {
+        entry: ConnectionEntry,
+        protocol: Arc<dyn Protocol>,
+        fs: Arc<dyn FileSystem>,
+        typed: Option<prompter::TypedPassword>,
+    },
+    ConnectFailed {
+        name: String,
+        message: String,
+    },
     Transfer(TransferEvent),
+    KeyringProbed {
+        available: bool,
+    },
+    KeyringDone(handlers::KeyringDone),
 }
 
 pub(crate) struct PlanningScan {
@@ -95,6 +108,11 @@ pub(crate) struct Engine {
     bookmarks: Bookmarks,
     published: TransferSnapshot,
     last_progress_publish: Option<Instant>,
+    secrets: Secrets,
+    keyring_jobs: Option<UnboundedSender<handlers::KeyringJob>>,
+    next_keyring_job: u64,
+    latest_keyring_job: HashMap<String, u64>,
+    connecting: std::collections::HashSet<String>,
 }
 
 pub(crate) struct EngineParts {
@@ -104,10 +122,15 @@ pub(crate) struct EngineParts {
     pub(crate) local_fs: Arc<dyn FileSystem>,
     pub(crate) transfers: TransferSettings,
     pub(crate) bookmarks: Bookmarks,
+    pub(crate) secrets: Secrets,
 }
 
 impl Engine {
     pub(crate) fn new(parts: EngineParts, events: UnboundedSender<Event>, internal: UnboundedSender<Internal>) -> Self {
+        let waiting = events.clone();
+        parts.secrets.on_waiting(move |waiting_now| {
+            let _ = waiting.send(Event::KeyringWaiting { waiting: waiting_now });
+        });
         Self {
             paths: parts.paths,
             env: parts.env,
@@ -128,6 +151,11 @@ impl Engine {
             bookmarks: parts.bookmarks,
             published: TransferSnapshot::default(),
             last_progress_publish: None,
+            secrets: parts.secrets,
+            keyring_jobs: None,
+            next_keyring_job: 0,
+            latest_keyring_job: HashMap::new(),
+            connecting: std::collections::HashSet::new(),
         }
     }
 
@@ -149,7 +177,7 @@ impl Engine {
         match command {
             Command::Connect { profile } => self.connect(&profile),
             Command::Disconnect { session } => self.disconnect(session),
-            Command::Answer { request_id, answer } => self.questions.answer(request_id, answer),
+            Command::Answer { request_id, answer, save } => self.questions.answer(request_id, answer, save),
             Command::PrepareShell { session } => self.prepare_shell(session),
             Command::List { location, path } => self.list(location, path),
             Command::CreateDir { location, path } => self.create_dir(location, path),
@@ -164,11 +192,13 @@ impl Engine {
             Command::Search { location, root, pattern } => self.search(location, root, pattern),
             Command::CancelSearch => self.cancel_search(),
             Command::ListProfiles => self.list_profiles(),
-            Command::SaveProfile { original, draft } => self.save_profile(original, draft),
+            Command::SaveProfile { original, draft } => self.save_profile(original, *draft),
             Command::DeleteProfile { name } => self.delete_profile(&name),
             Command::SaveSshLabels { name, group, tags } => self.save_ssh_labels(&name, &group, &tags),
             Command::MoveSshLabels { from, to } => self.move_ssh_labels(&from, &to),
             Command::ForgetSshLabels { name } => self.forget_ssh_labels(&name),
+            Command::RememberSaveChoice { save } => self.remember_save_choice(save),
+            Command::ForgetSshPassword { alias } => self.forget_ssh_password(&alias),
             Command::AddBookmark { label, location, path } => self.add_bookmark(label, location, path),
             Command::RemoveBookmark { index } => self.remove_bookmark(index),
             Command::Shutdown => {}
@@ -178,8 +208,13 @@ impl Engine {
 
     pub(crate) fn handle_internal(&mut self, done: Internal) {
         match done {
-            Internal::Connected { entry, protocol, fs } => self.finish_connect(entry, protocol, fs),
-            Internal::ConnectFailed { name, message } => self.emit(Event::ConnectFailed { name, message }),
+            Internal::Connected { entry, protocol, fs, typed } => self.finish_connect(entry, protocol, fs, typed),
+            Internal::ConnectFailed { name, message } => {
+                self.connecting.remove(&name);
+                self.emit(Event::ConnectFailed { name, message })
+            }
+            Internal::KeyringProbed { available } => self.emit(Event::KeyringStatus { available }),
+            Internal::KeyringDone(done) => self.finish_keyring_job(done),
             Internal::Transfer(TransferEvent::Progress { id, transferred }) => {
                 if let Some(job) = self.transfers.get_mut(id) {
                     job.transferred_bytes = transferred;

@@ -6,7 +6,11 @@ use crate::profiles::{ConnectionEntry, ConnectionSource, Labels};
 fn entry(name: &str, group: Option<&str>, tags: &[&str]) -> ConnectionEntry {
     let mut entry = ConnectionEntry::orphan_labels(
         name.to_string(),
-        Labels { group: group.map(str::to_string), tags: tags.iter().map(|tag| tag.to_string()).collect() },
+        Labels {
+            group: group.map(str::to_string),
+            tags: tags.iter().map(|tag| tag.to_string()).collect(),
+            in_keyring: Vec::new(),
+        },
         ConnectionSource::MissingSshHost,
     );
     entry.host = format!("{name}.example");

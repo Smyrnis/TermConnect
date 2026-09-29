@@ -25,5 +25,17 @@ fn parse_tags_splits_on_commas() {
 #[test]
 fn labels_are_empty_without_group_and_tags() {
     assert!(Labels::default().is_empty());
-    assert!(!Labels { group: Some("a".into()), tags: Vec::new() }.is_empty());
+    assert!(!Labels { group: Some("a".into()), tags: Vec::new(), in_keyring: Vec::new() }.is_empty());
+}
+
+#[test]
+fn labels_with_only_a_marker_are_not_empty() {
+    assert!(!Labels { group: None, tags: Vec::new(), in_keyring: vec!["password".into()] }.is_empty());
+}
+
+#[test]
+fn label_markers_are_omitted_when_empty() {
+    let written =
+        toml::to_string(&Labels { group: Some("A".into()), tags: Vec::new(), in_keyring: Vec::new() }).unwrap();
+    assert!(!written.contains("in_keyring"), "{written}");
 }

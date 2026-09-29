@@ -10,7 +10,7 @@ use crate::{app::testing::test_app, widgets::dialog::Dialog};
 fn missing(name: &str) -> ConnectionEntry {
     ConnectionEntry::orphan_labels(
         name.to_string(),
-        Labels { group: None, tags: vec!["t".into()] },
+        Labels { group: None, tags: vec!["t".into()], in_keyring: Vec::new() },
         ConnectionSource::MissingSshHost,
     )
 }

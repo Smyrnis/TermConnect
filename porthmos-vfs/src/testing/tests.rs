@@ -249,6 +249,16 @@ fn by_default_a_file_system_has_no_transfer_limit() {
     assert_eq!(OnlyWrites(FakeFs::new()).transfer_limit(), None);
 }
 
+#[tokio::test]
+async fn the_fake_protocol_remembers_the_target_it_was_given() {
+    let protocol = FakeProtocol::new(FakeFs::new());
+    assert!(protocol.seen_target().is_none());
+
+    protocol.connect(&target(Some("pw")), &mut Scripted(None)).await.unwrap();
+
+    assert_eq!(protocol.seen_target().and_then(|seen| seen.password).as_deref(), Some("pw"));
+}
+
 #[test]
 fn with_discovered_targets_are_returned_by_discover() {
     let protocol = FakeProtocol::new(FakeFs::new()).with_discovered(vec![target(None)]);

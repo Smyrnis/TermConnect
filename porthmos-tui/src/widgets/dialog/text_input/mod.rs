@@ -10,7 +10,6 @@ use ratatui::{
 pub struct TextInputDialog {
     pub title: String,
     pub value: String,
-    pub masked: bool,
     pub cursor: usize,
 }
 
@@ -25,11 +24,7 @@ impl TextInputDialog {
     pub fn new(title: impl Into<String>, initial_value: impl Into<String>) -> Self {
         let value = initial_value.into();
         let cursor = value.chars().count();
-        Self { title: title.into(), value, masked: false, cursor }
-    }
-
-    pub fn new_masked(title: impl Into<String>) -> Self {
-        Self { title: title.into(), value: String::new(), masked: true, cursor: 0 }
+        Self { title: title.into(), value, cursor }
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> TextInputOutcome {
@@ -90,7 +85,7 @@ impl TextInputDialog {
 }
 
 pub fn render_text_input(frame: &mut Frame, area: Rect, dialog: &TextInputDialog) {
-    let displayed_value = if dialog.masked { "*".repeat(dialog.value.chars().count()) } else { dialog.value.clone() };
+    let displayed_value = dialog.value.clone();
 
     let popup = centered_popup(area, super::content_width(&[dialog.title.as_str(), displayed_value.as_str()]), 4);
 

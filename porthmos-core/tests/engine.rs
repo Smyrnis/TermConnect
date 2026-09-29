@@ -48,7 +48,7 @@ async fn cancelling_the_password_prompt_fails_with_connection_cancelled_and_allo
             _ => None,
         })
         .await;
-    harness.core.send(Command::Answer { request_id, answer: None });
+    harness.core.send(Command::Answer { request_id, answer: None, save: false });
     let message = harness
         .next(|event| match event {
             Event::ConnectFailed { message, .. } => Some(message.clone()),
@@ -64,7 +64,7 @@ async fn cancelling_the_password_prompt_fails_with_connection_cancelled_and_allo
             _ => None,
         })
         .await;
-    harness.core.send(Command::Answer { request_id, answer: Some(Answer::Password("pw".into())) });
+    harness.core.send(Command::Answer { request_id, answer: Some(Answer::Password("pw".into())), save: false });
     harness.next(|event| matches!(event, Event::Connected { .. }).then_some(())).await;
 }
 
@@ -121,6 +121,7 @@ async fn a_protocol_without_a_shell_is_announced_on_connect() {
 async fn the_handle_lists_registered_protocols_in_order() {
     let config = tempfile::tempdir().unwrap();
     let (core, _events) = porthmos_core::Core::builder()
+        .without_keyring()
         .paths(porthmos_core::Paths::in_dir(config.path()))
         .protocol(std::sync::Arc::new(FakeProtocol::new(porthmos_vfs::testing::FakeFs::new()).with_id("one")))
         .protocol(std::sync::Arc::new(FakeProtocol::new(porthmos_vfs::testing::FakeFs::new()).with_id("two")))
@@ -130,4 +131,27 @@ async fn the_handle_lists_registered_protocols_in_order() {
     let ids: Vec<&str> = core.protocols().iter().map(|info| info.id).collect();
 
     assert_eq!(ids, ["one", "two"]);
+}
+
+#[tokio::test]
+async fn a_core_without_a_keyring_says_so_and_publishes_the_save_choice() {
+    let config = tempfile::tempdir().unwrap();
+    let (_core, mut events) = porthmos_core::Core::builder()
+        .paths(porthmos_core::Paths::in_dir(config.path()))
+        .without_keyring()
+        .start()
+        .unwrap();
+
+    let mut saw_choice = None;
+    let mut saw_status = None;
+    while saw_choice.is_none() || saw_status.is_none() {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(5), events.recv()).await.unwrap().unwrap();
+        match event {
+            Event::SaveChoice { save } => saw_choice = Some(save),
+            Event::KeyringStatus { available } => saw_status = Some(available),
+            _ => {}
+        }
+    }
+
+    assert_eq!((saw_choice, saw_status), (Some(false), Some(false)));
 }

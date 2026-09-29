@@ -24,6 +24,7 @@ pub fn start_with(protocol: impl FnOnce(FakeFs) -> FakeProtocol) -> Harness {
     .unwrap();
     let remote = FakeFs::new();
     let (core, events) = Core::builder()
+        .without_keyring()
         .paths(paths)
         .local_home(local.path().to_path_buf())
         .protocol(Arc::new(protocol(remote.clone())))

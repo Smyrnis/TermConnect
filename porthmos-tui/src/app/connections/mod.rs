@@ -1,7 +1,12 @@
 mod form;
 mod missing;
 
+use porthmos_core::Answer;
+
 use super::*;
+use crate::widgets::dialog::{FormDialog, FormField};
+
+const NO_KEYRING_HINT: &str = "Passwords are not saved: no system keyring. They are kept until Porthmos quits.";
 
 impl App {
     pub(super) fn request_shell(&mut self) {
@@ -51,10 +56,11 @@ impl App {
             return;
         }
 
-        let Some(dialog) = form::build("Add connection", self.core.protocols(), None) else {
+        let Some(mut dialog) = form::build("Add connection", self.core.protocols(), None) else {
             self.notifications.push(Severity::Warning, "No protocols are available in this build");
             return;
         };
+        dialog.hint = self.keyring_hint();
         self.dialog = Some(Dialog::Form(dialog));
         self.pending_action = Some(PendingAction::AddConnection);
     }
@@ -74,7 +80,9 @@ impl App {
             .iter()
             .find(|(key, _)| *key == "name")
             .map(|(_, name)| Reveal::AwaitingSave(name.trim().to_string()));
-        self.core.send(Command::SaveProfile { original, draft: form::draft(values) });
+        let protocol = values.iter().find(|(key, _)| *key == "protocol").map(|(_, value)| value.as_str()).unwrap_or("");
+        let secret_keys = form::secret_keys(self.core.protocols(), protocol);
+        self.core.send(Command::SaveProfile { original, draft: Box::new(form::draft(values, &secret_keys)) });
     }
 
     pub(super) fn open_edit_connection_dialog(&mut self) {
@@ -94,9 +102,10 @@ impl App {
             return;
         }
 
-        let Some(dialog) = form::build("Edit connection", self.core.protocols(), Some(&entry)) else {
+        let Some(mut dialog) = form::build("Edit connection", self.core.protocols(), Some(&entry)) else {
             return;
         };
+        dialog.hint = self.keyring_hint();
         self.dialog = Some(Dialog::Form(dialog));
         self.pending_action = Some(PendingAction::EditConnection { original: entry });
     }
@@ -126,9 +135,40 @@ impl App {
         let value = |wanted: &str| {
             values.iter().find(|(key, _)| *key == wanted).map(|(_, value)| value.clone()).unwrap_or_default()
         };
-        let (group, tags) = (value("group"), value("tags"));
+        let (group, tags, forget) = (value("group"), value("tags"), value("saved_password") == "forget");
         self.reveal = Some(Reveal::AwaitingSave(name.clone()));
-        self.core.send(Command::SaveSshLabels { name, group, tags });
+        self.core.send(Command::SaveSshLabels { name: name.clone(), group, tags });
+        if forget {
+            self.core.send(Command::ForgetSshPassword { alias: name });
+        }
+    }
+
+    fn keyring_hint(&self) -> Option<String> {
+        (!self.keyring_available).then(|| NO_KEYRING_HINT.to_string())
+    }
+
+    pub(super) fn open_password_prompt(&mut self, request_id: RequestId, username: String, name: String) {
+        let mut fields = vec![FormField::masked("password", "Password", "")];
+        if self.keyring_available {
+            let choices = vec![("true".to_string(), "Yes".to_string()), ("false".to_string(), "No".to_string())];
+            let current = if self.save_choice { "true" } else { "false" };
+            fields.push(FormField::choice("save", "Save in keyring", choices, current));
+        }
+        self.dialog = Some(Dialog::Form(FormDialog::new(format!("Password for {username}@{name}"), fields)));
+        self.pending_action = Some(PendingAction::SubmitPassword { request_id });
+    }
+
+    pub(super) fn submit_password(&mut self, request_id: RequestId, values: Vec<(&'static str, String)>) {
+        let value = |wanted: &str| values.iter().find(|(key, _)| *key == wanted).map(|(_, value)| value.clone());
+        let save = value("save").as_deref() == Some("true");
+        if value("save").is_some() && save != self.save_choice {
+            self.save_choice = save;
+            self.core.send(Command::RememberSaveChoice { save });
+        }
+        let password = value("password").unwrap_or_default();
+        self.core.send(Command::Answer { request_id, answer: Some(Answer::Password(password)), save });
+        self.dialog = None;
+        self.pending_action = None;
     }
 
     pub(super) fn set_form_error(&mut self, message: String) {

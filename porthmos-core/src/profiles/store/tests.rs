@@ -84,17 +84,16 @@ fn save_to_creates_a_new_entry() {
         port: Some(22),
         username: "deploy".to_string(),
         options: std::collections::BTreeMap::new(),
-        password: Some("hunter2".to_string()),
         group: None,
         tags: Vec::new(),
+        in_keyring: Vec::new(),
     };
 
     save_to(&path, &profile).unwrap();
     let loaded = load_from(&path).unwrap();
 
     assert_eq!(loaded.len(), 1);
-    assert_eq!(loaded[0].name, "prod");
-    assert_eq!(loaded[0].password, Some("hunter2".to_string()));
+    assert_eq!(loaded[0], profile);
 }
 
 #[test]
@@ -108,9 +107,9 @@ fn save_to_overwrites_an_existing_entry_by_name() {
         port: Some(22),
         username: "deploy".to_string(),
         options: std::collections::BTreeMap::new(),
-        password: None,
         group: None,
         tags: Vec::new(),
+        in_keyring: Vec::new(),
     };
     save_to(&path, &profile).unwrap();
 
@@ -135,9 +134,9 @@ fn delete_from_removes_one_entry_and_leaves_others() {
             port: Some(22),
             username: "deploy".to_string(),
             options: std::collections::BTreeMap::new(),
-            password: None,
             group: None,
             tags: Vec::new(),
+            in_keyring: Vec::new(),
         },
     )
     .unwrap();
@@ -150,9 +149,9 @@ fn delete_from_removes_one_entry_and_leaves_others() {
             port: Some(22),
             username: "deploy".to_string(),
             options: std::collections::BTreeMap::new(),
-            password: None,
             group: None,
             tags: Vec::new(),
+            in_keyring: Vec::new(),
         },
     )
     .unwrap();
@@ -177,9 +176,9 @@ fn save_to_sets_file_permissions_to_owner_read_write_only() {
             port: Some(22),
             username: "deploy".to_string(),
             options: std::collections::BTreeMap::new(),
-            password: Some("hunter2".to_string()),
             group: None,
             tags: Vec::new(),
+            in_keyring: Vec::new(),
         },
     )
     .unwrap();
@@ -199,9 +198,9 @@ fn save_to_leaves_the_original_file_untouched_if_the_write_fails() {
         port: Some(22),
         username: "deploy".to_string(),
         options: std::collections::BTreeMap::new(),
-        password: None,
         group: None,
         tags: Vec::new(),
+        in_keyring: Vec::new(),
     };
     save_to(&path, &original).unwrap();
 
@@ -234,9 +233,9 @@ fn save_to_creates_the_parent_directory_if_missing() {
             port: Some(22),
             username: "deploy".to_string(),
             options: std::collections::BTreeMap::new(),
-            password: None,
             group: None,
             tags: Vec::new(),
+            in_keyring: Vec::new(),
         },
     )
     .unwrap();
@@ -265,7 +264,11 @@ fn an_existing_flat_profile_round_trips_without_new_keys() {
 }
 
 fn labels(group: &str, tags: &[&str]) -> Labels {
-    Labels { group: Some(group.to_string()), tags: tags.iter().map(|tag| tag.to_string()).collect() }
+    Labels {
+        group: Some(group.to_string()),
+        tags: tags.iter().map(|tag| tag.to_string()).collect(),
+        in_keyring: Vec::new(),
+    }
 }
 
 fn sample_profile(name: &str) -> ConnectionProfile {
@@ -275,10 +278,10 @@ fn sample_profile(name: &str) -> ConnectionProfile {
         host: "h".to_string(),
         port: None,
         username: "u".to_string(),
-        password: None,
         group: None,
         tags: Vec::new(),
         options: std::collections::BTreeMap::new(),
+        in_keyring: Vec::new(),
     }
 }
 
@@ -358,4 +361,79 @@ fn a_profile_with_group_and_tags_round_trips_through_the_file() {
     save(&paths, &profile).unwrap();
 
     assert_eq!(load(&paths).unwrap(), vec![profile]);
+}
+
+#[test]
+fn profile_markers_are_rewritten_in_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::in_dir(dir.path());
+    save(&paths, &sample_profile("web")).unwrap();
+    save(&paths, &sample_profile("other")).unwrap();
+
+    assert!(set_profile_markers(&paths, "web", &["password".to_string()]).unwrap());
+    let profiles = load(&paths).unwrap();
+    let web = profiles.iter().find(|profile| profile.name == "web").unwrap();
+    let other = profiles.iter().find(|profile| profile.name == "other").unwrap();
+    assert_eq!(web.in_keyring, vec!["password"]);
+    assert!(other.in_keyring.is_empty());
+    assert!(!set_profile_markers(&paths, "gone", &["password".to_string()]).unwrap());
+    assert_eq!(load(&paths).unwrap().len(), 2);
+}
+
+#[test]
+fn ssh_markers_create_and_clear_the_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::in_dir(dir.path());
+
+    set_ssh_markers(&paths, "web1", &["password".to_string()]).unwrap();
+    assert_eq!(load_ssh_labels(&paths).unwrap()["web1"].in_keyring, vec!["password"]);
+    set_ssh_markers(&paths, "web1", &[]).unwrap();
+    assert!(load_ssh_labels(&paths).unwrap().is_empty());
+}
+
+#[test]
+fn ssh_markers_keep_the_group_and_tags() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::in_dir(dir.path());
+    save_ssh_labels(&paths, "web1", &labels("Work", &["prod"])).unwrap();
+
+    set_ssh_markers(&paths, "web1", &["password".to_string()]).unwrap();
+    set_ssh_markers(&paths, "web1", &[]).unwrap();
+
+    let record = &load_ssh_labels(&paths).unwrap()["web1"];
+    assert_eq!(record.group.as_deref(), Some("Work"));
+    assert_eq!(record.tags, vec!["prod"]);
+    assert!(record.in_keyring.is_empty());
+}
+
+#[test]
+fn saving_labels_keeps_a_marker_and_ignores_one_from_the_caller() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::in_dir(dir.path());
+    set_ssh_markers(&paths, "web1", &["password".to_string()]).unwrap();
+
+    save_ssh_labels(&paths, "web1", &Labels::default()).unwrap();
+    assert_eq!(load_ssh_labels(&paths).unwrap()["web1"].in_keyring, vec!["password"]);
+
+    let spoofed = Labels { group: None, tags: Vec::new(), in_keyring: vec!["password".into()] };
+    save_ssh_labels(&paths, "web2", &spoofed).unwrap();
+    assert!(!load_ssh_labels(&paths).unwrap().contains_key("web2"));
+}
+
+#[test]
+fn an_old_plaintext_password_never_survives_a_write() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::in_dir(dir.path());
+    std::fs::create_dir_all(&paths.config_dir).unwrap();
+    std::fs::write(
+        paths.connections_file(),
+        "[connections.web]\nhost = \"h\"\nusername = \"u\"\npassword = \"hunter2\"\n",
+    )
+    .unwrap();
+
+    save(&paths, &sample_profile("other")).unwrap();
+
+    let text = std::fs::read_to_string(paths.connections_file()).unwrap();
+    assert!(!text.contains("hunter2") && !text.contains("password"), "{text}");
+    assert_eq!(load(&paths).unwrap().len(), 2);
 }

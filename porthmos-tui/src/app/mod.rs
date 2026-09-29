@@ -113,6 +113,9 @@ pub struct App {
     connections: ConnectionsView,
     reveal: Option<Reveal>,
     announced_missing: HashSet<String>,
+    keyring_available: bool,
+    keyring_waiting: bool,
+    save_choice: bool,
     transfers_cursor: usize,
     reselect_row: Option<RowKind>,
     connection_status: ConnectionStatus,
@@ -139,6 +142,9 @@ impl App {
             connections: ConnectionsView::new(),
             reveal: None,
             announced_missing: HashSet::new(),
+            keyring_available: true,
+            keyring_waiting: false,
+            save_choice: false,
             transfers_cursor: 0,
             reselect_row: None,
             connection_status: ConnectionStatus::Disconnected,
@@ -267,16 +273,15 @@ impl App {
                     self.notifications.push(Severity::Error, message);
                 }
             }
+            Event::KeyringStatus { available } => self.keyring_available = available,
+            Event::KeyringWaiting { waiting } => self.keyring_waiting = waiting,
+            Event::SaveChoice { save } => self.save_choice = save,
         }
     }
 
     fn ask(&mut self, request_id: RequestId, question: Question) {
         match question {
-            Question::Password { username, name } => {
-                let title = format!("Password for {username}@{name}");
-                self.dialog = Some(Dialog::TextInput(TextInputDialog::new_masked(title)));
-                self.pending_action = Some(PendingAction::SubmitPassword { request_id });
-            }
+            Question::Password { username, name } => self.open_password_prompt(request_id, username, name),
             Question::TrustHostKey { name, host, port, key_type, fingerprint } => {
                 let message = format!(
                     "{name} ({host}:{port}) is not a known host.\n\

@@ -9,6 +9,8 @@ pub mod listing;
 pub mod paths;
 pub mod profiles;
 mod protocol_info;
+pub mod secrets;
+pub mod state;
 pub mod transfer;
 
 use std::{path::PathBuf, sync::Arc};
@@ -112,6 +114,13 @@ impl CoreHandle {
     }
 }
 
+pub fn disable_core_dumps() {
+    let limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    unsafe {
+        libc::setrlimit(libc::RLIMIT_CORE, &limit);
+    }
+}
+
 pub struct Core;
 
 impl Core {
@@ -127,6 +136,7 @@ pub struct CoreBuilder {
     settings: Settings,
     protocols: Option<Vec<Arc<dyn Protocol>>>,
     local_home: Option<PathBuf>,
+    secrets: Option<secrets::Secrets>,
 }
 
 impl CoreBuilder {
@@ -155,6 +165,15 @@ impl CoreBuilder {
         self
     }
 
+    pub fn secrets(mut self, secrets: secrets::Secrets) -> Self {
+        self.secrets = Some(secrets);
+        self
+    }
+
+    pub fn without_keyring(self) -> Self {
+        self.secrets(secrets::Secrets::new(None))
+    }
+
     pub fn start(self) -> Result<(CoreHandle, UnboundedReceiver<Event>)> {
         let paths = self.paths.context("the core needs its configuration paths")?;
         let (bookmarks, bookmark_warnings) = config::bookmarks::load(&paths)?;
@@ -169,6 +188,7 @@ impl CoreBuilder {
             env: self.env,
             transfers: self.settings.transfers,
             bookmarks,
+            secrets: self.secrets.unwrap_or_else(secrets::Secrets::native),
         };
 
         let (events, event_receiver) = unbounded_channel();
@@ -179,6 +199,8 @@ impl CoreBuilder {
             let _ = events.send(Event::Notice { severity: Severity::Warning, message: warning.0 });
         }
         engine.publish_bookmarks();
+        engine.publish_save_choice();
+        engine.start_keyring_probe();
         tokio::spawn(engine.run(command_receiver, internal_receiver));
         Ok((CoreHandle { commands, protocols: infos }, event_receiver))
     }

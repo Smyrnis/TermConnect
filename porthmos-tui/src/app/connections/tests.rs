@@ -29,6 +29,8 @@ fn connection(name: &str, source: ConnectionSource) -> ConnectionEntry {
         source,
         group: None,
         tags: Vec::new(),
+        saved_password: false,
+        in_keyring: Vec::new(),
     }
 }
 
@@ -198,9 +200,10 @@ fn a_password_question_opens_a_masked_prompt() {
     });
 
     match test.app.dialog {
-        Some(Dialog::TextInput(ref dialog)) => {
+        Some(Dialog::Form(ref dialog)) => {
             assert_eq!(dialog.title, "Password for u@srv");
-            assert!(dialog.masked);
+            assert_eq!(dialog.fields[0].key, "password");
+            assert_eq!(dialog.fields[0].kind, crate::widgets::dialog::FieldKind::Masked);
         }
         _ => panic!("expected the password prompt"),
     }
@@ -219,7 +222,10 @@ fn submitting_the_password_answers_the_question() {
     }
     test.app.apply_dialog_key(key(KeyCode::Enter));
 
-    assert_eq!(test.sent(), vec![Command::Answer { request_id: 4, answer: Some(Answer::Password("pw".to_string())) }]);
+    assert_eq!(
+        test.sent(),
+        vec![Command::Answer { request_id: 4, answer: Some(Answer::Password("pw".to_string())), save: false }]
+    );
 }
 
 #[test]
@@ -234,7 +240,7 @@ fn escaping_the_password_prompt_cancels_the_connection() {
     test.app.apply_dialog_key(key(KeyCode::Esc));
 
     assert!(test.app.dialog.is_none());
-    assert_eq!(test.sent(), vec![Command::Answer { request_id: 4, answer: None }]);
+    assert_eq!(test.sent(), vec![Command::Answer { request_id: 4, answer: None, save: false }]);
     assert_eq!(test.app.connection_status, ConnectionStatus::Disconnected);
 }
 
@@ -280,7 +286,7 @@ fn confirming_the_host_key_trusts_it() {
     test.app.apply_dialog_key(key(KeyCode::Char('y')));
 
     assert!(test.app.dialog.is_none());
-    assert_eq!(test.sent(), vec![Command::Answer { request_id: 9, answer: Some(Answer::Confirmed) }]);
+    assert_eq!(test.sent(), vec![Command::Answer { request_id: 9, answer: Some(Answer::Confirmed), save: false }]);
     assert_eq!(test.app.connection_status, ConnectionStatus::Connecting("web".to_string()));
 }
 
@@ -292,7 +298,7 @@ fn declining_the_host_key_cancels_the_connection() {
     test.app.apply_dialog_key(key(KeyCode::Enter));
 
     assert!(test.app.dialog.is_none());
-    assert_eq!(test.sent(), vec![Command::Answer { request_id: 9, answer: None }]);
+    assert_eq!(test.sent(), vec![Command::Answer { request_id: 9, answer: None, save: false }]);
     assert_eq!(test.app.connection_status, ConnectionStatus::Disconnected);
 }
 
@@ -310,18 +316,19 @@ fn add_connection_dialog_saves_a_new_profile_on_submit() {
         test.sent(),
         vec![Command::SaveProfile {
             original: None,
-            draft: ProfileDraft {
+            draft: Box::new(ProfileDraft {
                 name: "prod".to_string(),
                 host: "server.example.com".to_string(),
                 port: "2222".to_string(),
                 username: "deploy".to_string(),
-                password: "hunter2".to_string(),
+                password: porthmos_core::profiles::SecretEdit::Replace("hunter2".into()),
                 protocol: "sftp".to_string(),
                 remote_path: String::new(),
                 options: BTreeMap::from([("identity_file".to_string(), String::new())]),
                 group: String::new(),
                 tags: String::new(),
-            },
+                secret_options: Default::default(),
+            }),
         }]
     );
     test.app.apply_core_event(Event::ProfileSaved);
@@ -571,7 +578,7 @@ fn confirming_the_certificate_trusts_it() {
 
     test.app.apply_dialog_key(key(KeyCode::Char('y')));
 
-    assert_eq!(test.sent(), vec![Command::Answer { request_id: 11, answer: Some(Answer::Confirmed) }]);
+    assert_eq!(test.sent(), vec![Command::Answer { request_id: 11, answer: Some(Answer::Confirmed), save: false }]);
 }
 
 #[test]
@@ -581,7 +588,7 @@ fn declining_the_certificate_cancels_the_connection() {
 
     test.app.apply_dialog_key(key(KeyCode::Esc));
 
-    assert_eq!(test.sent(), vec![Command::Answer { request_id: 11, answer: None }]);
+    assert_eq!(test.sent(), vec![Command::Answer { request_id: 11, answer: None, save: false }]);
     assert_eq!(test.app.connection_status, ConnectionStatus::Disconnected);
 }
 
@@ -835,4 +842,219 @@ fn delete_on_a_shadowed_labels_row_does_not_disconnect_the_same_named_profile() 
     test.app.apply_action(Action::Delete);
 
     assert!(test.sent().is_empty());
+}
+
+fn ask_password(test: &mut TestApp, request_id: u64) {
+    test.app.apply_core_event(Event::Question {
+        request_id,
+        question: Question::Password { username: "u".into(), name: "web".into() },
+    });
+}
+
+fn prompt(test: &TestApp) -> &crate::widgets::dialog::FormDialog {
+    match &test.app.dialog {
+        Some(Dialog::Form(form)) => form,
+        _ => panic!("no password prompt"),
+    }
+}
+
+fn type_text(test: &mut TestApp, text: &str) {
+    for character in text.chars() {
+        test.app.apply_key(key(KeyCode::Char(character)));
+    }
+}
+
+#[test]
+fn the_password_prompt_offers_saving_at_the_remembered_choice() {
+    let mut test = app();
+    test.app.apply_core_event(Event::SaveChoice { save: true });
+    ask_password(&mut test, 7);
+
+    assert_eq!(prompt(&test).title, "Password for u@web");
+    assert_eq!(prompt(&test).fields[1].label, "Save in keyring");
+    assert_eq!(prompt(&test).value("save").as_deref(), Some("true"));
+
+    type_text(&mut test, "p w");
+    test.app.apply_key(key(KeyCode::Enter));
+
+    assert_eq!(
+        test.sent(),
+        vec![Command::Answer { request_id: 7, answer: Some(Answer::Password("p w".into())), save: true }]
+    );
+    assert!(test.app.dialog.is_none());
+}
+
+#[test]
+fn the_first_prompt_starts_at_no() {
+    let mut test = app();
+    ask_password(&mut test, 1);
+
+    assert_eq!(prompt(&test).value("save").as_deref(), Some("false"));
+}
+
+#[test]
+fn changing_the_choice_is_remembered_and_keeping_it_is_not() {
+    let mut test = app();
+    ask_password(&mut test, 1);
+    test.app.apply_key(key(KeyCode::Tab));
+    test.app.apply_key(key(KeyCode::Right));
+    test.app.apply_key(key(KeyCode::Enter));
+
+    assert_eq!(
+        test.sent(),
+        vec![
+            Command::RememberSaveChoice { save: true },
+            Command::Answer { request_id: 1, answer: Some(Answer::Password(String::new())), save: true },
+        ]
+    );
+
+    ask_password(&mut test, 2);
+    assert_eq!(prompt(&test).value("save").as_deref(), Some("true"));
+    type_text(&mut test, "x");
+    test.app.apply_key(key(KeyCode::Enter));
+    assert_eq!(
+        test.sent(),
+        vec![Command::Answer { request_id: 2, answer: Some(Answer::Password("x".into())), save: true }]
+    );
+}
+
+#[test]
+fn without_a_keyring_the_prompt_has_no_save_field_and_never_asks_to_save() {
+    let mut test = app();
+    test.app.apply_core_event(Event::SaveChoice { save: true });
+    test.app.apply_core_event(Event::KeyringStatus { available: false });
+    ask_password(&mut test, 1);
+
+    assert!(prompt(&test).value("save").is_none());
+    assert_eq!(prompt(&test).fields.len(), 1);
+    type_text(&mut test, "pw");
+    test.app.apply_key(key(KeyCode::Enter));
+
+    assert_eq!(
+        test.sent(),
+        vec![Command::Answer { request_id: 1, answer: Some(Answer::Password("pw".into())), save: false }]
+    );
+}
+
+#[test]
+fn the_save_field_returns_when_the_keyring_becomes_available() {
+    let mut test = app();
+    test.app.apply_core_event(Event::KeyringStatus { available: false });
+    test.app.apply_core_event(Event::KeyringStatus { available: true });
+    ask_password(&mut test, 1);
+
+    assert!(prompt(&test).value("save").is_some());
+}
+
+#[test]
+fn escaping_the_new_prompt_still_cancels() {
+    let mut test = app();
+    ask_password(&mut test, 3);
+    type_text(&mut test, "abc");
+
+    test.app.apply_key(key(KeyCode::Esc));
+
+    assert_eq!(test.sent(), vec![Command::Answer { request_id: 3, answer: None, save: false }]);
+    assert!(test.app.dialog.is_none());
+}
+
+#[test]
+fn sent_commands_never_print_the_typed_password() {
+    let mut test = app();
+    ask_password(&mut test, 1);
+    type_text(&mut test, "hunter2");
+    test.app.apply_key(key(KeyCode::Enter));
+
+    assert!(!format!("{:?}", test.sent()).contains("hunter2"));
+}
+
+#[test]
+fn without_a_keyring_the_connection_form_says_why() {
+    let mut test = on_connections_screen(vec![connection("web", ConnectionSource::Profile)]);
+    test.app.apply_action(Action::AddConnection);
+    assert!(matches!(&test.app.dialog, Some(Dialog::Form(form)) if form.hint.is_none()));
+    test.app.dialog = None;
+
+    test.app.apply_core_event(Event::KeyringStatus { available: false });
+    test.app.apply_action(Action::AddConnection);
+    let hint = |test: &TestApp| match &test.app.dialog {
+        Some(Dialog::Form(form)) => form.hint.clone(),
+        _ => panic!("no form"),
+    };
+    assert_eq!(
+        hint(&test).as_deref(),
+        Some("Passwords are not saved: no system keyring. They are kept until Porthmos quits.")
+    );
+    test.app.dialog = None;
+
+    test.app.apply_action(Action::Rename);
+    assert!(hint(&test).is_some());
+}
+
+#[test]
+fn the_labels_form_can_forget_a_saved_password() {
+    let mut host = connection("web1", ConnectionSource::SshConfig);
+    host.saved_password = true;
+    let mut test = on_connections_screen(vec![host]);
+
+    test.app.apply_action(Action::Rename);
+    test.app.apply_key(key(KeyCode::Tab));
+    test.app.apply_key(key(KeyCode::Tab));
+    test.app.apply_key(key(KeyCode::Right));
+    test.app.apply_key(key(KeyCode::Enter));
+
+    assert_eq!(
+        test.sent(),
+        vec![
+            Command::SaveSshLabels { name: "web1".into(), group: String::new(), tags: String::new() },
+            Command::ForgetSshPassword { alias: "web1".into() },
+        ]
+    );
+}
+
+#[test]
+fn keeping_the_saved_password_sends_no_forget() {
+    let mut host = connection("web1", ConnectionSource::SshConfig);
+    host.saved_password = true;
+    let mut test = on_connections_screen(vec![host]);
+
+    test.app.apply_action(Action::Rename);
+    test.app.apply_key(key(KeyCode::Enter));
+
+    assert_eq!(
+        test.sent(),
+        vec![Command::SaveSshLabels { name: "web1".into(), group: String::new(), tags: String::new() }]
+    );
+}
+
+#[test]
+fn the_status_line_shows_a_waiting_keyring() {
+    use ratatui::{Terminal, backend::TestBackend};
+    let status = |test: &TestApp| {
+        let mut terminal = Terminal::new(TestBackend::new(80, 1)).unwrap();
+        terminal.draw(|frame| test.app.render_status(frame, frame.area())).unwrap();
+        terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect::<String>()
+    };
+    let mut test = app();
+
+    test.app.apply_core_event(Event::KeyringWaiting { waiting: true });
+    assert!(status(&test).contains("Waiting for the system keyring\u{2026}"), "{}", status(&test));
+
+    test.app.apply_core_event(Event::KeyringWaiting { waiting: false });
+    assert!(!status(&test).contains("Waiting for the system keyring"));
+}
+
+#[test]
+fn the_password_prompt_shows_asterisks_never_the_password() {
+    use ratatui::{Terminal, backend::TestBackend};
+    let mut test = app();
+    ask_password(&mut test, 1);
+    type_text(&mut test, "s3cret");
+
+    let mut terminal = Terminal::new(TestBackend::new(70, 10)).unwrap();
+    terminal.draw(|frame| test.app.dialog.as_ref().unwrap().render(frame, frame.area())).unwrap();
+    let screen: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
+
+    assert!(screen.contains("******"), "{screen}");
+    assert!(!screen.contains("s3cret"), "{screen}");
 }

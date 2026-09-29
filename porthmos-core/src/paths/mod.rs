@@ -64,6 +64,10 @@ impl Paths {
         self.config_dir.join("bookmarks.toml")
     }
 
+    pub fn state_file(&self) -> PathBuf {
+        self.state_dir.join("state.toml")
+    }
+
     pub fn log_file(&self) -> PathBuf {
         self.state_dir.join("porthmos.log")
     }

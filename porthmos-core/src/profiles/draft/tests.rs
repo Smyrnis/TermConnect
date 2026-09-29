@@ -38,7 +38,7 @@ fn draft(port: &str) -> ProfileDraft {
         host: " server.example.com ".to_string(),
         port: port.to_string(),
         username: " deploy ".to_string(),
-        password: String::new(),
+        password: SecretEdit::Keep,
         remote_path: String::new(),
         options: BTreeMap::from([
             ("bucket".to_string(), " media ".to_string()),
@@ -47,6 +47,7 @@ fn draft(port: &str) -> ProfileDraft {
         ]),
         group: String::new(),
         tags: String::new(),
+        secret_options: Default::default(),
     }
 }
 
@@ -62,6 +63,8 @@ fn entry(protocol: &str, options: &[(&str, &str)]) -> ConnectionEntry {
         source: ConnectionSource::Profile,
         group: None,
         tags: Vec::new(),
+        saved_password: false,
+        in_keyring: Vec::new(),
     }
 }
 
@@ -74,7 +77,7 @@ fn a_valid_draft_is_trimmed_into_a_profile_of_its_protocol() {
         ("prod", "server.example.com", Some(2222), "deploy")
     );
     assert_eq!(profile.protocol, "ftp");
-    assert_eq!(profile.password, None);
+    assert!(profile.in_keyring.is_empty());
     assert_eq!(
         profile.options,
         BTreeMap::from([
@@ -150,15 +153,17 @@ fn empty_optional_options_are_not_saved() {
 }
 
 #[test]
-fn passwords_and_secret_options_are_kept_verbatim() {
+fn replaced_secrets_stay_untrimmed_in_the_draft_and_out_of_the_profile() {
     let mut spaced = draft("21");
-    spaced.password = " pw ".to_string();
-    spaced.options.insert("token".to_string(), " tok ".to_string());
+    spaced.password = SecretEdit::Replace(" pw ".into());
+    spaced.secret_options.insert("token".to_string(), SecretEdit::Replace(" tok ".into()));
 
     let profile = spaced.validate(&form(), None).unwrap();
 
-    assert_eq!(profile.password.as_deref(), Some(" pw "));
-    assert_eq!(profile.options.get("token").map(String::as_str), Some(" tok "));
+    assert_eq!(spaced.password, SecretEdit::Replace(" pw ".into()));
+    assert_eq!(spaced.secret_options["token"], SecretEdit::Replace(" tok ".into()));
+    assert!(!profile.options.contains_key("token"));
+    assert!(profile.in_keyring.is_empty());
 }
 
 #[test]
@@ -203,7 +208,7 @@ fn switching_protocol_drops_the_old_protocols_options() {
 #[test]
 fn debug_never_prints_option_values_or_the_password() {
     let mut secret = draft("21");
-    secret.password = "hunter2".to_string();
+    secret.password = SecretEdit::Replace("hunter2".into());
     secret.options.insert("token".to_string(), "s3cr3t".to_string());
 
     let printed = format!("{secret:?}");
@@ -238,4 +243,124 @@ fn validate_normalizes_group_and_tags() {
     let profile = draft.validate(&form, None).unwrap();
     assert_eq!(profile.group.as_deref(), Some("Work/Web"));
     assert_eq!(profile.tags, vec!["prod", "db"]);
+}
+
+fn sftp_draft(password: SecretEdit) -> ProfileDraft {
+    ProfileDraft {
+        protocol: "sftp".into(),
+        name: "web".into(),
+        host: "h".into(),
+        username: "u".into(),
+        password,
+        ..Default::default()
+    }
+}
+
+fn marked(markers: &[&str]) -> ConnectionEntry {
+    let mut saved = entry("sftp", &[]);
+    saved.in_keyring = markers.iter().map(|marker| marker.to_string()).collect();
+    saved.saved_password = markers.contains(&"password");
+    saved
+}
+
+#[test]
+fn keep_carries_the_saved_markers_and_replace_or_clear_drop_them() {
+    let form = ConnectionForm::standard(22);
+    let saved = marked(&["password"]);
+
+    let kept = sftp_draft(SecretEdit::Keep).validate(&form, Some(&saved)).unwrap();
+    let cleared = sftp_draft(SecretEdit::Clear).validate(&form, Some(&saved)).unwrap();
+    let replaced = sftp_draft(SecretEdit::Replace("pw".into())).validate(&form, Some(&saved)).unwrap();
+
+    assert_eq!(kept.in_keyring, vec!["password"]);
+    assert!(cleared.in_keyring.is_empty());
+    assert!(replaced.in_keyring.is_empty());
+}
+
+#[test]
+fn switching_protocol_drops_every_marker() {
+    let mut saved = marked(&["password"]);
+    saved.protocol = "ftp".into();
+
+    let profile = sftp_draft(SecretEdit::Keep).validate(&ConnectionForm::standard(22), Some(&saved)).unwrap();
+
+    assert!(profile.in_keyring.is_empty());
+}
+
+#[test]
+fn a_required_password_is_satisfied_by_a_kept_saved_one_only() {
+    let mut form = ConnectionForm::standard(22);
+    form.password.required = true;
+
+    assert!(sftp_draft(SecretEdit::Keep).validate(&form, Some(&marked(&["password"]))).is_ok());
+    assert_eq!(sftp_draft(SecretEdit::Keep).validate(&form, None).unwrap_err(), "Password can't be empty");
+    assert_eq!(
+        sftp_draft(SecretEdit::Keep).validate(&form, Some(&marked(&[]))).unwrap_err(),
+        "Password can't be empty"
+    );
+    assert_eq!(
+        sftp_draft(SecretEdit::Clear).validate(&form, Some(&marked(&["password"]))).unwrap_err(),
+        "Password can't be empty"
+    );
+    assert_eq!(
+        sftp_draft(SecretEdit::Replace(String::new())).validate(&form, None).unwrap_err(),
+        "Password can't be empty"
+    );
+    assert!(sftp_draft(SecretEdit::Replace(" ".into())).validate(&form, None).is_ok());
+}
+
+#[test]
+fn secret_options_never_land_in_the_options_map_or_the_markers() {
+    let draft = ProfileDraft {
+        secret_options: BTreeMap::from([("token".to_string(), SecretEdit::Replace("t".into()))]),
+        ..draft("21")
+    };
+    let profile = draft.validate(&form(), None).unwrap();
+    assert!(!profile.options.contains_key("token"));
+    assert!(profile.in_keyring.is_empty());
+}
+
+#[test]
+fn a_kept_secret_option_keeps_its_marker() {
+    let mut saved = entry("ftp", &[]);
+    saved.in_keyring = vec!["token".into()];
+
+    let profile = draft("21").validate(&form(), Some(&saved)).unwrap();
+
+    assert_eq!(profile.in_keyring, vec!["token"]);
+    assert!(!profile.options.contains_key("token"));
+}
+
+#[test]
+fn a_required_secret_option_needs_a_value_or_a_kept_saved_one() {
+    let mut form = form();
+    form.options.push(OptionField { key: "key", label: "Secret key", required: true, kind: OptionKind::Secret });
+    let mut saved = entry("ftp", &[]);
+    saved.in_keyring = vec!["key".into()];
+
+    assert_eq!(draft("21").validate(&form, None).unwrap_err(), "Secret key can't be empty");
+    assert!(draft("21").validate(&form, Some(&saved)).is_ok());
+    let mut blank = draft("21");
+    blank.secret_options.insert("key".into(), SecretEdit::Replace("   ".into()));
+    assert_eq!(blank.validate(&form, None).unwrap_err(), "Secret key can't be empty");
+}
+
+#[test]
+fn an_old_plaintext_secret_option_is_not_carried_into_the_new_profile() {
+    let saved = entry("ftp", &[("token", "old-plain")]);
+
+    let profile = draft("21").validate(&form(), Some(&saved)).unwrap();
+
+    assert!(!profile.options.contains_key("token"));
+}
+
+#[test]
+fn debug_never_prints_a_replaced_secret() {
+    assert!(!format!("{:?}", SecretEdit::Replace("hunter2".into())).contains("hunter2"));
+    let mut secret = draft("21");
+    secret.password = SecretEdit::Replace("hunter2".into());
+    secret.secret_options.insert("token".into(), SecretEdit::Replace("s3cr3t".into()));
+    let printed = format!("{secret:?}");
+    assert!(!printed.contains("hunter2") && !printed.contains("s3cr3t"), "{printed}");
+    assert!(printed.contains("Replace"), "{printed}");
 }

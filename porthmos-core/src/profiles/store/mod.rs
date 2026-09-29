@@ -62,10 +62,34 @@ pub fn load_ssh_labels(paths: &Paths) -> Result<BTreeMap<String, Labels>> {
 pub fn save_ssh_labels(paths: &Paths, name: &str, labels: &Labels) -> Result<()> {
     let path = paths.connections_file();
     let mut file = read_config_file(&path)?;
-    if labels.is_empty() {
+    let in_keyring = file.ssh_hosts.get(name).map(|record| record.in_keyring.clone()).unwrap_or_default();
+    let record = Labels { group: labels.group.clone(), tags: labels.tags.clone(), in_keyring };
+    if record.is_empty() {
         file.ssh_hosts.remove(name);
     } else {
-        file.ssh_hosts.insert(name.to_string(), labels.clone());
+        file.ssh_hosts.insert(name.to_string(), record);
+    }
+    write_config_file(&path, &file)
+}
+
+pub fn set_profile_markers(paths: &Paths, name: &str, markers: &[String]) -> Result<bool> {
+    let path = paths.connections_file();
+    let mut file = read_config_file(&path)?;
+    let Some(profile) = file.connections.get_mut(name) else {
+        return Ok(false);
+    };
+    profile.in_keyring = markers.to_vec();
+    write_config_file(&path, &file)?;
+    Ok(true)
+}
+
+pub fn set_ssh_markers(paths: &Paths, alias: &str, markers: &[String]) -> Result<()> {
+    let path = paths.connections_file();
+    let mut file = read_config_file(&path)?;
+    let mut record = file.ssh_hosts.remove(alias).unwrap_or_default();
+    record.in_keyring = markers.to_vec();
+    if !record.is_empty() {
+        file.ssh_hosts.insert(alias.to_string(), record);
     }
     write_config_file(&path, &file)
 }

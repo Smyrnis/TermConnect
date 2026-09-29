@@ -8,7 +8,7 @@ pub mod text_input;
 pub use confirm::ConfirmDialog;
 pub use conflict::ConflictDialog;
 use crossterm::event::KeyEvent;
-pub use form::{FieldKind, FormDialog, FormField};
+pub use form::{FieldKind, FormDialog, FormField, KEPT_SECRET};
 pub use list::ListDialog;
 use ratatui::{Frame, layout::Rect};
 pub use text_input::TextInputDialog;
@@ -27,7 +27,7 @@ pub enum Dialog {
     Message(message::MessageDialog),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum DialogOutcome {
     Pending,
     Confirmed,
@@ -38,6 +38,28 @@ pub enum DialogOutcome {
     FormSubmitted(Vec<(&'static str, String)>),
     FormChoiceChanged { key: &'static str },
     Resolved { resolution: Option<porthmos_core::transfer::conflicts::Resolution>, apply_to_rest: bool },
+}
+
+impl std::fmt::Debug for DialogOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DialogOutcome::Pending => write!(f, "Pending"),
+            DialogOutcome::Confirmed => write!(f, "Confirmed"),
+            DialogOutcome::Cancelled => write!(f, "Cancelled"),
+            DialogOutcome::Submitted(_) => write!(f, "Submitted(<redacted>)"),
+            DialogOutcome::Selected(index) => f.debug_tuple("Selected").field(index).finish(),
+            DialogOutcome::Removed(index) => f.debug_tuple("Removed").field(index).finish(),
+            DialogOutcome::FormSubmitted(values) => {
+                f.debug_tuple("FormSubmitted").field(&form::submitted_keys(values)).finish()
+            }
+            DialogOutcome::FormChoiceChanged { key } => f.debug_struct("FormChoiceChanged").field("key", key).finish(),
+            DialogOutcome::Resolved { resolution, apply_to_rest } => f
+                .debug_struct("Resolved")
+                .field("resolution", resolution)
+                .field("apply_to_rest", apply_to_rest)
+                .finish(),
+        }
+    }
 }
 
 impl Dialog {

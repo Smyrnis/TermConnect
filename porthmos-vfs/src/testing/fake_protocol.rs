@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
@@ -16,11 +16,21 @@ pub struct FakeProtocol {
     connect_failure: Option<String>,
     shell: Option<ShellInvocation>,
     discovered: Vec<Target>,
+    seen: Arc<Mutex<Option<Target>>>,
 }
 
 impl FakeProtocol {
     pub fn new(fs: FakeFs) -> Self {
-        Self { id: "fake", form: None, fs, password: None, connect_failure: None, shell: None, discovered: Vec::new() }
+        Self {
+            id: "fake",
+            form: None,
+            fs,
+            password: None,
+            connect_failure: None,
+            shell: None,
+            discovered: Vec::new(),
+            seen: Arc::default(),
+        }
     }
 
     pub fn requiring_password(mut self, password: &str) -> Self {
@@ -46,6 +56,14 @@ impl FakeProtocol {
     pub fn with_shell(mut self, invocation: ShellInvocation) -> Self {
         self.shell = Some(invocation);
         self
+    }
+
+    pub fn seen_target(&self) -> Option<Target> {
+        self.seen.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
+    }
+
+    pub fn seen_targets(&self) -> Arc<Mutex<Option<Target>>> {
+        self.seen.clone()
     }
 
     pub fn with_discovered(mut self, targets: Vec<Target>) -> Self {
@@ -79,6 +97,7 @@ impl Protocol for FakeProtocol {
     async fn connect(
         &self, target: &Target, prompter: &mut dyn Prompter,
     ) -> Result<Arc<dyn FileSystem>, ProtocolError> {
+        *self.seen.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(target.clone());
         if let Some(message) = &self.connect_failure {
             return Err(ProtocolError::new(ErrorKind::Connect, anyhow::anyhow!(message.clone())));
         }

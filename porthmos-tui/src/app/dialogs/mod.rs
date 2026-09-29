@@ -105,7 +105,7 @@ impl App {
                     | PendingAction::TrustCertificate { request_id },
                 ) = self.pending_action.take()
                 {
-                    self.core.send(Command::Answer { request_id, answer: None });
+                    self.core.send(Command::Answer { request_id, answer: None, save: false });
                     self.connection_status = ConnectionStatus::Disconnected;
                 }
             }
@@ -119,7 +119,7 @@ impl App {
                     Some(
                         PendingAction::TrustHostKey { request_id } | PendingAction::TrustCertificate { request_id },
                     ) => {
-                        self.core.send(Command::Answer { request_id, answer: Some(Answer::Confirmed) });
+                        self.core.send(Command::Answer { request_id, answer: Some(Answer::Confirmed), save: false });
                     }
                     _ => {}
                 }
@@ -129,11 +129,9 @@ impl App {
                 match self.pending_action.take() {
                     Some(PendingAction::Mkdir) => self.create_directory(&value),
                     Some(PendingAction::Rename) => self.rename_current(&value),
-                    Some(PendingAction::SubmitPassword { request_id }) => {
-                        self.core.send(Command::Answer { request_id, answer: Some(Answer::Password(value)) });
-                    }
                     Some(PendingAction::AddBookmark) => self.add_bookmark(value),
-                    Some(PendingAction::Delete)
+                    Some(PendingAction::SubmitPassword { .. })
+                    | Some(PendingAction::Delete)
                     | Some(PendingAction::TrustHostKey { .. })
                     | Some(PendingAction::TrustCertificate { .. })
                     | Some(PendingAction::AddConnection)
@@ -177,6 +175,10 @@ impl App {
                 Some(PendingAction::EditSshLabels { name }) => {
                     let name = name.clone();
                     self.submit_ssh_labels(name, values);
+                }
+                Some(PendingAction::SubmitPassword { request_id }) => {
+                    let request_id = *request_id;
+                    self.submit_password(request_id, values);
                 }
                 _ => self.dialog = None,
             },

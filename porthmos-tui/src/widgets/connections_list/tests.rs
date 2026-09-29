@@ -25,6 +25,8 @@ fn renders_connection_names() {
         source: ConnectionSource::Profile,
         group: None,
         tags: Vec::new(),
+        saved_password: false,
+        in_keyring: Vec::new(),
     }];
 
     let backend = TestBackend::new(60, 8);
@@ -53,6 +55,8 @@ fn entry(name: &str) -> ConnectionEntry {
         source: ConnectionSource::Profile,
         group: None,
         tags: Vec::new(),
+        saved_password: false,
+        in_keyring: Vec::new(),
     }
 }
 

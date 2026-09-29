@@ -15,8 +15,10 @@ use super::*;
 use crate::{
     engine::{
         Command, Location, PlanningScan,
-        testing::{TestEngine, test_engine},
+        testing::{TestEngine, test_engine, test_engine_with_secrets},
     },
+    profiles::store,
+    secrets::TestBackend,
     transfer::{Direction, JobStatus},
 };
 
@@ -175,7 +177,7 @@ async fn cancelling_the_password_prompt_fails_with_connection_cancelled_and_allo
         _ => None,
     })
     .await;
-    t.engine.handle_command(Command::Answer { request_id, answer: None });
+    t.engine.handle_command(Command::Answer { request_id, answer: None, save: false });
     t.run_internal().await;
     let message = next_matching(&mut t, |event| match event {
         Event::ConnectFailed { message, .. } => Some(message.clone()),
@@ -191,7 +193,7 @@ async fn cancelling_the_password_prompt_fails_with_connection_cancelled_and_allo
         _ => None,
     })
     .await;
-    t.engine.handle_command(Command::Answer { request_id, answer: Some(Answer::Password("pw".into())) });
+    t.engine.handle_command(Command::Answer { request_id, answer: Some(Answer::Password("pw".into())), save: false });
     t.run_internal().await;
     next_matching(&mut t, |event| matches!(event, Event::Connected { .. }).then_some(())).await;
 }
@@ -206,7 +208,7 @@ async fn a_wrong_password_reports_authentication_failed() {
         _ => None,
     })
     .await;
-    t.engine.handle_command(Command::Answer { request_id, answer: Some(Answer::Password("no".into())) });
+    t.engine.handle_command(Command::Answer { request_id, answer: Some(Answer::Password("no".into())), save: false });
     t.run_internal().await;
 
     let message = next_matching(&mut t, |event| match event {
@@ -469,7 +471,7 @@ fn connecting_to_a_missing_ssh_host_fails_with_a_message() {
     crate::profiles::store::save_ssh_labels(
         &t.engine.paths,
         "old",
-        &crate::profiles::Labels { group: Some("A".into()), tags: Vec::new() },
+        &crate::profiles::Labels { group: Some("A".into()), tags: Vec::new(), in_keyring: Vec::new() },
     )
     .unwrap();
 
@@ -503,4 +505,452 @@ async fn a_profile_wins_over_shadowed_labels_of_the_same_name() {
         _ => None,
     })
     .await;
+}
+
+fn with_secured_profile_lines(
+    backend: &Arc<TestBackend>, extra_lines: &str, protocol: impl FnOnce(FakeFs) -> FakeProtocol,
+) -> TestEngine {
+    let mut t = test_engine_with_secrets(backend.clone());
+    std::fs::create_dir_all(&t.engine.paths.config_dir).unwrap();
+    std::fs::write(
+        t.engine.paths.connections_file(),
+        format!("[connections.srv]\nprotocol = \"fake\"\nhost = \"h\"\nusername = \"u\"\n{extra_lines}"),
+    )
+    .unwrap();
+    t.engine.protocols = vec![Arc::new(protocol(FakeFs::new()))];
+    t
+}
+
+fn with_secured_profile(backend: &Arc<TestBackend>, protocol: impl FnOnce(FakeFs) -> FakeProtocol) -> TestEngine {
+    with_secured_profile_lines(backend, "", protocol)
+}
+
+fn discovered_host(name: &str) -> porthmos_vfs::Target {
+    porthmos_vfs::Target {
+        name: name.into(),
+        host: format!("{name}.example"),
+        port: 22,
+        username: "u".into(),
+        password: None,
+        options: Default::default(),
+    }
+}
+
+async fn answer_next_question(t: &mut TestEngine, password: &str, save: bool, seen: &mut Vec<Event>) {
+    let request_id = loop {
+        let event = t.next_event().await;
+        let found = match &event {
+            Event::Question { request_id, question: Question::Password { .. } } => Some(*request_id),
+            _ => None,
+        };
+        seen.push(event);
+        if let Some(request_id) = found {
+            break request_id;
+        }
+    };
+    t.engine.handle_command(Command::Answer { request_id, answer: Some(Answer::Password(password.into())), save });
+}
+
+async fn finish(t: &mut TestEngine, seen: &mut Vec<Event>) {
+    t.settle().await;
+    seen.extend(t.drain());
+}
+
+fn connected(seen: &[Event], name: &str) -> Option<crate::engine::SessionId> {
+    seen.iter().rev().find_map(|event| match event {
+        Event::Connected { session, name: connected, .. } if connected == name => Some(*session),
+        _ => None,
+    })
+}
+
+fn questions(seen: &[Event]) -> usize {
+    seen.iter().filter(|event| matches!(event, Event::Question { question: Question::Password { .. }, .. })).count()
+}
+
+fn errors(seen: &[Event]) -> Vec<String> {
+    seen.iter()
+        .filter_map(|event| match event {
+            Event::Notice { severity: Severity::Error, message } => Some(message.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn markers(t: &TestEngine) -> Vec<String> {
+    store::load(&t.engine.paths).unwrap().remove(0).in_keyring
+}
+
+#[tokio::test]
+async fn a_prompted_password_with_save_is_stored_after_the_login_succeeds() {
+    let backend = Arc::new(TestBackend::new());
+    let mut t = with_secured_profile(&backend, |fs| FakeProtocol::new(fs).requiring_password("hunter2"));
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    answer_next_question(&mut t, "hunter2", true, &mut seen).await;
+    finish(&mut t, &mut seen).await;
+
+    assert!(connected(&seen, "srv").is_some());
+    assert_eq!(backend.stored("profile:srv").as_deref(), Some("hunter2"));
+    assert_eq!(backend.calls(), vec!["set profile:srv"]);
+    assert_eq!(markers(&t), vec!["password"]);
+    assert!(errors(&seen).is_empty());
+    t.assert_secret_nowhere("hunter2", &seen);
+}
+
+#[tokio::test]
+async fn without_save_the_password_is_kept_for_the_run_and_not_asked_again() {
+    let backend = Arc::new(TestBackend::new());
+    let mut t = with_secured_profile(&backend, |fs| FakeProtocol::new(fs).requiring_password("hunter2"));
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    answer_next_question(&mut t, "hunter2", false, &mut seen).await;
+    finish(&mut t, &mut seen).await;
+    let session = connected(&seen, "srv").unwrap();
+    t.engine.handle_command(Command::Disconnect { session });
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    finish(&mut t, &mut seen).await;
+
+    assert_eq!(questions(&seen), 1);
+    assert_eq!(seen.iter().filter(|event| matches!(event, Event::Connected { .. })).count(), 2);
+    assert!(backend.calls().is_empty());
+    assert!(markers(&t).is_empty());
+    t.assert_secret_nowhere("hunter2", &seen);
+}
+
+#[tokio::test]
+async fn a_rejected_password_is_never_cached() {
+    let backend = Arc::new(TestBackend::new());
+    let mut t = with_secured_profile(&backend, |fs| FakeProtocol::new(fs).requiring_password("pw"));
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    answer_next_question(&mut t, "wrong", true, &mut seen).await;
+    finish(&mut t, &mut seen).await;
+
+    assert!(seen.iter().any(|event| matches!(event, Event::ConnectFailed { .. })));
+    assert!(t.engine.secrets.cached("profile:srv").is_none());
+    assert!(backend.calls().is_empty());
+    assert!(markers(&t).is_empty());
+}
+
+#[tokio::test]
+async fn after_a_rejected_try_only_the_accepted_password_is_stored() {
+    let backend = Arc::new(TestBackend::new());
+    let mut t = with_secured_profile(&backend, |fs| FakeProtocol::new(fs).requiring_password("right"));
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    answer_next_question(&mut t, "wrong", true, &mut seen).await;
+    finish(&mut t, &mut seen).await;
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    answer_next_question(&mut t, "right", true, &mut seen).await;
+    finish(&mut t, &mut seen).await;
+
+    assert_eq!(backend.stored("profile:srv").as_deref(), Some("right"));
+    assert_eq!(backend.calls(), vec!["set profile:srv"]);
+    t.assert_secret_nowhere("wrong", &seen);
+}
+
+#[tokio::test]
+async fn a_cancelled_prompt_stores_nothing() {
+    let backend = Arc::new(TestBackend::new());
+    let mut t = with_secured_profile(&backend, |fs| FakeProtocol::new(fs).requiring_password("pw"));
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    let request_id = next_matching(&mut t, |event| match event {
+        Event::Question { request_id, .. } => Some(*request_id),
+        _ => None,
+    })
+    .await;
+    t.engine.handle_command(Command::Answer { request_id, answer: None, save: true });
+    t.settle().await;
+
+    assert!(t.engine.secrets.cached("profile:srv").is_none());
+    assert!(backend.calls().is_empty());
+}
+
+#[tokio::test]
+async fn a_saved_password_connects_without_asking_and_reads_the_keyring_once() {
+    let backend = Arc::new(TestBackend::new());
+    backend.put("profile:srv", "hunter2");
+    let mut t = with_secured_profile_lines(&backend, "in_keyring = [\"password\"]\n", |fs| {
+        FakeProtocol::new(fs).requiring_password("hunter2")
+    });
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    finish(&mut t, &mut seen).await;
+    let session = connected(&seen, "srv").unwrap();
+    t.engine.handle_command(Command::Disconnect { session });
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    finish(&mut t, &mut seen).await;
+
+    assert_eq!(questions(&seen), 0);
+    assert_eq!(seen.iter().filter(|event| matches!(event, Event::Connected { .. })).count(), 2);
+    assert_eq!(backend.calls(), vec!["get profile:srv"]);
+    t.assert_secret_nowhere("hunter2", &seen);
+}
+
+#[tokio::test]
+async fn a_marker_without_a_keyring_entry_just_asks() {
+    let backend = Arc::new(TestBackend::new());
+    let mut t = with_secured_profile_lines(&backend, "in_keyring = [\"password\"]\n", |fs| {
+        FakeProtocol::new(fs).requiring_password("pw")
+    });
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    answer_next_question(&mut t, "pw", false, &mut seen).await;
+    finish(&mut t, &mut seen).await;
+
+    assert!(connected(&seen, "srv").is_some());
+    assert_eq!(backend.calls(), vec!["get profile:srv"]);
+    assert!(errors(&seen).is_empty());
+}
+
+#[tokio::test]
+async fn a_saved_but_outdated_password_is_asked_again_and_replaced() {
+    let backend = Arc::new(TestBackend::new());
+    backend.put("profile:srv", "old");
+    let mut t = with_secured_profile_lines(&backend, "in_keyring = [\"password\"]\n", |fs| {
+        FakeProtocol::new(fs).requiring_password("new")
+    });
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    answer_next_question(&mut t, "new", true, &mut seen).await;
+    finish(&mut t, &mut seen).await;
+
+    assert_eq!(backend.stored("profile:srv").as_deref(), Some("new"));
+    assert_eq!(backend.calls(), vec!["get profile:srv", "set profile:srv"]);
+    assert_eq!(markers(&t), vec!["password"]);
+    assert_eq!(t.engine.secrets.cached("profile:srv").as_deref().map(String::as_str), Some("new"));
+}
+
+#[tokio::test]
+async fn a_failing_keyring_write_keeps_the_password_for_the_run() {
+    let backend = Arc::new(TestBackend::new());
+    backend.fail_writes();
+    let mut t = with_secured_profile(&backend, |fs| FakeProtocol::new(fs).requiring_password("pw"));
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    answer_next_question(&mut t, "pw", true, &mut seen).await;
+    finish(&mut t, &mut seen).await;
+
+    assert_eq!(
+        errors(&seen),
+        vec!["Couldn't save the password for srv in the system keyring: write failed".to_string()]
+    );
+    assert!(markers(&t).is_empty());
+    assert_eq!(t.engine.secrets.cached("profile:srv").as_deref().map(String::as_str), Some("pw"));
+    assert!(connected(&seen, "srv").is_some());
+}
+
+#[tokio::test]
+async fn saving_without_a_keyring_keeps_the_password_for_the_run_quietly() {
+    let backend = Arc::new(TestBackend::new());
+    backend.fail_reads();
+    let mut t = with_secured_profile(&backend, |fs| FakeProtocol::new(fs).requiring_password("pw"));
+    assert!(!t.engine.secrets.probe().await);
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    answer_next_question(&mut t, "pw", true, &mut seen).await;
+    finish(&mut t, &mut seen).await;
+
+    assert_eq!(backend.calls(), vec!["get porthmos:probe"]);
+    assert!(errors(&seen).is_empty());
+    assert!(markers(&t).is_empty());
+    assert_eq!(t.engine.secrets.cached("profile:srv").as_deref().map(String::as_str), Some("pw"));
+}
+
+#[tokio::test]
+async fn a_marker_with_no_keyring_available_asks_without_calling_it() {
+    let backend = Arc::new(TestBackend::new());
+    backend.fail_reads();
+    let mut t = with_secured_profile_lines(&backend, "in_keyring = [\"password\"]\n", |fs| {
+        FakeProtocol::new(fs).requiring_password("pw")
+    });
+    assert!(!t.engine.secrets.probe().await);
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    answer_next_question(&mut t, "pw", false, &mut seen).await;
+    finish(&mut t, &mut seen).await;
+
+    assert_eq!(backend.calls(), vec!["get porthmos:probe"]);
+    assert!(connected(&seen, "srv").is_some());
+}
+
+#[tokio::test]
+async fn an_ssh_config_host_saves_under_its_alias_and_uses_it_next_time() {
+    let backend = Arc::new(TestBackend::new());
+    let mut t = test_engine_with_secrets(backend.clone());
+    t.engine.protocols = vec![Arc::new(
+        FakeProtocol::new(FakeFs::new()).requiring_password("pw").with_discovered(vec![discovered_host("web1")]),
+    )];
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "web1".into() });
+    answer_next_question(&mut t, "pw", true, &mut seen).await;
+    finish(&mut t, &mut seen).await;
+
+    assert_eq!(backend.stored("ssh:web1").as_deref(), Some("pw"));
+    assert!(backend.stored("profile:web1").is_none());
+    assert_eq!(store::load_ssh_labels(&t.engine.paths).unwrap()["web1"].in_keyring, vec!["password"]);
+    assert!(store::load(&t.engine.paths).unwrap().is_empty());
+    t.assert_secret_nowhere("pw\"", &seen);
+
+    let mut fresh = test_engine_with_secrets(backend.clone());
+    std::fs::create_dir_all(&fresh.engine.paths.config_dir).unwrap();
+    std::fs::copy(t.engine.paths.connections_file(), fresh.engine.paths.connections_file()).unwrap();
+    fresh.engine.protocols = vec![Arc::new(
+        FakeProtocol::new(FakeFs::new()).requiring_password("pw").with_discovered(vec![discovered_host("web1")]),
+    )];
+    let mut again = Vec::new();
+    fresh.engine.handle_command(Command::Connect { profile: "web1".into() });
+    finish(&mut fresh, &mut again).await;
+    assert_eq!(questions(&again), 0);
+    assert!(connected(&again, "web1").is_some());
+}
+
+#[tokio::test]
+async fn a_password_with_spaces_and_unicode_round_trips() {
+    let backend = Arc::new(TestBackend::new());
+    let password = " p ä: ß 🔑 ";
+    let mut t = with_secured_profile(&backend, move |fs| FakeProtocol::new(fs).requiring_password(password));
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    answer_next_question(&mut t, password, true, &mut seen).await;
+    finish(&mut t, &mut seen).await;
+
+    assert_eq!(backend.stored("profile:srv").as_deref(), Some(password));
+    assert_eq!(t.engine.secrets.cached("profile:srv").as_deref().map(String::as_str), Some(password));
+    let session = connected(&seen, "srv").unwrap();
+    assert_eq!(t.engine.shell_target(session).and_then(|target| target.password).as_deref(), Some(password));
+}
+
+#[tokio::test]
+async fn a_saved_secret_option_reaches_the_protocol() {
+    let backend = Arc::new(TestBackend::new());
+    backend.put("option:token:srv", "tok-123");
+    let protocol = FakeProtocol::new(FakeFs::new()).with_form(token_form());
+    let seen_targets = protocol.seen_targets();
+    let mut t = with_secured_profile_lines(&backend, "in_keyring = [\"token\"]\n", move |_| protocol);
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    finish(&mut t, &mut seen).await;
+
+    let target = seen_targets.lock().unwrap().clone().unwrap();
+    assert_eq!(target.options.get("token").map(String::as_str), Some("tok-123"));
+    assert_eq!(target.password, None);
+    assert_eq!(backend.calls(), vec!["get option:token:srv"]);
+    let session = connected(&seen, "srv").unwrap();
+    assert!(!t.engine.sessions[&session].entry.options.contains_key("token"));
+}
+
+#[tokio::test]
+async fn the_shell_handoff_gets_the_password_but_the_session_does_not_keep_it() {
+    let backend = Arc::new(TestBackend::new());
+    let mut t = with_secured_profile(&backend, |fs| {
+        FakeProtocol::new(fs).requiring_password("pw").with_shell(ShellInvocation {
+            program: "ssh".into(),
+            args: Vec::new(),
+            env: Vec::new(),
+        })
+    });
+    let mut seen = Vec::new();
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    answer_next_question(&mut t, "pw", false, &mut seen).await;
+    finish(&mut t, &mut seen).await;
+    let session = connected(&seen, "srv").unwrap();
+
+    assert!(t.engine.sessions[&session].entry.password.is_none());
+    assert_eq!(t.engine.shell_target(session).and_then(|target| target.password).as_deref(), Some("pw"));
+    assert!(!format!("{:?}", t.engine.sessions[&session].entry).contains("pw\""));
+}
+
+#[test]
+fn an_answer_never_shows_the_password_when_printed() {
+    let command = Command::Answer { request_id: 1, answer: Some(Answer::Password("hunter2".into())), save: true };
+    assert!(!format!("{command:?}").contains("hunter2"));
+}
+
+fn token_form() -> porthmos_vfs::ConnectionForm {
+    let mut form = porthmos_vfs::ConnectionForm::standard(22);
+    form.options.push(porthmos_vfs::OptionField {
+        key: "token",
+        label: "Token",
+        required: false,
+        kind: porthmos_vfs::OptionKind::Secret,
+    });
+    form
+}
+
+#[tokio::test]
+async fn two_connects_to_the_same_profile_ask_only_once() {
+    let backend = Arc::new(TestBackend::new());
+    let mut t = with_secured_profile(&backend, |fs| FakeProtocol::new(fs).requiring_password("pw"));
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    answer_next_question(&mut t, "pw", false, &mut seen).await;
+    finish(&mut t, &mut seen).await;
+
+    assert_eq!(questions(&seen), 1);
+    assert_eq!(seen.iter().filter(|event| matches!(event, Event::Connected { .. })).count(), 1);
+    assert_eq!(t.engine.sessions.len(), 1);
+}
+
+#[tokio::test]
+async fn a_failed_connect_allows_a_new_attempt() {
+    let backend = Arc::new(TestBackend::new());
+    let mut t = with_secured_profile(&backend, |fs| FakeProtocol::new(fs).requiring_password("pw"));
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    answer_next_question(&mut t, "wrong", false, &mut seen).await;
+    finish(&mut t, &mut seen).await;
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    answer_next_question(&mut t, "pw", false, &mut seen).await;
+    finish(&mut t, &mut seen).await;
+
+    assert!(connected(&seen, "srv").is_some());
+    assert_eq!(questions(&seen), 2);
+}
+
+#[tokio::test]
+async fn a_secret_option_kept_only_for_the_run_reaches_the_protocol() {
+    let protocol = FakeProtocol::new(FakeFs::new()).with_form(token_form());
+    let seen_targets = protocol.seen_targets();
+    let (mut t, _remote) = with_fake_profile(move |_| protocol);
+    t.engine.secrets.remember("option:token:srv", "tok-run");
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    finish(&mut t, &mut seen).await;
+
+    let target = seen_targets.lock().unwrap().clone().unwrap();
+    assert_eq!(target.options.get("token").map(String::as_str), Some("tok-run"));
+}
+
+#[tokio::test]
+async fn an_old_plaintext_secret_option_is_never_given_to_the_protocol() {
+    let protocol = FakeProtocol::new(FakeFs::new()).with_form(token_form());
+    let seen_targets = protocol.seen_targets();
+    let (mut t, _remote) = with_fake_profile_lines("token = \"plain-old\"\n", move |_| protocol);
+    let mut seen = Vec::new();
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    finish(&mut t, &mut seen).await;
+
+    let target = seen_targets.lock().unwrap().clone().unwrap();
+    assert!(!target.options.contains_key("token"));
+    assert!(!format!("{seen:?}").contains("plain-old"));
 }

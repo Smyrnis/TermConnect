@@ -19,6 +19,8 @@ fn connection(name: &str, source: ConnectionSource) -> ConnectionEntry {
         source,
         group: None,
         tags: Vec::new(),
+        saved_password: false,
+        in_keyring: Vec::new(),
     }
 }
 
@@ -279,7 +281,7 @@ fn rename_action_on_connections_screen_opens_the_edit_connection_form() {
             assert_eq!(form.value("host").as_deref(), Some("server.example.com"));
             assert_eq!(form.value("port").as_deref(), Some("2222"));
             assert_eq!(form.value("username").as_deref(), Some("deploy"));
-            assert_eq!(form.value("password").as_deref(), Some("hunter2"));
+            assert_eq!(form.value("password").as_deref(), Some(""));
         }
         _ => panic!("expected the edit form to open"),
     }

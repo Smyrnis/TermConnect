@@ -36,4 +36,5 @@ fn option_finds_a_described_field_by_key() {
 fn reserved_keys_include_group_and_tags() {
     assert!(RESERVED_KEYS.contains(&"group"));
     assert!(RESERVED_KEYS.contains(&"tags"));
+    assert!(RESERVED_KEYS.contains(&"in_keyring"));
 }

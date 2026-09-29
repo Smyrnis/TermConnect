@@ -2,11 +2,11 @@ use std::collections::BTreeMap;
 
 use porthmos_core::{
     Choice, ConnectionForm, OptionField, OptionKind, ProtocolInfo,
-    profiles::{ConnectionEntry, ConnectionSource},
+    profiles::{ConnectionEntry, ConnectionSource, SecretEdit},
 };
 
 use super::*;
-use crate::widgets::dialog::FieldKind;
+use crate::widgets::dialog::{FieldKind, KEPT_SECRET};
 
 const SECURITY: &[Choice] =
     &[Choice { value: "none", label: "None" }, Choice { value: "explicit", label: "Explicit TLS" }];
@@ -62,6 +62,8 @@ fn ftp_entry(options: &[(&str, &str)]) -> ConnectionEntry {
         source: ConnectionSource::Profile,
         group: None,
         tags: Vec::new(),
+        saved_password: false,
+        in_keyring: Vec::new(),
     }
 }
 
@@ -107,7 +109,7 @@ fn editing_fills_every_field_from_the_entry_including_options() {
         ]
     );
     assert_eq!(form.value("port").as_deref(), Some("2121"));
-    assert_eq!(form.value("password").as_deref(), Some("pw"));
+    assert_eq!(form.value("password").as_deref(), Some(""));
     assert_eq!(form.value("remote_path").as_deref(), Some("/pub"));
     assert_eq!(form.value("security").as_deref(), Some("none"));
     assert_eq!(form.value("passive").as_deref(), Some("false"));
@@ -195,19 +197,17 @@ fn the_draft_carries_protocol_common_fields_remote_folder_and_options() {
     let form = build("Edit connection", &protocols(), Some(&entry)).unwrap();
     let values = form.fields.iter().map(|field| (field.key, field.submitted_value())).collect();
 
-    let draft = draft(values);
+    let draft = draft(values, &["token"]);
 
     assert_eq!(draft.protocol, "ftp");
-    assert_eq!((draft.name.as_str(), draft.port.as_str(), draft.password.as_str()), ("files", "2121", "pw"));
+    assert_eq!((draft.name.as_str(), draft.port.as_str()), ("files", "2121"));
+    assert_eq!(draft.password, SecretEdit::Clear);
     assert_eq!(draft.remote_path, "/pub");
     assert_eq!(
         draft.options,
-        BTreeMap::from([
-            ("passive".to_string(), "true".to_string()),
-            ("security".to_string(), "none".to_string()),
-            ("token".to_string(), String::new()),
-        ])
+        BTreeMap::from([("passive".to_string(), "true".to_string()), ("security".to_string(), "none".to_string())])
     );
+    assert_eq!(draft.secret_options, BTreeMap::from([("token".to_string(), SecretEdit::Clear)]));
 }
 
 fn sftp_with_identity() -> Vec<ProtocolInfo> {
@@ -330,7 +330,7 @@ fn switching_protocol_keeps_group_and_tags() {
 
 #[test]
 fn draft_reads_group_and_tags() {
-    let draft = draft(vec![("group", "Work".to_string()), ("tags", "prod".to_string())]);
+    let draft = draft(vec![("group", "Work".to_string()), ("tags", "prod".to_string())], &[]);
 
     assert_eq!((draft.group.as_str(), draft.tags.as_str()), ("Work", "prod"));
     assert!(draft.options.is_empty());
@@ -349,4 +349,125 @@ fn the_labels_form_has_only_group_and_tags() {
     assert_eq!(keys(&form), ["group", "tags"]);
     assert_eq!(form.value("group").as_deref(), Some("Work"));
     assert_eq!(form.value("tags").as_deref(), Some("prod"));
+}
+
+fn saved_entry(markers: &[&str]) -> ConnectionEntry {
+    let mut entry = ftp_entry(&[]);
+    entry.in_keyring = markers.iter().map(|marker| marker.to_string()).collect();
+    entry.saved_password = markers.contains(&"password");
+    entry
+}
+
+fn field_kind(form: &FormDialog, key: &str) -> FieldKind {
+    form.fields.iter().find(|field| field.key == key).unwrap().kind.clone()
+}
+
+#[test]
+fn a_saved_password_is_offered_as_kept() {
+    let form = build("Edit connection", &protocols(), Some(&saved_entry(&["password"]))).unwrap();
+
+    assert_eq!(field_kind(&form, "password"), FieldKind::SavedSecret);
+    assert_eq!(form.value("password").as_deref(), Some(KEPT_SECRET));
+    assert_eq!(field_kind(&form, "token"), FieldKind::Masked);
+}
+
+#[test]
+fn a_saved_secret_option_is_offered_as_kept() {
+    let form = build("Edit connection", &protocols(), Some(&saved_entry(&["token"]))).unwrap();
+
+    assert_eq!(field_kind(&form, "token"), FieldKind::SavedSecret);
+    assert_eq!(field_kind(&form, "password"), FieldKind::Masked);
+    assert_eq!(form.value("password").as_deref(), Some(""));
+}
+
+#[test]
+fn the_form_never_shows_a_password_carried_by_the_entry() {
+    let mut entry = saved_entry(&[]);
+    entry.password = Some("leak".into());
+    entry.options.insert("token".into(), "leak".into());
+
+    let form = build("Edit connection", &protocols(), Some(&entry)).unwrap();
+
+    assert!(form.fields.iter().all(|field| field.submitted_value() != "leak"));
+}
+
+#[test]
+fn a_new_connection_has_no_saved_secrets() {
+    let form = build("Add connection", &protocols(), None).unwrap();
+
+    assert_eq!(field_kind(&form, "password"), FieldKind::Masked);
+    assert_eq!(form.value("password").as_deref(), Some(""));
+}
+
+#[test]
+fn switching_protocol_turns_a_kept_secret_into_an_empty_field() {
+    let mut form = build("Edit connection", &protocols(), Some(&saved_entry(&["password", "token"]))).unwrap();
+
+    select_protocol(&mut form, "sftp");
+    rebuild_for_protocol(&mut form, &protocols());
+
+    assert_eq!(field_kind(&form, "password"), FieldKind::Masked);
+    assert_eq!(form.value("password").as_deref(), Some(""));
+    assert!(form.fields.iter().all(|field| field.submitted_value() != KEPT_SECRET));
+}
+
+#[test]
+fn secrets_map_to_keep_clear_or_replace() {
+    assert_eq!(draft(vec![("password", KEPT_SECRET.to_string())], &[]).password, SecretEdit::Keep);
+    assert_eq!(draft(vec![("password", String::new())], &[]).password, SecretEdit::Clear);
+    assert_eq!(draft(vec![("password", " p w ".to_string())], &[]).password, SecretEdit::Replace(" p w ".into()));
+    assert_eq!(draft(vec![], &[]).password, SecretEdit::Keep);
+}
+
+#[test]
+fn a_secret_option_goes_to_the_secret_edits_and_never_the_options() {
+    let draft = draft(
+        vec![("token", "t".to_string()), ("other", KEPT_SECRET.to_string()), ("plain", "x".to_string())],
+        &["token", "other"],
+    );
+
+    assert_eq!(draft.secret_options.get("token"), Some(&SecretEdit::Replace("t".into())));
+    assert_eq!(draft.secret_options.get("other"), Some(&SecretEdit::Keep));
+    assert_eq!(draft.options, BTreeMap::from([("plain".to_string(), "x".to_string())]));
+}
+
+#[test]
+fn the_labels_form_offers_forgetting_only_with_a_saved_password() {
+    let mut host = ftp_entry(&[]);
+    host.name = "web1".into();
+    assert!(build_labels(&host).value("saved_password").is_none());
+
+    host.saved_password = true;
+    let form = build_labels(&host);
+    assert_eq!(keys(&form), ["group", "tags", "saved_password"]);
+    assert_eq!(form.value("saved_password").as_deref(), Some("keep"));
+}
+
+#[test]
+fn switching_the_protocol_away_and_back_restores_the_saved_secrets() {
+    let mut form = build("Edit connection", &protocols(), Some(&saved_entry(&["password", "token"]))).unwrap();
+
+    select_protocol(&mut form, "sftp");
+    rebuild_for_protocol(&mut form, &protocols());
+    select_protocol(&mut form, "ftp");
+    rebuild_for_protocol(&mut form, &protocols());
+
+    assert_eq!(field_kind(&form, "password"), FieldKind::SavedSecret);
+    assert_eq!(form.value("password").as_deref(), Some(KEPT_SECRET));
+    assert_eq!(field_kind(&form, "token"), FieldKind::SavedSecret);
+}
+
+#[test]
+fn a_password_typed_before_switching_survives_the_round_trip() {
+    let mut form = build("Edit connection", &protocols(), Some(&saved_entry(&["password"]))).unwrap();
+    set(&mut form, "password", "typed");
+    form.fields.iter_mut().find(|field| field.key == "password").unwrap().kind = FieldKind::Masked;
+
+    select_protocol(&mut form, "sftp");
+    rebuild_for_protocol(&mut form, &protocols());
+    select_protocol(&mut form, "ftp");
+    rebuild_for_protocol(&mut form, &protocols());
+
+    assert_eq!(field_kind(&form, "password"), FieldKind::Masked);
+    assert_eq!(form.value("password").as_deref(), Some("typed"));
 }

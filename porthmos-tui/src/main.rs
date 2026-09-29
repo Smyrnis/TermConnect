@@ -57,8 +57,17 @@ fn start_app(
     Ok((app, events))
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+
+fn main() -> Result<()> {
+    porthmos_core::disable_core_dumps();
+    let runtime = tokio::runtime::Runtime::new()?;
+    let result = runtime.block_on(run());
+    runtime.shutdown_timeout(SHUTDOWN_GRACE);
+    result
+}
+
+async fn run() -> Result<()> {
     let env = Environment::from_process();
     let paths = Paths::from_env(&env);
     init_tracing(paths.as_ref().ok().map(Paths::log_file).as_deref());

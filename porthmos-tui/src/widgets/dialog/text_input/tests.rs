@@ -36,30 +36,6 @@ fn esc_cancels() {
 }
 
 #[test]
-fn new_masked_starts_empty_and_marks_masked() {
-    let dialog = TextInputDialog::new_masked("Password");
-    assert_eq!(dialog.value, "");
-    assert!(dialog.masked);
-}
-
-#[test]
-fn masked_dialog_renders_asterisks_not_the_value() {
-    let mut dialog = TextInputDialog::new_masked("Password");
-    dialog.handle_key(key(KeyCode::Char('s')));
-    dialog.handle_key(key(KeyCode::Char('e')));
-    dialog.handle_key(key(KeyCode::Char('t')));
-
-    let backend = ratatui::backend::TestBackend::new(60, 6);
-    let mut terminal = ratatui::Terminal::new(backend).unwrap();
-    terminal.draw(|frame| render_text_input(frame, frame.area(), &dialog)).unwrap();
-
-    let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
-
-    assert!(content.contains("***"));
-    assert!(!content.contains("set"));
-}
-
-#[test]
 fn left_and_right_move_the_cursor_without_changing_the_value() {
     let mut dialog = TextInputDialog::new("Name", "abc");
     assert_eq!(dialog.cursor, 3);

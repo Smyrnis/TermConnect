@@ -9,10 +9,14 @@ use ratatui::{
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
+pub const KEPT_SECRET: &str = "\u{0}kept";
+const SAVED_SECRET_DISPLAY: &str = "\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}  (saved)";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FieldKind {
     Text,
     Masked,
+    SavedSecret,
     Choice { choices: Vec<(String, String)>, selected: usize },
 }
 
@@ -35,6 +39,10 @@ impl FormField {
         Self { kind: FieldKind::Masked, ..Self::text(key, label, initial_value) }
     }
 
+    pub fn saved_secret(key: &'static str, label: impl Into<String>) -> Self {
+        Self { kind: FieldKind::SavedSecret, ..Self::text(key, label, "") }
+    }
+
     pub fn choice(
         key: &'static str, label: impl Into<String>, choices: Vec<(String, String)>, selected_value: &str,
     ) -> Self {
@@ -53,6 +61,7 @@ impl FormField {
             FieldKind::Choice { choices, selected } => {
                 choices.get(*selected).map(|(value, _)| value.clone()).unwrap_or_default()
             }
+            FieldKind::SavedSecret => KEPT_SECRET.to_string(),
             FieldKind::Text | FieldKind::Masked => self.value.clone(),
         }
     }
@@ -93,16 +102,33 @@ pub struct FormDialog {
     pub fields: Vec<FormField>,
     pub focused: usize,
     pub error: Option<String>,
+    pub hint: Option<String>,
+    pub saved_secrets: Option<(String, Vec<String>)>,
     pub remembered: BTreeMap<String, String>,
     pub prefilled: BTreeMap<&'static str, String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub enum FormOutcome {
     Pending,
     Submitted(Vec<(&'static str, String)>),
     ChoiceChanged { key: &'static str },
     Cancelled,
+}
+
+pub(super) fn submitted_keys(values: &[(&'static str, String)]) -> Vec<&'static str> {
+    values.iter().map(|(key, _)| *key).collect()
+}
+
+impl std::fmt::Debug for FormOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FormOutcome::Pending => write!(f, "Pending"),
+            FormOutcome::Submitted(values) => f.debug_tuple("Submitted").field(&submitted_keys(values)).finish(),
+            FormOutcome::ChoiceChanged { key } => f.debug_struct("ChoiceChanged").field("key", key).finish(),
+            FormOutcome::Cancelled => write!(f, "Cancelled"),
+        }
+    }
 }
 
 impl FormDialog {
@@ -112,6 +138,8 @@ impl FormDialog {
             fields,
             focused: 0,
             error: None,
+            hint: None,
+            saved_secrets: None,
             remembered: BTreeMap::new(),
             prefilled: BTreeMap::new(),
         }
@@ -123,6 +151,24 @@ impl FormDialog {
 
     pub fn handle_key(&mut self, key: KeyEvent) -> FormOutcome {
         let on_choice = self.fields[self.focused].is_choice();
+        let field = &mut self.fields[self.focused];
+        if field.kind == FieldKind::SavedSecret {
+            match key.code {
+                KeyCode::Char(c) => {
+                    field.kind = FieldKind::Masked;
+                    field.value = c.to_string();
+                    field.cursor = 1;
+                    return FormOutcome::Pending;
+                }
+                KeyCode::Backspace | KeyCode::Delete => {
+                    field.kind = FieldKind::Masked;
+                    field.value.clear();
+                    field.cursor = 0;
+                    return FormOutcome::Pending;
+                }
+                _ => {}
+            }
+        }
         match key.code {
             KeyCode::Esc => FormOutcome::Cancelled,
             KeyCode::Enter => {
@@ -203,11 +249,13 @@ pub fn render_form(frame: &mut Frame, area: Rect, dialog: &FormDialog) {
         .collect();
 
     let mut width_lines: Vec<&str> = field_display_lines.iter().map(String::as_str).collect();
+    width_lines.extend(dialog.hint.as_deref());
     if let Some(error) = &dialog.error {
         width_lines.push(error.as_str());
     }
     let width = super::content_width(&width_lines);
-    let height = dialog.fields.len() as u16 + if dialog.error.is_some() { 1 } else { 0 } + 2;
+    let height =
+        dialog.fields.len() as u16 + u16::from(dialog.hint.is_some()) + if dialog.error.is_some() { 1 } else { 0 } + 2;
 
     let popup = centered_popup(area, width, height);
 
@@ -218,6 +266,9 @@ pub fn render_form(frame: &mut Frame, area: Rect, dialog: &FormDialog) {
 
     let mut lines: Vec<Line> =
         dialog.fields.iter().enumerate().map(|(i, field)| field_line(field, i == dialog.focused)).collect();
+    if let Some(hint) = &dialog.hint {
+        lines.push(Line::styled(hint.as_str(), Style::default().add_modifier(Modifier::DIM)));
+    }
     if let Some(error) = &dialog.error {
         lines.push(Line::styled(error.as_str(), Style::default().fg(Color::Red)));
     }
@@ -232,6 +283,7 @@ fn displayed_value(field: &FormField) -> String {
     match &field.kind {
         FieldKind::Text => field.value.clone(),
         FieldKind::Masked => "*".repeat(field.value.chars().count()),
+        FieldKind::SavedSecret => SAVED_SECRET_DISPLAY.to_string(),
         FieldKind::Choice { choices, selected } => {
             format!("\u{25c0} {} \u{25b6}", choices.get(*selected).map(|(_, label)| label.as_str()).unwrap_or(""))
         }

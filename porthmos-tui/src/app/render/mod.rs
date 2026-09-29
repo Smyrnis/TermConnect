@@ -133,7 +133,11 @@ impl App {
     pub(super) fn render_status(&self, frame: &mut Frame, area: Rect) {
         let (text, style) = match self.notifications.current() {
             Some(notification) => (notification.message.clone(), notification_style(notification.severity)),
-            None => match self.waiting_for_answer_text().or_else(|| self.planning_status_text()) {
+            None => match self
+                .keyring_waiting_text()
+                .or_else(|| self.waiting_for_answer_text())
+                .or_else(|| self.planning_status_text())
+            {
                 Some(text) => (text, Style::default()),
                 None => {
                     if self.transfers.active.is_empty() {
@@ -146,6 +150,10 @@ impl App {
         };
 
         frame.render_widget(Paragraph::new(text).style(style), area);
+    }
+
+    fn keyring_waiting_text(&self) -> Option<String> {
+        self.keyring_waiting.then(|| "Waiting for the system keyring\u{2026}".to_string())
     }
 
     fn waiting_for_answer_text(&self) -> Option<String> {

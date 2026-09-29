@@ -6,7 +6,7 @@ use crate::widgets::filter_line::FilterLine;
 fn entry(name: &str, group: Option<&str>) -> ConnectionEntry {
     let mut entry = ConnectionEntry::orphan_labels(
         name.to_string(),
-        Labels { group: group.map(str::to_string), tags: Vec::new() },
+        Labels { group: group.map(str::to_string), tags: Vec::new(), in_keyring: Vec::new() },
         ConnectionSource::MissingSshHost,
     );
     entry.source = ConnectionSource::Profile;

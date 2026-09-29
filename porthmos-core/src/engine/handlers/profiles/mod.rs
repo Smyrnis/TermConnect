@@ -1,9 +1,14 @@
-use porthmos_vfs::ConnectionForm;
+mod keyring;
+
+use keyring::SecretChanges;
+pub(crate) use keyring::{KeyringDone, KeyringJob, SecretOwner, profile_account, ssh_account};
+use porthmos_vfs::{ConnectionForm, OptionKind};
 
 use super::super::{Engine, Event};
 use crate::{
     Severity,
-    profiles::{self, ConnectionEntry, ConnectionSource, Labels, ProfileDraft, labels, store},
+    profiles::{self, ConnectionEntry, ConnectionSource, Labels, PASSWORD_MARKER, ProfileDraft, labels, store},
+    secrets::SecretKey,
 };
 
 impl Engine {
@@ -72,8 +77,18 @@ impl Engine {
                 self.emit(Event::ProfileSaved);
                 self.list_profiles();
             }
-            Err(err) => self.notice(Severity::Error, err.to_string()),
+            Err(err) => return self.notice(Severity::Error, err.to_string()),
         }
+
+        let renamed_from = original.filter(|old| *old != profile.name);
+        let saved_before = preserve_from.map(|entry| entry.in_keyring).unwrap_or_default();
+        let secret_keys: Vec<&str> =
+            form.options.iter().filter(|field| field.kind == OptionKind::Secret).map(|field| field.key).collect();
+        let edits = std::iter::once((PASSWORD_MARKER.to_string(), draft.password))
+            .chain(draft.secret_options.into_iter().filter(|(key, _)| secret_keys.contains(&key.as_str())));
+        let changes =
+            SecretChanges::from_edits(profile.name.clone(), renamed_from, saved_before, profile.in_keyring, edits);
+        self.apply_secret_changes(changes);
     }
 
     fn is_ssh_host(&self, name: &str) -> anyhow::Result<bool> {
@@ -89,7 +104,8 @@ impl Engine {
             }
             Err(err) => return self.notice(Severity::Error, err.to_string()),
         }
-        let labels = Labels { group: labels::normalize_group(group), tags: labels::parse_tags(tags) };
+        let labels =
+            Labels { group: labels::normalize_group(group), tags: labels::parse_tags(tags), in_keyring: Vec::new() };
         match store::save_ssh_labels(&self.paths, name, &labels) {
             Ok(()) => {
                 self.emit(Event::ProfileSaved);
@@ -102,8 +118,11 @@ impl Engine {
     pub(crate) fn move_ssh_labels(&mut self, from: &str, to: &str) {
         match self.is_ssh_host(to) {
             Ok(true) => {
-                if let Err(err) = store::move_ssh_labels(&self.paths, from, to) {
-                    self.notice(Severity::Error, err.to_string());
+                let saved = self.ssh_markers(from);
+                match store::move_ssh_labels(&self.paths, from, to) {
+                    Ok(()) if !saved.is_empty() => self.move_ssh_password(from, to, saved),
+                    Ok(()) => {}
+                    Err(err) => self.notice(Severity::Error, err.to_string()),
                 }
             }
             Ok(false) => self.notice(Severity::Error, format!("{to} is not in ~/.ssh/config")),
@@ -113,17 +132,36 @@ impl Engine {
     }
 
     pub(crate) fn forget_ssh_labels(&mut self, name: &str) {
+        let saved = self.ssh_markers(name);
         if let Err(err) = store::forget_ssh_labels(&self.paths, name) {
             self.notice(Severity::Error, err.to_string());
+            return self.list_profiles();
         }
         self.list_profiles();
+        self.drop_ssh_password(name, saved, false);
+    }
+
+    pub(crate) fn forget_ssh_password(&mut self, alias: &str) {
+        let saved = self.ssh_markers(alias);
+        if saved.is_empty() {
+            self.secrets.uncache(&SecretKey::SshHost { alias: alias.to_string() }.account());
+            return self.list_profiles();
+        }
+        self.drop_ssh_password(alias, saved, true);
     }
 
     pub(crate) fn delete_profile(&mut self, name: &str) {
+        let saved = store::load(&self.paths)
+            .ok()
+            .and_then(|profiles| profiles.into_iter().find(|profile| profile.name == name))
+            .map(|profile| profile.in_keyring)
+            .unwrap_or_default();
         if let Err(err) = store::delete(&self.paths, name) {
             self.notice(Severity::Error, err.to_string());
+            return self.list_profiles();
         }
         self.list_profiles();
+        self.forget_profile_secrets(name.to_string(), saved);
     }
 }
 

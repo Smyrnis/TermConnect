@@ -3,9 +3,12 @@ mod connect;
 mod fs;
 mod profiles;
 mod search;
+mod secrets;
 mod transfer;
 
 use std::fmt::Display;
+
+pub(crate) use profiles::{KeyringDone, KeyringJob};
 
 use super::Location;
 use crate::user_message;

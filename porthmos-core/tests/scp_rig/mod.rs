@@ -40,7 +40,7 @@ pub async fn rig(max_parallel: usize, policy: ConflictPolicy) -> Rig {
     let paths = Paths::in_dir(config.path());
     std::fs::create_dir_all(&paths.config_dir).unwrap();
     let profile = format!(
-        "[connections.box]\nprotocol = \"scp\"\nhost = \"127.0.0.1\"\nport = {}\nusername = \"{USER}\"\npassword = \"{PASSWORD}\"\n",
+        "[connections.box]\nprotocol = \"scp\"\nhost = \"127.0.0.1\"\nport = {}\nusername = \"{USER}\"\n",
         server.port
     );
     std::fs::write(paths.connections_file(), profile).unwrap();
@@ -48,6 +48,7 @@ pub async fn rig(max_parallel: usize, policy: ConflictPolicy) -> Rig {
         Settings { transfers: TransferSettings { max_parallel, on_conflict: policy }, ..Settings::default() };
     let scp = Scp::default().with_connect_options(server.connect_options());
     let (core, events) = Core::builder()
+        .without_keyring()
         .paths(paths)
         .settings(settings)
         .local_home(local.path().to_path_buf())
@@ -59,8 +60,13 @@ pub async fn rig(max_parallel: usize, policy: ConflictPolicy) -> Rig {
     loop {
         match rig.event().await {
             Event::Question { request_id, question: Question::TrustHostKey { .. } } => {
-                rig.core.send(Command::Answer { request_id, answer: Some(Answer::Confirmed) })
+                rig.core.send(Command::Answer { request_id, answer: Some(Answer::Confirmed), save: false })
             }
+            Event::Question { request_id, question: Question::Password { .. } } => rig.core.send(Command::Answer {
+                request_id,
+                answer: Some(Answer::Password(PASSWORD.into())),
+                save: false,
+            }),
             Event::Connected { session, .. } => {
                 rig.session = session;
                 return rig;

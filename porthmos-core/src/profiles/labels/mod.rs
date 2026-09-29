@@ -6,11 +6,13 @@ pub struct Labels {
     pub group: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub in_keyring: Vec<String>,
 }
 
 impl Labels {
     pub fn is_empty(&self) -> bool {
-        self.group.is_none() && self.tags.is_empty()
+        self.group.is_none() && self.tags.is_empty() && self.in_keyring.is_empty()
     }
 }
 

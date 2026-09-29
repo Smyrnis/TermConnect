@@ -194,3 +194,100 @@ fn error_message_renders_when_set() {
 
     assert!(content.contains("Host can't be empty"));
 }
+
+fn press(form: &mut FormDialog, code: KeyCode) -> FormOutcome {
+    form.handle_key(KeyEvent::new(code, KeyModifiers::NONE))
+}
+
+fn screen_of(form: &FormDialog) -> String {
+    let mut terminal = ratatui::Terminal::new(ratatui::backend::TestBackend::new(70, 10)).unwrap();
+    terminal.draw(|frame| render_form(frame, frame.area(), form)).unwrap();
+    terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect()
+}
+
+#[test]
+fn a_saved_secret_is_kept_until_edited() {
+    let field = FormField::saved_secret("password", "Password");
+    assert_eq!(field.submitted_value(), KEPT_SECRET);
+
+    let mut form = FormDialog::new("t", vec![field]);
+    press(&mut form, KeyCode::Char('x'));
+    press(&mut form, KeyCode::Char('y'));
+    assert_eq!(form.fields[0].submitted_value(), "xy");
+}
+
+#[test]
+fn backspace_or_delete_on_a_saved_secret_clears_it() {
+    for code in [KeyCode::Backspace, KeyCode::Delete] {
+        let mut form = FormDialog::new("t", vec![FormField::saved_secret("password", "Password")]);
+        press(&mut form, code);
+        assert_eq!(form.fields[0].submitted_value(), "");
+    }
+}
+
+#[test]
+fn moving_around_or_submitting_keeps_a_saved_secret() {
+    let mut form =
+        FormDialog::new("t", vec![FormField::text("a", "A", ""), FormField::saved_secret("password", "Password")]);
+    press(&mut form, KeyCode::Tab);
+    press(&mut form, KeyCode::Left);
+    press(&mut form, KeyCode::Right);
+    press(&mut form, KeyCode::Home);
+    press(&mut form, KeyCode::End);
+    press(&mut form, KeyCode::BackTab);
+    press(&mut form, KeyCode::Tab);
+
+    match press(&mut form, KeyCode::Enter) {
+        FormOutcome::Submitted(values) => assert_eq!(values[1], ("password", KEPT_SECRET.to_string())),
+        other => panic!("unexpected {other:?}"),
+    }
+}
+
+#[test]
+fn typing_can_never_produce_the_kept_marker() {
+    let mut form = FormDialog::new("t", vec![FormField::masked("password", "Password", "")]);
+    for character in KEPT_SECRET.chars().filter(|character| !character.is_control()) {
+        press(&mut form, KeyCode::Char(character));
+    }
+    assert_ne!(form.fields[0].submitted_value(), KEPT_SECRET);
+    assert!(KEPT_SECRET.chars().any(char::is_control));
+}
+
+#[test]
+fn a_saved_secret_shows_that_it_is_saved_without_a_value() {
+    let form = FormDialog::new("t", vec![FormField::saved_secret("password", "Password")]);
+    let screen = screen_of(&form);
+    assert!(screen.contains("(saved)"), "{screen}");
+    assert!(screen.contains("\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}\u{2022}"), "{screen}");
+}
+
+#[test]
+fn an_edited_saved_secret_is_shown_masked() {
+    let mut form = FormDialog::new("t", vec![FormField::saved_secret("password", "Password")]);
+    press(&mut form, KeyCode::Char('s'));
+    press(&mut form, KeyCode::Char('3'));
+    let screen = screen_of(&form);
+    assert!(!screen.contains("(saved)") && !screen.contains("s3"), "{screen}");
+    assert!(screen.contains("**"), "{screen}");
+}
+
+#[test]
+fn a_hint_line_is_rendered_and_absent_by_default() {
+    let mut form = FormDialog::new("t", vec![FormField::text("a", "A", "")]);
+    assert!(form.hint.is_none());
+    let plain = screen_of(&form);
+    form.hint = Some("Passwords are not saved".into());
+    let hinted = screen_of(&form);
+    assert!(!plain.contains("Passwords are not saved"));
+    assert!(hinted.contains("Passwords are not saved"), "{hinted}");
+}
+
+#[test]
+fn a_submitted_form_never_prints_its_values() {
+    let outcome = FormOutcome::Submitted(vec![("password", "hunter2".to_string()), ("host", "h".to_string())]);
+
+    let printed = format!("{outcome:?}");
+
+    assert!(!printed.contains("hunter2"), "{printed}");
+    assert!(printed.contains("password") && printed.contains("host"), "{printed}");
+}
