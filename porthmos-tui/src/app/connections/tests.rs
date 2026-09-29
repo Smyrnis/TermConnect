@@ -6,7 +6,7 @@ use porthmos_core::{Answer, ConnectionForm, OptionField, OptionKind, ProtocolInf
 use super::*;
 use crate::{
     app::testing::{TestApp, test_app, test_app_with_protocols},
-    widgets::dialog::confirm::ConfirmFocus,
+    widgets::{dialog::confirm::ConfirmFocus, filter_line::FilterLine},
 };
 
 fn app() -> TestApp {
@@ -27,6 +27,8 @@ fn connection(name: &str, source: ConnectionSource) -> ConnectionEntry {
         password: None,
         options: Default::default(),
         source,
+        group: None,
+        tags: Vec::new(),
     }
 }
 
@@ -47,8 +49,8 @@ fn sample_protocols() -> Vec<ProtocolInfo> {
 fn screen_with(protocols: Vec<ProtocolInfo>, entries: Vec<ConnectionEntry>) -> TestApp {
     let mut test = test_app_with_protocols(Path::new("/d"), protocols);
     test.app.screen = Screen::Connections;
-    test.app.connections = entries;
-    test.app.connections_cursor = 0;
+    test.app.connections.replace(entries);
+    test.app.connections.cursor = 0;
     test
 }
 
@@ -83,12 +85,12 @@ fn open_connections_switches_screen_and_loads_entries() {
 #[test]
 fn the_profile_list_arrives_from_the_core() {
     let mut test = app();
-    test.app.connections_cursor = 5;
+    test.app.connections.cursor = 5;
 
     test.app.apply_core_event(Event::Profiles(vec![connection("a", ConnectionSource::Profile)]));
 
-    assert_eq!(test.app.connections.len(), 1);
-    assert_eq!(test.app.connections_cursor, 0);
+    assert_eq!(test.app.connections.entries().len(), 1);
+    assert_eq!(test.app.connections.cursor, 0);
 }
 
 #[test]
@@ -317,6 +319,8 @@ fn add_connection_dialog_saves_a_new_profile_on_submit() {
                 protocol: "sftp".to_string(),
                 remote_path: String::new(),
                 options: BTreeMap::from([("identity_file".to_string(), String::new())]),
+                group: String::new(),
+                tags: String::new(),
             },
         }]
     );
@@ -579,4 +583,256 @@ fn declining_the_certificate_cancels_the_connection() {
 
     assert_eq!(test.sent(), vec![Command::Answer { request_id: 11, answer: None }]);
     assert_eq!(test.app.connection_status, ConnectionStatus::Disconnected);
+}
+
+fn grouped(name: &str, group: &str) -> ConnectionEntry {
+    let mut entry = connection(name, ConnectionSource::Profile);
+    entry.group = Some(group.to_string());
+    entry
+}
+
+#[test]
+fn enter_on_a_group_toggles_it_and_enter_on_a_connection_connects() {
+    let mut test = app();
+    test.app.screen = Screen::Connections;
+    test.app.connections.replace(vec![grouped("web", "Work")]);
+
+    test.app.apply_key(key(KeyCode::Enter));
+    assert_eq!(test.app.connections.rows().len(), 2);
+    assert!(test.sent().is_empty());
+
+    test.app.apply_key(key(KeyCode::Down));
+    test.app.apply_key(key(KeyCode::Enter));
+    assert_eq!(test.sent(), vec![Command::Connect { profile: "web".into() }]);
+}
+
+#[test]
+fn right_opens_and_left_closes_a_group_on_the_connections_screen() {
+    let mut test = app();
+    test.app.screen = Screen::Connections;
+    test.app.connections.replace(vec![grouped("web", "Work")]);
+
+    test.app.apply_key(key(KeyCode::Right));
+    assert_eq!(test.app.connections.rows().len(), 2);
+    test.app.apply_key(key(KeyCode::Left));
+    assert_eq!(test.app.connections.rows().len(), 1);
+}
+
+#[test]
+fn slash_filters_the_connections_and_esc_clears_before_leaving() {
+    let mut test = app();
+    test.app.screen = Screen::Connections;
+    test.app
+        .connections
+        .replace(vec![connection("web", ConnectionSource::Profile), connection("db", ConnectionSource::Profile)]);
+
+    test.app.apply_key(key(KeyCode::Char('/')));
+    test.app.apply_key(key(KeyCode::Char('w')));
+    test.app.apply_key(key(KeyCode::Enter));
+    assert_eq!(test.app.connections.rows().len(), 1);
+
+    test.app.apply_key(key(KeyCode::Esc));
+    assert_eq!(test.app.connections.rows().len(), 2);
+    assert_eq!(test.app.screen, Screen::Connections);
+    test.app.apply_key(key(KeyCode::Esc));
+    assert_eq!(test.app.screen, Screen::Files);
+}
+
+#[test]
+fn typing_in_the_filter_narrows_and_another_key_closes_the_line_and_acts() {
+    let mut test = app();
+    test.app.screen = Screen::Connections;
+    test.app
+        .connections
+        .replace(vec![connection("web", ConnectionSource::Profile), connection("db", ConnectionSource::Profile)]);
+
+    test.app.apply_key(key(KeyCode::Char('/')));
+    test.app.apply_key(key(KeyCode::Char('d')));
+    assert_eq!(test.app.connections.filter_status(40).as_deref(), Some("/d\u{2588} (1 of 2)"));
+    test.app.apply_key(key(KeyCode::F(9)));
+
+    assert!(!test.app.connections.editing_filter());
+    assert_eq!(test.app.connections.filter(), Some("d"));
+    assert_eq!(test.sent(), vec![Command::ListProfiles]);
+}
+
+#[test]
+fn edit_and_delete_leave_orphan_label_rows_alone_and_enter_only_offers_the_fix() {
+    let mut test = app();
+    test.app.screen = Screen::Connections;
+    test.app.connections.replace(vec![ConnectionEntry::orphan_labels(
+        "web1".into(),
+        Default::default(),
+        ConnectionSource::ShadowedSshHost,
+    )]);
+
+    test.app.announced_missing.insert("web1".into());
+
+    test.app.apply_action(Action::Rename);
+    test.app.apply_action(Action::DeleteConnection);
+    assert!(test.app.dialog.is_none());
+
+    test.app.apply_action(Action::Open);
+    assert!(matches!(test.app.dialog, Some(Dialog::List(_))));
+    assert!(test.sent().is_empty());
+}
+
+#[test]
+fn the_cursor_stays_on_the_same_connection_after_a_reload() {
+    let mut test = app();
+    test.app.screen = Screen::Connections;
+    test.app
+        .connections
+        .replace(vec![connection("b", ConnectionSource::Profile), connection("c", ConnectionSource::Profile)]);
+    test.app.apply_key(key(KeyCode::Down));
+
+    test.app.apply_core_event(Event::Profiles(vec![
+        connection("a", ConnectionSource::Profile),
+        connection("b", ConnectionSource::Profile),
+        connection("c", ConnectionSource::Profile),
+    ]));
+
+    assert_eq!(test.app.connections.selected_entry().map(|entry| entry.name.as_str()), Some("c"));
+}
+
+#[test]
+fn f2_on_an_ssh_host_opens_the_labels_form_and_enter_sends_labels() {
+    let mut test = app();
+    test.app.screen = Screen::Connections;
+    test.app.connections.replace(vec![connection("web1", ConnectionSource::SshConfig)]);
+
+    test.app.apply_action(Action::Rename);
+    let Some(Dialog::Form(form)) = &test.app.dialog else { panic!("no form") };
+    assert_eq!(form.title, "Labels for web1");
+    test.app.apply_key(key(KeyCode::Char('W')));
+    test.app.apply_key(key(KeyCode::Enter));
+
+    assert_eq!(
+        test.sent(),
+        vec![Command::SaveSshLabels { name: "web1".into(), group: "W".into(), tags: String::new() }]
+    );
+}
+
+#[test]
+fn a_rejected_labels_save_shows_in_the_form() {
+    let mut test = app();
+    test.app.screen = Screen::Connections;
+    test.app.connections.replace(vec![connection("web1", ConnectionSource::SshConfig)]);
+    test.app.apply_action(Action::Rename);
+
+    test.app.apply_core_event(Event::ProfileRejected { message: "web1 is not in ~/.ssh/config".into() });
+
+    let Some(Dialog::Form(form)) = &test.app.dialog else { panic!("form closed") };
+    assert_eq!(form.error.as_deref(), Some("web1 is not in ~/.ssh/config"));
+}
+
+#[test]
+fn after_a_save_the_connection_is_revealed() {
+    let mut test = app();
+    test.app.screen = Screen::Connections;
+    test.app.connections.replace(vec![connection("aaa", ConnectionSource::Profile)]);
+    test.app.apply_action(Action::AddConnection);
+    test.app.submit_connection_form(vec![("name", " web ".into()), ("group", "Work/Web".into())], None);
+
+    test.app.apply_core_event(Event::ProfileSaved);
+    let mut saved = connection("web", ConnectionSource::Profile);
+    saved.group = Some("Work/Web".into());
+    test.app.apply_core_event(Event::Profiles(vec![connection("aaa", ConnectionSource::Profile), saved]));
+
+    assert_eq!(test.app.connections.selected_entry().map(|entry| entry.name.as_str()), Some("web"));
+}
+
+#[test]
+fn after_saving_ssh_labels_the_host_is_revealed_in_its_group() {
+    let mut test = app();
+    test.app.screen = Screen::Connections;
+    test.app
+        .connections
+        .replace(vec![connection("aaa", ConnectionSource::Profile), connection("web1", ConnectionSource::SshConfig)]);
+    test.app.apply_key(key(KeyCode::Down));
+    test.app.apply_action(Action::Rename);
+    test.app.apply_key(key(KeyCode::Char('W')));
+    test.app.apply_key(key(KeyCode::Enter));
+
+    test.app.apply_core_event(Event::ProfileSaved);
+    let mut labelled = connection("web1", ConnectionSource::SshConfig);
+    labelled.group = Some("W".into());
+    test.app.apply_core_event(Event::Profiles(vec![connection("aaa", ConnectionSource::Profile), labelled]));
+
+    assert_eq!(test.app.connections.selected_entry().map(|entry| entry.name.as_str()), Some("web1"));
+    assert!(test.app.dialog.is_none());
+}
+
+#[test]
+fn renaming_and_regrouping_reveals_the_new_name() {
+    let mut test = app();
+    test.app.screen = Screen::Connections;
+    let mut old = connection("old", ConnectionSource::Profile);
+    old.group = Some("A".into());
+    test.app.connections.replace(vec![old]);
+    test.app.submit_connection_form(vec![("name", "new".into()), ("group", "B/C".into())], Some("old".into()));
+
+    test.app.apply_core_event(Event::ProfileSaved);
+    let mut renamed = connection("new", ConnectionSource::Profile);
+    renamed.group = Some("B/C".into());
+    test.app.apply_core_event(Event::Profiles(vec![renamed]));
+
+    assert_eq!(test.app.connections.selected_entry().map(|entry| entry.name.as_str()), Some("new"));
+    assert_eq!(test.app.connections.rows().len(), 3);
+}
+
+#[test]
+fn a_listing_without_a_save_does_not_move_the_cursor() {
+    let mut test = app();
+    test.app.screen = Screen::Connections;
+    test.app
+        .connections
+        .replace(vec![connection("a", ConnectionSource::Profile), connection("b", ConnectionSource::Profile)]);
+    test.app.submit_connection_form(vec![("name", "b".into())], None);
+    test.app.apply_core_event(Event::ProfileRejected { message: "bad".into() });
+
+    test.app.apply_core_event(Event::Profiles(vec![
+        connection("a", ConnectionSource::Profile),
+        connection("b", ConnectionSource::Profile),
+    ]));
+
+    assert_eq!(test.app.connections.cursor, 0);
+}
+
+#[test]
+fn cancelling_the_form_forgets_the_pending_reveal() {
+    let mut test = screen_with(
+        sample_protocols(),
+        vec![connection("a", ConnectionSource::Profile), connection("b", ConnectionSource::Profile)],
+    );
+    test.app.apply_action(Action::AddConnection);
+    assert!(matches!(test.app.dialog, Some(Dialog::Form(_))));
+    test.app.submit_connection_form(vec![("name", "b".into())], None);
+    test.app.apply_key(key(KeyCode::Esc));
+
+    test.app.apply_core_event(Event::ProfileSaved);
+    test.app.apply_core_event(Event::Profiles(vec![
+        connection("a", ConnectionSource::Profile),
+        connection("b", ConnectionSource::Profile),
+    ]));
+
+    assert_eq!(test.app.connections.cursor, 0);
+}
+
+#[test]
+fn delete_on_a_shadowed_labels_row_does_not_disconnect_the_same_named_profile() {
+    let mut test = app();
+    test.connect(5, "foo");
+    test.app.screen = Screen::Connections;
+    test.app.announced_missing.insert("foo".into());
+    test.app.connections.replace(vec![
+        connection("foo", ConnectionSource::Profile),
+        ConnectionEntry::orphan_labels("foo".into(), Default::default(), ConnectionSource::ShadowedSshHost),
+    ]);
+    test.sent();
+    test.app.connections.cursor = 1;
+
+    test.app.apply_action(Action::Delete);
+
+    assert!(test.sent().is_empty());
 }

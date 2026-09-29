@@ -31,3 +31,9 @@ fn option_finds_a_described_field_by_key() {
     assert_eq!(form.option("tls").map(|field| field.label), Some("TLS"));
     assert!(form.option("missing").is_none());
 }
+
+#[test]
+fn reserved_keys_include_group_and_tags() {
+    assert!(RESERVED_KEYS.contains(&"group"));
+    assert!(RESERVED_KEYS.contains(&"tags"));
+}

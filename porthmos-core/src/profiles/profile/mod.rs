@@ -3,6 +3,8 @@ use std::collections::BTreeMap;
 use porthmos_vfs::Target;
 use serde::{Deserialize, Serialize};
 
+use super::labels::Labels;
+
 pub const DEFAULT_PROTOCOL: &str = "sftp";
 
 fn default_protocol() -> String {
@@ -25,6 +27,10 @@ pub struct ConnectionProfile {
     pub username: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
     #[serde(flatten)]
     pub options: BTreeMap<String, String>,
 }
@@ -38,6 +44,8 @@ impl std::fmt::Debug for ConnectionProfile {
             .field("port", &self.port)
             .field("username", &self.username)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
+            .field("group", &self.group)
+            .field("tags", &self.tags)
             .field("options", &self.options.keys().collect::<Vec<_>>())
             .finish()
     }
@@ -47,6 +55,14 @@ impl std::fmt::Debug for ConnectionProfile {
 pub enum ConnectionSource {
     Profile,
     SshConfig,
+    MissingSshHost,
+    ShadowedSshHost,
+}
+
+impl ConnectionSource {
+    pub fn is_orphan_labels(self) -> bool {
+        matches!(self, ConnectionSource::MissingSshHost | ConnectionSource::ShadowedSshHost)
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -58,6 +74,8 @@ pub struct ConnectionEntry {
     pub username: String,
     pub password: Option<String>,
     pub options: BTreeMap<String, String>,
+    pub group: Option<String>,
+    pub tags: Vec<String>,
     pub source: ConnectionSource,
 }
 
@@ -71,6 +89,8 @@ impl std::fmt::Debug for ConnectionEntry {
             .field("username", &self.username)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
             .field("options", &self.options.keys().collect::<Vec<_>>())
+            .field("group", &self.group)
+            .field("tags", &self.tags)
             .field("source", &self.source)
             .finish()
     }
@@ -86,6 +106,8 @@ impl ConnectionEntry {
             username: profile.username,
             password: profile.password,
             options: profile.options,
+            group: profile.group,
+            tags: profile.tags,
             source: ConnectionSource::Profile,
         }
     }
@@ -99,7 +121,24 @@ impl ConnectionEntry {
             username: target.username,
             password: target.password,
             options: target.options,
+            group: None,
+            tags: Vec::new(),
             source: ConnectionSource::SshConfig,
+        }
+    }
+
+    pub fn orphan_labels(name: String, labels: Labels, source: ConnectionSource) -> Self {
+        Self {
+            name,
+            protocol: DEFAULT_PROTOCOL.to_string(),
+            host: String::new(),
+            port: 0,
+            username: String::new(),
+            password: None,
+            options: BTreeMap::new(),
+            group: labels.group,
+            tags: labels.tags,
+            source,
         }
     }
 

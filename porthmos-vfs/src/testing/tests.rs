@@ -248,3 +248,13 @@ async fn by_default_a_sized_write_is_a_plain_write() {
 fn by_default_a_file_system_has_no_transfer_limit() {
     assert_eq!(OnlyWrites(FakeFs::new()).transfer_limit(), None);
 }
+
+#[test]
+fn with_discovered_targets_are_returned_by_discover() {
+    let protocol = FakeProtocol::new(FakeFs::new()).with_discovered(vec![target(None)]);
+
+    let names: Vec<String> =
+        protocol.discover(&crate::Environment::default()).unwrap().into_iter().map(|found| found.name).collect();
+
+    assert_eq!(names, vec![target(None).name]);
+}

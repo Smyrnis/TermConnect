@@ -15,11 +15,12 @@ pub struct FakeProtocol {
     password: Option<String>,
     connect_failure: Option<String>,
     shell: Option<ShellInvocation>,
+    discovered: Vec<Target>,
 }
 
 impl FakeProtocol {
     pub fn new(fs: FakeFs) -> Self {
-        Self { id: "fake", form: None, fs, password: None, connect_failure: None, shell: None }
+        Self { id: "fake", form: None, fs, password: None, connect_failure: None, shell: None, discovered: Vec::new() }
     }
 
     pub fn requiring_password(mut self, password: &str) -> Self {
@@ -46,6 +47,11 @@ impl FakeProtocol {
         self.shell = Some(invocation);
         self
     }
+
+    pub fn with_discovered(mut self, targets: Vec<Target>) -> Self {
+        self.discovered = targets;
+        self
+    }
 }
 
 #[async_trait]
@@ -60,6 +66,10 @@ impl Protocol for FakeProtocol {
 
     fn default_port(&self) -> u16 {
         2222
+    }
+
+    fn discover(&self, _env: &Environment) -> Result<Vec<Target>, ProtocolError> {
+        Ok(self.discovered.clone())
     }
 
     fn connection_form(&self) -> ConnectionForm {

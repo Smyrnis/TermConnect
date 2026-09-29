@@ -60,6 +60,8 @@ fn ftp_entry(options: &[(&str, &str)]) -> ConnectionEntry {
         password: Some("pw".to_string()),
         options: options.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect(),
         source: ConnectionSource::Profile,
+        group: None,
+        tags: Vec::new(),
     }
 }
 
@@ -67,7 +69,10 @@ fn ftp_entry(options: &[(&str, &str)]) -> ConnectionEntry {
 fn adding_starts_on_the_first_protocol_with_its_default_port() {
     let form = build("Add connection", &protocols(), None).unwrap();
 
-    assert_eq!(keys(&form), ["protocol", "name", "host", "port", "username", "password", "remote_path"]);
+    assert_eq!(
+        keys(&form),
+        ["protocol", "name", "group", "tags", "host", "port", "username", "password", "remote_path"]
+    );
     assert_eq!(form.value("protocol").as_deref(), Some("sftp"));
     assert_eq!(form.value("port").as_deref(), Some("22"));
     assert_eq!(form.focused, 0);
@@ -86,7 +91,20 @@ fn editing_fills_every_field_from_the_entry_including_options() {
 
     assert_eq!(
         keys(&form),
-        ["protocol", "name", "host", "port", "username", "password", "remote_path", "security", "passive", "token"]
+        [
+            "protocol",
+            "name",
+            "group",
+            "tags",
+            "host",
+            "port",
+            "username",
+            "password",
+            "remote_path",
+            "security",
+            "passive",
+            "token"
+        ]
     );
     assert_eq!(form.value("port").as_deref(), Some("2121"));
     assert_eq!(form.value("password").as_deref(), Some("pw"));
@@ -127,7 +145,7 @@ fn an_entry_of_an_unavailable_protocol_is_shown_as_not_available_with_the_standa
         &form.fields[0].kind,
         FieldKind::Choice { choices, selected } if choices[*selected].1 == "webdav (not available)"
     ));
-    assert_eq!(keys(&form).len(), 7);
+    assert_eq!(keys(&form).len(), 9);
 }
 
 #[test]
@@ -274,4 +292,61 @@ fn editing_an_entry_on_a_custom_port_keeps_it_on_a_protocol_switch() {
     rebuild_for_protocol(&mut form, &protocols());
 
     assert_eq!(form.value("port").as_deref(), Some("2121"));
+}
+
+#[test]
+fn the_form_has_group_and_tags_after_the_name() {
+    let form = build("Add connection", &protocols(), None).unwrap();
+
+    assert_eq!(keys(&form)[..4], ["protocol", "name", "group", "tags"]);
+    assert_eq!(form.value("group").as_deref(), Some(""));
+}
+
+#[test]
+fn editing_prefills_group_and_tags() {
+    let mut entry = ftp_entry(&[]);
+    entry.group = Some("Work/Web".into());
+    entry.tags = vec!["prod".into(), "db".into()];
+
+    let form = build("Edit connection", &protocols(), Some(&entry)).unwrap();
+
+    assert_eq!(form.value("group").as_deref(), Some("Work/Web"));
+    assert_eq!(form.value("tags").as_deref(), Some("prod, db"));
+}
+
+#[test]
+fn switching_protocol_keeps_group_and_tags() {
+    let mut form = build("Add connection", &protocols(), None).unwrap();
+    set(&mut form, "group", "Work");
+    set(&mut form, "tags", "prod");
+
+    select_protocol(&mut form, "ftp");
+    rebuild_for_protocol(&mut form, &protocols());
+
+    assert_eq!(form.value("group").as_deref(), Some("Work"));
+    assert_eq!(form.value("tags").as_deref(), Some("prod"));
+    assert!(!form.remembered.contains_key("group") && !form.remembered.contains_key("tags"));
+}
+
+#[test]
+fn draft_reads_group_and_tags() {
+    let draft = draft(vec![("group", "Work".to_string()), ("tags", "prod".to_string())]);
+
+    assert_eq!((draft.group.as_str(), draft.tags.as_str()), ("Work", "prod"));
+    assert!(draft.options.is_empty());
+}
+
+#[test]
+fn the_labels_form_has_only_group_and_tags() {
+    let mut entry = ftp_entry(&[]);
+    entry.name = "web1".into();
+    entry.group = Some("Work".into());
+    entry.tags = vec!["prod".into()];
+
+    let form = build_labels(&entry);
+
+    assert_eq!(form.title, "Labels for web1");
+    assert_eq!(keys(&form), ["group", "tags"]);
+    assert_eq!(form.value("group").as_deref(), Some("Work"));
+    assert_eq!(form.value("tags").as_deref(), Some("prod"));
 }

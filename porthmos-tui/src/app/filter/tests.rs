@@ -5,7 +5,7 @@ use porthmos_core::{Command, Location};
 
 use crate::{
     app::testing::{entry, test_app},
-    widgets::panel_view::Row,
+    widgets::{filter_line::FilterLine, panel_view::Row},
 };
 
 fn press(test: &mut crate::app::testing::TestApp, code: KeyCode) {

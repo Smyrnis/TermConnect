@@ -1,4 +1,5 @@
 mod form;
+mod missing;
 
 use super::*;
 
@@ -69,6 +70,10 @@ impl App {
     }
 
     pub(super) fn submit_connection_form(&mut self, values: Vec<(&'static str, String)>, original: Option<String>) {
+        self.reveal = values
+            .iter()
+            .find(|(key, _)| *key == "name")
+            .map(|(_, name)| Reveal::AwaitingSave(name.trim().to_string()));
         self.core.send(Command::SaveProfile { original, draft: form::draft(values) });
     }
 
@@ -76,12 +81,16 @@ impl App {
         if self.screen != Screen::Connections {
             return;
         }
-        let Some(entry) = self.connections.get(self.connections_cursor).cloned() else {
+        let Some(entry) = self.connections.selected_entry().cloned() else {
             return;
         };
+        if entry.source.is_orphan_labels() {
+            return;
+        }
         if entry.source == ConnectionSource::SshConfig {
-            self.notifications
-                .push(Severity::Info, "This connection is defined in ~/.ssh/config and can't be edited here");
+            let name = entry.name.clone();
+            self.dialog = Some(Dialog::Form(form::build_labels(&entry)));
+            self.pending_action = Some(PendingAction::EditSshLabels { name });
             return;
         }
 
@@ -96,9 +105,12 @@ impl App {
         if self.screen != Screen::Connections {
             return;
         }
-        let Some(entry) = self.connections.get(self.connections_cursor) else {
+        let Some(entry) = self.connections.selected_entry() else {
             return;
         };
+        if entry.source.is_orphan_labels() {
+            return;
+        }
         if entry.source == ConnectionSource::SshConfig {
             self.notifications
                 .push(Severity::Info, "This connection is defined in ~/.ssh/config and can't be deleted here");
@@ -110,6 +122,15 @@ impl App {
         self.pending_action = Some(PendingAction::DeleteConnection { name });
     }
 
+    pub(super) fn submit_ssh_labels(&mut self, name: String, values: Vec<(&'static str, String)>) {
+        let value = |wanted: &str| {
+            values.iter().find(|(key, _)| *key == wanted).map(|(_, value)| value.clone()).unwrap_or_default()
+        };
+        let (group, tags) = (value("group"), value("tags"));
+        self.reveal = Some(Reveal::AwaitingSave(name.clone()));
+        self.core.send(Command::SaveSshLabels { name, group, tags });
+    }
+
     pub(super) fn set_form_error(&mut self, message: String) {
         if let Some(Dialog::Form(form)) = self.dialog.as_mut() {
             form.error = Some(message);
@@ -117,7 +138,7 @@ impl App {
     }
 
     pub(super) fn connect_to_selected(&mut self) {
-        let Some(entry) = self.connections.get(self.connections_cursor) else {
+        let Some(entry) = self.connections.selected_entry() else {
             return;
         };
 
@@ -130,7 +151,7 @@ impl App {
     }
 
     pub(super) fn disconnect_selected(&mut self) {
-        let Some(entry) = self.connections.get(self.connections_cursor) else {
+        let Some(entry) = self.connections.selected_entry().filter(|entry| !entry.source.is_orphan_labels()) else {
             return;
         };
         let Some(session) = self.sessions.by_name(&entry.name).map(|session| session.id) else {

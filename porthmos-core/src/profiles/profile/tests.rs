@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
+use crate::profiles::Labels;
 
 #[test]
 fn deserializing_a_profile_without_a_password_defaults_to_none() {
@@ -22,6 +23,8 @@ fn serializing_a_profile_round_trips_the_password() {
         username: "deploy".to_string(),
         password: Some("hunter2".to_string()),
         options: BTreeMap::new(),
+        group: None,
+        tags: Vec::new(),
     };
 
     let serialized = toml::to_string(&profile).unwrap();
@@ -40,6 +43,8 @@ fn debug_formatting_a_profile_redacts_the_password() {
         username: "deploy".to_string(),
         password: Some("hunter2".to_string()),
         options: BTreeMap::new(),
+        group: None,
+        tags: Vec::new(),
     };
 
     let debug_output = format!("{profile:?}");
@@ -59,6 +64,8 @@ fn debug_formatting_an_entry_redacts_the_password() {
         password: Some("hunter2".to_string()),
         options: BTreeMap::new(),
         source: ConnectionSource::Profile,
+        group: None,
+        tags: Vec::new(),
     };
 
     let debug_output = format!("{entry:?}");
@@ -77,6 +84,8 @@ fn converting_a_profile_to_an_entry_tags_it_as_profile_sourced() {
         username: "deploy".to_string(),
         password: Some("hunter2".to_string()),
         options: BTreeMap::from([("remote_path".to_string(), "/var/www".to_string())]),
+        group: None,
+        tags: Vec::new(),
     };
 
     let entry = ConnectionEntry::from_profile(profile, 22);
@@ -119,6 +128,8 @@ fn an_entry_hands_its_fields_and_options_to_the_protocol_target() {
         password: Some("pw".to_string()),
         options: BTreeMap::from([("identity_file".to_string(), "/k".to_string())]),
         source: ConnectionSource::Profile,
+        group: None,
+        tags: Vec::new(),
     };
 
     let target = entry.target();
@@ -138,6 +149,8 @@ fn entry_with_options(options: &[(&str, &str)]) -> ConnectionEntry {
             username: "deploy".to_string(),
             password: None,
             options: options.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect(),
+            group: None,
+            tags: Vec::new(),
         },
         22,
     )
@@ -173,6 +186,8 @@ fn profile_and_entry_debug_show_option_keys_but_never_their_values() {
         username: "u".to_string(),
         password: None,
         options: BTreeMap::from([("secret_key".to_string(), "s3cr3t".to_string())]),
+        group: None,
+        tags: Vec::new(),
     };
     let entry = ConnectionEntry::from_profile(profile.clone(), 443);
 
@@ -180,4 +195,54 @@ fn profile_and_entry_debug_show_option_keys_but_never_their_values() {
         assert!(printed.contains("secret_key"), "{printed}");
         assert!(!printed.contains("s3cr3t"), "{printed}");
     }
+}
+
+#[test]
+fn an_old_profile_without_group_or_tags_loads_with_none_and_empty() {
+    let profile: ConnectionProfile = toml::from_str("host = \"h\"\nusername = \"u\"\n").unwrap();
+    assert_eq!(profile.group, None);
+    assert!(profile.tags.is_empty());
+    assert!(profile.options.is_empty());
+}
+
+#[test]
+fn group_and_tags_are_not_options_and_are_omitted_when_empty() {
+    let profile: ConnectionProfile =
+        toml::from_str("host = \"h\"\nusername = \"u\"\ngroup = \"Work/Web\"\ntags = [\"prod\"]\n").unwrap();
+    assert_eq!(profile.group.as_deref(), Some("Work/Web"));
+    assert_eq!(profile.tags, vec!["prod"]);
+    assert!(profile.options.is_empty());
+
+    let bare = ConnectionProfile { group: None, tags: Vec::new(), ..profile };
+    let written = toml::to_string(&bare).unwrap();
+    assert!(!written.contains("group") && !written.contains("tags"), "{written}");
+}
+
+#[test]
+fn from_profile_carries_group_and_tags() {
+    let profile: ConnectionProfile =
+        toml::from_str("host = \"h\"\nusername = \"u\"\ngroup = \"A\"\ntags = [\"t\"]\n").unwrap();
+    let entry = ConnectionEntry::from_profile(profile, 22);
+    assert_eq!((entry.group.as_deref(), entry.tags.clone()), (Some("A"), vec!["t".to_string()]));
+}
+
+#[test]
+fn an_orphan_labels_entry_carries_its_labels_and_cannot_be_mistaken_for_a_host() {
+    let entry = ConnectionEntry::orphan_labels(
+        "web1".into(),
+        Labels { group: Some("Work".into()), tags: vec!["prod".into()] },
+        ConnectionSource::ShadowedSshHost,
+    );
+    assert_eq!(entry.source, ConnectionSource::ShadowedSshHost);
+    assert_eq!((entry.host.as_str(), entry.port), ("", 0));
+    assert_eq!(entry.group.as_deref(), Some("Work"));
+    assert_eq!(entry.tags, vec!["prod"]);
+}
+
+#[test]
+fn only_label_records_without_a_host_count_as_orphans() {
+    assert!(ConnectionSource::MissingSshHost.is_orphan_labels());
+    assert!(ConnectionSource::ShadowedSshHost.is_orphan_labels());
+    assert!(!ConnectionSource::Profile.is_orphan_labels());
+    assert!(!ConnectionSource::SshConfig.is_orphan_labels());
 }

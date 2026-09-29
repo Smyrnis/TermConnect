@@ -6,7 +6,7 @@ use crate::{
         Command,
         testing::{TestEngine, test_engine},
     },
-    profiles::ConnectionProfile,
+    profiles::{ConnectionProfile, Labels},
 };
 
 fn engine_with_sftp() -> TestEngine {
@@ -52,6 +52,8 @@ fn seed(t: &TestEngine, name: &str, host: &str, options: BTreeMap<String, String
             username: "deploy".to_string(),
             password: None,
             options,
+            group: None,
+            tags: Vec::new(),
         },
     )
     .unwrap();
@@ -245,6 +247,8 @@ fn editing_an_entry_of_a_protocol_missing_from_this_build_keeps_its_options() {
             username: "u".to_string(),
             password: None,
             options: BTreeMap::from([("security".to_string(), "explicit".to_string())]),
+            group: None,
+            tags: Vec::new(),
         },
     )
     .unwrap();
@@ -256,4 +260,108 @@ fn editing_an_entry_of_a_protocol_missing_from_this_build_keeps_its_options() {
     let profiles = saved(&t);
     assert_eq!((profiles[0].protocol.as_str(), profiles[0].host.as_str()), ("ftp", "h2"));
     assert_eq!(profiles[0].options.get("security").map(String::as_str), Some("explicit"));
+}
+
+fn discovered(name: &str) -> porthmos_vfs::Target {
+    porthmos_vfs::Target {
+        name: name.to_string(),
+        host: format!("{name}.example"),
+        port: 22,
+        username: "u".into(),
+        password: None,
+        options: Default::default(),
+    }
+}
+
+fn engine_discovering(names: &[&str]) -> TestEngine {
+    let mut t = test_engine();
+    let protocol = porthmos_vfs::testing::FakeProtocol::new(porthmos_vfs::testing::FakeFs::new())
+        .with_id("sftp")
+        .with_discovered(names.iter().map(|name| discovered(name)).collect());
+    t.engine.protocols = vec![std::sync::Arc::new(protocol)];
+    t
+}
+
+fn group_only(group: &str) -> Labels {
+    Labels { group: Some(group.to_string()), tags: Vec::new() }
+}
+
+#[test]
+fn saving_ssh_labels_stores_them_normalized_and_relists() {
+    let mut t = engine_discovering(&["web1"]);
+
+    t.engine.handle_command(Command::SaveSshLabels {
+        name: "web1".into(),
+        group: " Work / Web ".into(),
+        tags: "prod, prod".into(),
+    });
+
+    let labels = store::load_ssh_labels(&t.engine.paths).unwrap();
+    assert_eq!(labels.get("web1").unwrap().group.as_deref(), Some("Work/Web"));
+    assert_eq!(labels.get("web1").unwrap().tags, vec!["prod"]);
+    let events = t.drain();
+    assert!(matches!(events[0], Event::ProfileSaved));
+    assert!(matches!(&events[1], Event::Profiles(entries) if entries[0].group.as_deref() == Some("Work/Web")));
+}
+
+#[test]
+fn saving_ssh_labels_for_an_unknown_host_is_rejected() {
+    let mut t = engine_discovering(&["web1"]);
+
+    t.engine.handle_command(Command::SaveSshLabels { name: "nope".into(), group: "A".into(), tags: String::new() });
+
+    assert!(
+        matches!(t.drain().as_slice(), [Event::ProfileRejected { message }] if message == "nope is not in ~/.ssh/config")
+    );
+    assert!(store::load_ssh_labels(&t.engine.paths).unwrap().is_empty());
+}
+
+#[test]
+fn moving_ssh_labels_reattaches_them_to_another_host() {
+    let mut t = engine_discovering(&["new"]);
+    store::save_ssh_labels(&t.engine.paths, "old", &group_only("A")).unwrap();
+
+    t.engine.handle_command(Command::MoveSshLabels { from: "old".into(), to: "new".into() });
+
+    let labels = store::load_ssh_labels(&t.engine.paths).unwrap();
+    assert_eq!(labels.keys().collect::<Vec<_>>(), vec!["new"]);
+    assert!(matches!(t.drain().last(), Some(Event::Profiles(_))));
+}
+
+#[test]
+fn moving_ssh_labels_to_an_unknown_host_is_an_error_notice() {
+    let mut t = engine_discovering(&["new"]);
+    store::save_ssh_labels(&t.engine.paths, "old", &group_only("A")).unwrap();
+
+    t.engine.handle_command(Command::MoveSshLabels { from: "old".into(), to: "ghost".into() });
+
+    assert!(t.drain().iter().any(|event| matches!(
+        event,
+        Event::Notice { severity: Severity::Error, message } if message == "ghost is not in ~/.ssh/config"
+    )));
+    assert!(store::load_ssh_labels(&t.engine.paths).unwrap().contains_key("old"));
+}
+
+#[test]
+fn forgetting_ssh_labels_removes_them_and_relists() {
+    let mut t = engine_discovering(&[]);
+    store::save_ssh_labels(&t.engine.paths, "old", &group_only("A")).unwrap();
+
+    t.engine.handle_command(Command::ForgetSshLabels { name: "old".into() });
+
+    assert!(store::load_ssh_labels(&t.engine.paths).unwrap().is_empty());
+    assert!(matches!(t.drain().last(), Some(Event::Profiles(entries)) if entries.is_empty()));
+}
+
+#[test]
+fn a_saved_profile_carries_its_group_and_tags() {
+    let mut t = engine_with_sftp();
+    let mut new = draft("web", "h", "22");
+    new.group = "Work".into();
+    new.tags = "prod".into();
+
+    t.engine.handle_command(Command::SaveProfile { original: None, draft: new });
+
+    let profile = saved(&t).remove(0);
+    assert_eq!((profile.group.as_deref(), profile.tags), (Some("Work"), vec!["prod".to_string()]));
 }

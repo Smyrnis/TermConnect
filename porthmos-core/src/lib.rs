@@ -2,6 +2,7 @@
 compile_error!("porthmos only supports Unix-like platforms (Linux/macOS)");
 
 pub mod config;
+pub mod connections_tree;
 mod engine;
 pub mod error;
 pub mod listing;

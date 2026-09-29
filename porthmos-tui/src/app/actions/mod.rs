@@ -1,4 +1,5 @@
 use super::*;
+use crate::widgets::filter_line::FilterLine;
 
 impl App {
     pub(super) fn apply_action(&mut self, action: Action) {
@@ -111,14 +112,16 @@ impl App {
 
     fn apply_connections_action(&mut self, action: Action) {
         match action {
-            Action::Up => {
-                self.connections_cursor = self.connections_cursor.saturating_sub(1);
-            }
-            Action::Down if self.connections_cursor + 1 < self.connections.len() => {
-                self.connections_cursor += 1;
-            }
-            Action::Down => {}
-            Action::Open => self.connect_to_selected(),
+            Action::Up => self.connections.move_cursor(-1),
+            Action::Down => self.connections.move_cursor(1),
+            Action::Open => match self.connections.selected() {
+                Some(Selection::Group(_)) => self.connections.toggle(),
+                Some(Selection::Connection(entry)) if entry.source.is_orphan_labels() => {
+                    self.open_missing_host_dialog()
+                }
+                Some(Selection::Connection(_)) => self.connect_to_selected(),
+                None => {}
+            },
             Action::Refresh => self.open_connections_screen(),
             _ => {}
         }

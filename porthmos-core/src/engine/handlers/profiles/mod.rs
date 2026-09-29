@@ -3,7 +3,7 @@ use porthmos_vfs::ConnectionForm;
 use super::super::{Engine, Event};
 use crate::{
     Severity,
-    profiles::{self, ConnectionEntry, ProfileDraft, store},
+    profiles::{self, ConnectionEntry, ConnectionSource, Labels, ProfileDraft, labels, store},
 };
 
 impl Engine {
@@ -74,6 +74,49 @@ impl Engine {
             }
             Err(err) => self.notice(Severity::Error, err.to_string()),
         }
+    }
+
+    fn is_ssh_host(&self, name: &str) -> anyhow::Result<bool> {
+        Ok(self.all_profiles()?.iter().any(|entry| entry.name == name && entry.source == ConnectionSource::SshConfig))
+    }
+
+    pub(crate) fn save_ssh_labels(&mut self, name: &str, group: &str, tags: &str) {
+        match self.is_ssh_host(name) {
+            Ok(true) => {}
+            Ok(false) => {
+                self.emit(Event::ProfileRejected { message: format!("{name} is not in ~/.ssh/config") });
+                return;
+            }
+            Err(err) => return self.notice(Severity::Error, err.to_string()),
+        }
+        let labels = Labels { group: labels::normalize_group(group), tags: labels::parse_tags(tags) };
+        match store::save_ssh_labels(&self.paths, name, &labels) {
+            Ok(()) => {
+                self.emit(Event::ProfileSaved);
+                self.list_profiles();
+            }
+            Err(err) => self.notice(Severity::Error, err.to_string()),
+        }
+    }
+
+    pub(crate) fn move_ssh_labels(&mut self, from: &str, to: &str) {
+        match self.is_ssh_host(to) {
+            Ok(true) => {
+                if let Err(err) = store::move_ssh_labels(&self.paths, from, to) {
+                    self.notice(Severity::Error, err.to_string());
+                }
+            }
+            Ok(false) => self.notice(Severity::Error, format!("{to} is not in ~/.ssh/config")),
+            Err(err) => self.notice(Severity::Error, err.to_string()),
+        }
+        self.list_profiles();
+    }
+
+    pub(crate) fn forget_ssh_labels(&mut self, name: &str) {
+        if let Err(err) = store::forget_ssh_labels(&self.paths, name) {
+            self.notice(Severity::Error, err.to_string());
+        }
+        self.list_profiles();
     }
 
     pub(crate) fn delete_profile(&mut self, name: &str) {

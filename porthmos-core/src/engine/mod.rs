@@ -166,6 +166,9 @@ impl Engine {
             Command::ListProfiles => self.list_profiles(),
             Command::SaveProfile { original, draft } => self.save_profile(original, draft),
             Command::DeleteProfile { name } => self.delete_profile(&name),
+            Command::SaveSshLabels { name, group, tags } => self.save_ssh_labels(&name, &group, &tags),
+            Command::MoveSshLabels { from, to } => self.move_ssh_labels(&from, &to),
+            Command::ForgetSshLabels { name } => self.forget_ssh_labels(&name),
             Command::AddBookmark { label, location, path } => self.add_bookmark(label, location, path),
             Command::RemoveBookmark { index } => self.remove_bookmark(index),
             Command::Shutdown => {}

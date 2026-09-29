@@ -9,13 +9,15 @@ use std::{
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use super::profile::ConnectionProfile;
+use super::{labels::Labels, profile::ConnectionProfile};
 use crate::Paths;
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 struct ConfigFile {
     #[serde(default)]
     connections: BTreeMap<String, ConnectionProfile>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    ssh_hosts: BTreeMap<String, Labels>,
 }
 
 pub fn load(paths: &Paths) -> Result<Vec<ConnectionProfile>> {
@@ -51,6 +53,37 @@ fn delete_from(path: &Path, name: &str) -> Result<()> {
     let mut file = read_config_file(path)?;
     file.connections.remove(name);
     write_config_file(path, &file)
+}
+
+pub fn load_ssh_labels(paths: &Paths) -> Result<BTreeMap<String, Labels>> {
+    Ok(read_config_file(&paths.connections_file())?.ssh_hosts)
+}
+
+pub fn save_ssh_labels(paths: &Paths, name: &str, labels: &Labels) -> Result<()> {
+    let path = paths.connections_file();
+    let mut file = read_config_file(&path)?;
+    if labels.is_empty() {
+        file.ssh_hosts.remove(name);
+    } else {
+        file.ssh_hosts.insert(name.to_string(), labels.clone());
+    }
+    write_config_file(&path, &file)
+}
+
+pub fn move_ssh_labels(paths: &Paths, from: &str, to: &str) -> Result<()> {
+    let path = paths.connections_file();
+    let mut file = read_config_file(&path)?;
+    if let Some(labels) = file.ssh_hosts.remove(from) {
+        file.ssh_hosts.insert(to.to_string(), labels);
+    }
+    write_config_file(&path, &file)
+}
+
+pub fn forget_ssh_labels(paths: &Paths, name: &str) -> Result<()> {
+    let path = paths.connections_file();
+    let mut file = read_config_file(&path)?;
+    file.ssh_hosts.remove(name);
+    write_config_file(&path, &file)
 }
 
 fn read_config_file(path: &Path) -> Result<ConfigFile> {

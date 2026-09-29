@@ -42,6 +42,8 @@ pub(crate) fn sample_entry(name: &str) -> ConnectionEntry {
         password: None,
         options: Default::default(),
         source: ConnectionSource::Profile,
+        group: None,
+        tags: Vec::new(),
     }
 }
 

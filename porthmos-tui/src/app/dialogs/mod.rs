@@ -98,6 +98,7 @@ impl App {
             DialogOutcome::Pending => {}
             DialogOutcome::Cancelled => {
                 self.dialog = None;
+                self.reveal = None;
                 if let Some(
                     PendingAction::SubmitPassword { request_id }
                     | PendingAction::TrustHostKey { request_id }
@@ -138,13 +139,25 @@ impl App {
                     | Some(PendingAction::AddConnection)
                     | Some(PendingAction::EditConnection { .. })
                     | Some(PendingAction::DeleteConnection { .. })
+                    | Some(PendingAction::EditSshLabels { .. })
+                    | Some(PendingAction::FixMissingHost { .. })
+                    | Some(PendingAction::MoveLabels { .. })
                     | Some(PendingAction::ResolveConflict)
                     | None => {}
                 }
             }
             DialogOutcome::Selected(index) => {
                 self.dialog = None;
-                self.navigate_to_bookmark(index);
+                match self.pending_action.take() {
+                    Some(PendingAction::FixMissingHost { name }) => self.apply_missing_host_choice(name, index),
+                    Some(PendingAction::MoveLabels { from, candidates }) => {
+                        self.move_labels_to(from, candidates, index)
+                    }
+                    other => {
+                        self.pending_action = other;
+                        self.navigate_to_bookmark(index);
+                    }
+                }
             }
             DialogOutcome::Removed(index) => {
                 self.core.send(Command::RemoveBookmark { index });
@@ -161,6 +174,10 @@ impl App {
                     let original = original.name.clone();
                     self.submit_connection_form(values, Some(original));
                 }
+                Some(PendingAction::EditSshLabels { name }) => {
+                    let name = name.clone();
+                    self.submit_ssh_labels(name, values);
+                }
                 _ => self.dialog = None,
             },
             DialogOutcome::FormChoiceChanged { key } => self.form_choice_changed(key),
@@ -171,6 +188,7 @@ impl App {
             }
         }
         self.open_next_conflict_prompt();
+        self.announce_missing_hosts();
     }
 }
 

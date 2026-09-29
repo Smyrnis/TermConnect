@@ -16,7 +16,10 @@ use ratatui::{
     widgets::{Block, Borders},
 };
 
-use crate::widgets::file_list;
+use crate::widgets::{
+    file_list,
+    filter_line::{self, FilterLine},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivePanel {
@@ -96,40 +99,6 @@ impl PanelView {
         self.listing.sort_spec()
     }
 
-    pub fn filter(&self) -> Option<&str> {
-        self.listing.filter()
-    }
-
-    pub fn editing_filter(&self) -> bool {
-        self.editing_filter
-    }
-
-    pub fn start_filter(&mut self) {
-        self.editing_filter = true;
-    }
-
-    pub fn finish_filter(&mut self) {
-        self.editing_filter = false;
-    }
-
-    pub fn type_filter(&mut self, character: char) {
-        let mut text = self.filter().unwrap_or_default().to_string();
-        text.push(character);
-        self.apply_filter(Some(text));
-    }
-
-    pub fn erase_filter(&mut self) {
-        let mut text = self.filter().unwrap_or_default().to_string();
-        text.pop();
-        self.apply_filter(Some(text));
-    }
-
-    pub fn clear_filter(&mut self) {
-        self.editing_filter = false;
-        self.apply_filter(None);
-        self.anchor = None;
-    }
-
     fn apply_filter(&mut self, text: Option<String>) {
         let anchor = match &self.anchor {
             Some((anchor, placed)) if *placed == self.cursor => Some(anchor.clone()),
@@ -162,20 +131,7 @@ impl PanelView {
 
     fn filter_status(&self, width: usize) -> Option<String> {
         let (matched, total) = self.listing.match_count();
-        let (prefix, text, suffix) = match (self.editing_filter, self.filter()) {
-            (true, text) => ("/", text.unwrap_or_default(), format!("\u{2588} ({matched} of {total})")),
-            (false, Some(text)) => ("filter: ", text, format!(" ({matched} of {total})")),
-            (false, None) => return None,
-        };
-        let room = width.saturating_sub(prefix.chars().count() + suffix.chars().count());
-        let length = text.chars().count();
-        let shown = if length <= room {
-            text.to_string()
-        } else {
-            let tail: String = text.chars().skip(length - room.saturating_sub(1)).collect();
-            format!("\u{2026}{tail}")
-        };
-        Some(format!("{prefix}{shown}{suffix}"))
+        filter_line::status(self.editing_filter, self.filter(), matched, total, width)
     }
 
     fn visible_selected(&self) -> Vec<&Entry> {
@@ -186,16 +142,6 @@ impl PanelView {
                 _ => None,
             })
             .collect()
-    }
-
-    pub fn move_cursor(&mut self, delta: isize) {
-        if self.rows().is_empty() {
-            return;
-        }
-
-        let max = self.rows().len() as isize - 1;
-        let next = (self.cursor as isize + delta).clamp(0, max);
-        self.cursor = next as usize;
     }
 
     pub fn target_path_for_open(&self) -> Option<PathBuf> {
@@ -290,6 +236,52 @@ pub fn render_placeholder(frame: &mut Frame, area: Rect, title: &str, is_active:
     let block = Block::default().title(title).borders(Borders::ALL).border_style(border_style);
 
     frame.render_widget(block, area);
+}
+
+impl FilterLine for PanelView {
+    fn filter(&self) -> Option<&str> {
+        self.listing.filter()
+    }
+
+    fn editing_filter(&self) -> bool {
+        self.editing_filter
+    }
+
+    fn start_filter(&mut self) {
+        self.editing_filter = true;
+    }
+
+    fn finish_filter(&mut self) {
+        self.editing_filter = false;
+    }
+
+    fn type_filter(&mut self, character: char) {
+        let mut text = self.filter().unwrap_or_default().to_string();
+        text.push(character);
+        self.apply_filter(Some(text));
+    }
+
+    fn erase_filter(&mut self) {
+        let mut text = self.filter().unwrap_or_default().to_string();
+        text.pop();
+        self.apply_filter(Some(text));
+    }
+
+    fn clear_filter(&mut self) {
+        self.editing_filter = false;
+        self.apply_filter(None);
+        self.anchor = None;
+    }
+
+    fn move_cursor(&mut self, delta: isize) {
+        if self.rows().is_empty() {
+            return;
+        }
+
+        let max = self.rows().len() as isize - 1;
+        let next = (self.cursor as isize + delta).clamp(0, max);
+        self.cursor = next as usize;
+    }
 }
 
 #[cfg(test)]

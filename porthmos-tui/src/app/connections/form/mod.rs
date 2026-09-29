@@ -8,10 +8,13 @@ use porthmos_core::{
 use crate::widgets::dialog::{FieldKind, FormDialog, FormField};
 
 const UNAVAILABLE_PORT: u16 = 22;
-const COMMON_KEYS: [&str; 7] = ["protocol", "name", "host", "port", "username", "password", "remote_path"];
+const COMMON_KEYS: [&str; 9] =
+    ["protocol", "name", "group", "tags", "host", "port", "username", "password", "remote_path"];
 
 struct Common {
     name: String,
+    group: String,
+    tags: String,
     host: String,
     port: String,
     username: String,
@@ -65,6 +68,8 @@ fn fields(
     let mut fields = vec![
         FormField::choice("protocol", "Protocol", protocol_choices(protocols, unavailable), protocol),
         FormField::text("name", "Name", common.name),
+        FormField::text("group", "Group", common.group),
+        FormField::text("tags", "Tags", common.tags),
         FormField::text("host", form.host.label, common.host),
         FormField::text("port", form.port.label, common.port),
         FormField::text("username", form.username.label, common.username),
@@ -84,6 +89,8 @@ pub(super) fn build(title: &str, protocols: &[ProtocolInfo], existing: Option<&C
             Some(&entry.protocol),
             Common {
                 name: entry.name.clone(),
+                group: entry.group.clone().unwrap_or_default(),
+                tags: entry.tags.join(", "),
                 host: entry.host.clone(),
                 port: entry.port.to_string(),
                 username: entry.username.clone(),
@@ -100,6 +107,8 @@ pub(super) fn build(title: &str, protocols: &[ProtocolInfo], existing: Option<&C
                 None,
                 Common {
                     name: String::new(),
+                    group: String::new(),
+                    tags: String::new(),
                     host: String::new(),
                     port: first.form.port.default.to_string(),
                     username: String::new(),
@@ -146,6 +155,8 @@ pub(super) fn rebuild_for_protocol(form: &mut FormDialog, protocols: &[ProtocolI
         typed_port.trim().is_empty() || form.prefilled.get("port").is_some_and(|port| port == typed_port.trim());
     let common = Common {
         name: form.value("name").unwrap_or_default(),
+        group: form.value("group").unwrap_or_default(),
+        tags: form.value("tags").unwrap_or_default(),
         host: form.value("host").unwrap_or_default(),
         port: if port_untouched { new_form.port.default.to_string() } else { typed_port },
         username: form.value("username").unwrap_or_default(),
@@ -166,12 +177,24 @@ pub(super) fn rebuild_for_protocol(form: &mut FormDialog, protocols: &[ProtocolI
     form.error = None;
 }
 
+pub(super) fn build_labels(entry: &ConnectionEntry) -> FormDialog {
+    FormDialog::new(
+        format!("Labels for {}", entry.name),
+        vec![
+            FormField::text("group", "Group", entry.group.clone().unwrap_or_default()),
+            FormField::text("tags", "Tags", entry.tags.join(", ")),
+        ],
+    )
+}
+
 pub(super) fn draft(values: Vec<(&'static str, String)>) -> ProfileDraft {
     let mut draft = ProfileDraft::default();
     for (key, value) in values {
         match key {
             "protocol" => draft.protocol = value,
             "name" => draft.name = value,
+            "group" => draft.group = value,
+            "tags" => draft.tags = value,
             "host" => draft.host = value,
             "port" => draft.port = value,
             "username" => draft.username = value,

@@ -2,6 +2,7 @@ pub mod confirm;
 pub mod conflict;
 pub mod form;
 pub mod list;
+pub mod message;
 pub mod text_input;
 
 pub use confirm::ConfirmDialog;
@@ -23,6 +24,7 @@ pub enum Dialog {
     List(ListDialog),
     Form(FormDialog),
     Conflict(ConflictDialog),
+    Message(message::MessageDialog),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +71,10 @@ impl Dialog {
                     DialogOutcome::Resolved { resolution, apply_to_rest }
                 }
             },
+            Dialog::Message(dialog) => match dialog.handle_key(key) {
+                message::MessageOutcome::Pending => DialogOutcome::Pending,
+                message::MessageOutcome::Closed => DialogOutcome::Cancelled,
+            },
         }
     }
 
@@ -79,6 +85,7 @@ impl Dialog {
             Dialog::List(dialog) => list::render_list(frame, area, dialog),
             Dialog::Form(dialog) => form::render_form(frame, area, dialog),
             Dialog::Conflict(dialog) => conflict::render_conflict(frame, area, dialog),
+            Dialog::Message(dialog) => message::render_message(frame, area, dialog),
         }
     }
 }

@@ -1,4 +1,8 @@
-use std::{collections::VecDeque, path::PathBuf, time::Instant};
+use std::{
+    collections::{HashSet, VecDeque},
+    path::PathBuf,
+    time::Instant,
+};
 
 use anyhow::Result;
 use crossterm::event::{Event as TerminalEvent, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -27,6 +31,7 @@ use crate::{
     terminal::{self, Backend},
     widgets::{
         connections_list,
+        connections_view::{ConnectionsView, Selection},
         dialog::{ConfirmDialog, ConflictDialog, Dialog, DialogOutcome, ListDialog, TextInputDialog},
         help, layout,
         notifications::Notifications,
@@ -58,7 +63,15 @@ enum PendingAction {
     AddConnection,
     EditConnection { original: ConnectionEntry },
     DeleteConnection { name: String },
+    EditSshLabels { name: String },
+    FixMissingHost { name: String },
+    MoveLabels { from: String, candidates: Vec<String> },
     ResolveConflict,
+}
+
+enum Reveal {
+    AwaitingSave(String),
+    Ready(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -97,8 +110,9 @@ pub struct App {
     help_visible: bool,
     pending_action: Option<PendingAction>,
     notifications: Notifications,
-    connections: Vec<ConnectionEntry>,
-    connections_cursor: usize,
+    connections: ConnectionsView,
+    reveal: Option<Reveal>,
+    announced_missing: HashSet<String>,
     transfers_cursor: usize,
     reselect_row: Option<RowKind>,
     connection_status: ConnectionStatus,
@@ -122,8 +136,9 @@ impl App {
             help_visible: false,
             pending_action: None,
             notifications: Notifications::default(),
-            connections: Vec::new(),
-            connections_cursor: 0,
+            connections: ConnectionsView::new(),
+            reveal: None,
+            announced_missing: HashSet::new(),
             transfers_cursor: 0,
             reselect_row: None,
             connection_status: ConnectionStatus::Disconnected,
@@ -188,7 +203,15 @@ impl App {
             self.apply_filter_key(key);
         } else {
             let action = self.key_bindings.map_key(key);
-            self.apply_action(action);
+            if action == Action::Noop && self.screen == Screen::Connections && key.modifiers.is_empty() {
+                match key.code {
+                    KeyCode::Right => self.connections.expand(),
+                    KeyCode::Left => self.connections.collapse_or_parent(),
+                    _ => {}
+                }
+            } else {
+                self.apply_action(action);
+            }
         }
     }
 
@@ -209,12 +232,19 @@ impl App {
             Event::Listed { location, path, entries } => self.apply_listing(location, path, entries),
             Event::LocationChanged { location } => self.relist(location),
             Event::Profiles(entries) => {
-                self.connections = entries;
-                self.connections_cursor = self.connections_cursor.min(self.connections.len().saturating_sub(1));
+                self.connections.replace(entries);
+                match self.reveal.take() {
+                    Some(Reveal::Ready(name)) => self.connections.reveal(&name),
+                    other => self.reveal = other,
+                }
+                self.announce_missing_hosts();
             }
             Event::ProfileSaved => {
                 self.dialog = None;
                 self.pending_action = None;
+                if let Some(Reveal::AwaitingSave(name)) = self.reveal.take() {
+                    self.reveal = Some(Reveal::Ready(name));
+                }
             }
             Event::ProfileRejected { message } => self.set_form_error(message),
             Event::Bookmarks(bookmarks) => self.bookmarks = bookmarks,

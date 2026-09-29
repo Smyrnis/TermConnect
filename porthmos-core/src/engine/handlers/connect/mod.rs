@@ -3,7 +3,10 @@ use std::sync::Arc;
 use porthmos_vfs::{FileSystem, Protocol};
 
 use super::super::{Engine, Event, Internal, LiveSession, SessionId, prompter::EnginePrompter};
-use crate::{Severity, connect_failure_message, profiles::ConnectionEntry};
+use crate::{
+    Severity, connect_failure_message,
+    profiles::{ConnectionEntry, ConnectionSource},
+};
 
 impl Engine {
     pub(crate) fn connect(&mut self, profile: &str) {
@@ -13,14 +16,23 @@ impl Engine {
             return;
         }
 
-        let entry = match self.all_profiles() {
-            Ok(entries) => entries.into_iter().find(|entry| entry.name == profile),
+        let entries = match self.all_profiles() {
+            Ok(entries) => entries,
             Err(err) => {
                 self.notice(Severity::Error, err.to_string());
                 return;
             }
         };
+        let named = |entry: &&ConnectionEntry| entry.name == profile;
+        let entry = entries.iter().filter(named).find(|entry| !entry.source.is_orphan_labels()).cloned();
         let Some(entry) = entry else {
+            if entries.iter().filter(named).any(|entry| entry.source == ConnectionSource::MissingSshHost) {
+                self.emit(Event::ConnectFailed {
+                    name: profile.to_string(),
+                    message: format!("{profile} is no longer in ~/.ssh/config"),
+                });
+                return;
+            }
             self.emit(Event::ConnectFailed {
                 name: profile.to_string(),
                 message: format!("No saved connection named \"{profile}\""),

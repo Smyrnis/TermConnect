@@ -1,4 +1,5 @@
 use super::*;
+use crate::profiles::Labels;
 
 #[test]
 fn config_path_is_connections_toml_under_config_dir() {
@@ -84,6 +85,8 @@ fn save_to_creates_a_new_entry() {
         username: "deploy".to_string(),
         options: std::collections::BTreeMap::new(),
         password: Some("hunter2".to_string()),
+        group: None,
+        tags: Vec::new(),
     };
 
     save_to(&path, &profile).unwrap();
@@ -106,6 +109,8 @@ fn save_to_overwrites_an_existing_entry_by_name() {
         username: "deploy".to_string(),
         options: std::collections::BTreeMap::new(),
         password: None,
+        group: None,
+        tags: Vec::new(),
     };
     save_to(&path, &profile).unwrap();
 
@@ -131,6 +136,8 @@ fn delete_from_removes_one_entry_and_leaves_others() {
             username: "deploy".to_string(),
             options: std::collections::BTreeMap::new(),
             password: None,
+            group: None,
+            tags: Vec::new(),
         },
     )
     .unwrap();
@@ -144,6 +151,8 @@ fn delete_from_removes_one_entry_and_leaves_others() {
             username: "deploy".to_string(),
             options: std::collections::BTreeMap::new(),
             password: None,
+            group: None,
+            tags: Vec::new(),
         },
     )
     .unwrap();
@@ -169,6 +178,8 @@ fn save_to_sets_file_permissions_to_owner_read_write_only() {
             username: "deploy".to_string(),
             options: std::collections::BTreeMap::new(),
             password: Some("hunter2".to_string()),
+            group: None,
+            tags: Vec::new(),
         },
     )
     .unwrap();
@@ -189,6 +200,8 @@ fn save_to_leaves_the_original_file_untouched_if_the_write_fails() {
         username: "deploy".to_string(),
         options: std::collections::BTreeMap::new(),
         password: None,
+        group: None,
+        tags: Vec::new(),
     };
     save_to(&path, &original).unwrap();
 
@@ -222,6 +235,8 @@ fn save_to_creates_the_parent_directory_if_missing() {
             username: "deploy".to_string(),
             options: std::collections::BTreeMap::new(),
             password: None,
+            group: None,
+            tags: Vec::new(),
         },
     )
     .unwrap();
@@ -247,4 +262,100 @@ fn an_existing_flat_profile_round_trips_without_new_keys() {
     let before: toml::Table = std::fs::read_to_string(&path).unwrap().parse().unwrap();
     let after: toml::Table = std::fs::read_to_string(&copy).unwrap().parse().unwrap();
     assert_eq!(before, after);
+}
+
+fn labels(group: &str, tags: &[&str]) -> Labels {
+    Labels { group: Some(group.to_string()), tags: tags.iter().map(|tag| tag.to_string()).collect() }
+}
+
+fn sample_profile(name: &str) -> ConnectionProfile {
+    ConnectionProfile {
+        name: name.to_string(),
+        protocol: "sftp".to_string(),
+        host: "h".to_string(),
+        port: None,
+        username: "u".to_string(),
+        password: None,
+        group: None,
+        tags: Vec::new(),
+        options: std::collections::BTreeMap::new(),
+    }
+}
+
+#[test]
+fn ssh_labels_are_saved_loaded_and_kept_next_to_profiles() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::in_dir(dir.path());
+    std::fs::create_dir_all(&paths.config_dir).unwrap();
+    std::fs::write(paths.connections_file(), "[connections.web]\nhost = \"h\"\nusername = \"u\"\n").unwrap();
+
+    save_ssh_labels(&paths, "web1", &labels("Work", &["prod"])).unwrap();
+
+    assert_eq!(load_ssh_labels(&paths).unwrap().get("web1"), Some(&labels("Work", &["prod"])));
+    assert_eq!(load(&paths).unwrap().len(), 1);
+    let text = std::fs::read_to_string(paths.connections_file()).unwrap();
+    assert!(text.contains("[ssh_hosts.web1]"), "{text}");
+}
+
+#[test]
+fn saving_empty_labels_removes_the_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::in_dir(dir.path());
+    save_ssh_labels(&paths, "web1", &labels("Work", &[])).unwrap();
+
+    save_ssh_labels(&paths, "web1", &Labels::default()).unwrap();
+
+    assert!(load_ssh_labels(&paths).unwrap().is_empty());
+    let text = std::fs::read_to_string(paths.connections_file()).unwrap();
+    assert!(!text.contains("ssh_hosts"), "{text}");
+}
+
+#[test]
+fn moving_labels_replaces_any_record_at_the_target() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::in_dir(dir.path());
+    save_ssh_labels(&paths, "old", &labels("A", &["x"])).unwrap();
+    save_ssh_labels(&paths, "new", &labels("B", &[])).unwrap();
+
+    move_ssh_labels(&paths, "old", "new").unwrap();
+
+    let all = load_ssh_labels(&paths).unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all.get("new"), Some(&labels("A", &["x"])));
+}
+
+#[test]
+fn forgetting_labels_removes_only_that_record() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::in_dir(dir.path());
+    save_ssh_labels(&paths, "a", &labels("A", &[])).unwrap();
+    save_ssh_labels(&paths, "b", &labels("B", &[])).unwrap();
+
+    forget_ssh_labels(&paths, "a").unwrap();
+
+    assert_eq!(load_ssh_labels(&paths).unwrap().keys().collect::<Vec<_>>(), vec!["b"]);
+}
+
+#[test]
+fn saving_a_profile_keeps_ssh_labels() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::in_dir(dir.path());
+    save_ssh_labels(&paths, "web1", &labels("Work", &[])).unwrap();
+
+    save(&paths, &sample_profile("web")).unwrap();
+
+    assert_eq!(load_ssh_labels(&paths).unwrap().len(), 1);
+}
+
+#[test]
+fn a_profile_with_group_and_tags_round_trips_through_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::in_dir(dir.path());
+    let mut profile = sample_profile("web");
+    profile.group = Some("Work/Web".into());
+    profile.tags = vec!["prod".into(), "db".into()];
+
+    save(&paths, &profile).unwrap();
+
+    assert_eq!(load(&paths).unwrap(), vec![profile]);
 }

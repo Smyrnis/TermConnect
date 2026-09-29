@@ -17,6 +17,8 @@ fn connection(name: &str, source: ConnectionSource) -> ConnectionEntry {
         password: None,
         options: Default::default(),
         source,
+        group: None,
+        tags: Vec::new(),
     }
 }
 
@@ -155,16 +157,18 @@ fn back_action_returns_to_files_screen() {
 fn connections_cursor_moves_within_bounds() {
     let mut test = app_in("/d");
     test.app.screen = Screen::Connections;
-    test.app.connections = vec![connection("a", ConnectionSource::Profile), connection("b", ConnectionSource::Profile)];
+    test.app
+        .connections
+        .replace(vec![connection("a", ConnectionSource::Profile), connection("b", ConnectionSource::Profile)]);
 
     test.app.apply_action(Action::Up);
-    assert_eq!(test.app.connections_cursor, 0);
+    assert_eq!(test.app.connections.cursor, 0);
 
     test.app.apply_action(Action::Down);
-    assert_eq!(test.app.connections_cursor, 1);
+    assert_eq!(test.app.connections.cursor, 1);
 
     test.app.apply_action(Action::Down);
-    assert_eq!(test.app.connections_cursor, 1);
+    assert_eq!(test.app.connections.cursor, 1);
 }
 
 #[test]
@@ -190,8 +194,8 @@ fn cycle_session_action_advances_the_active_session() {
 fn delete_on_the_connections_screen_disconnects_the_selected_session() {
     let mut test = app_in("/d");
     let session = test.connect(5, "test");
-    test.app.connections = vec![connection("test", ConnectionSource::Profile)];
-    test.app.connections_cursor = 0;
+    test.app.connections.replace(vec![connection("test", ConnectionSource::Profile)]);
+    test.app.connections.cursor = 0;
     test.app.screen = Screen::Connections;
 
     test.app.apply_action(Action::Delete);
@@ -264,8 +268,8 @@ fn rename_action_on_connections_screen_opens_the_edit_connection_form() {
     prod.port = 2222;
     prod.username = "deploy".to_string();
     prod.password = Some("hunter2".to_string());
-    test.app.connections = vec![prod];
-    test.app.connections_cursor = 0;
+    test.app.connections.replace(vec![prod]);
+    test.app.connections.cursor = 0;
 
     test.app.apply_action(Action::Rename);
 
@@ -279,19 +283,6 @@ fn rename_action_on_connections_screen_opens_the_edit_connection_form() {
         }
         _ => panic!("expected the edit form to open"),
     }
-}
-
-#[test]
-fn rename_action_on_an_ssh_config_entry_does_not_open_a_dialog() {
-    let mut test = app_in("/d");
-    test.app.screen = Screen::Connections;
-    test.app.connections = vec![connection("prod", ConnectionSource::SshConfig)];
-    test.app.connections_cursor = 0;
-
-    test.app.apply_action(Action::Rename);
-
-    assert!(test.app.dialog.is_none());
-    assert!(test.app.notifications.current().is_some());
 }
 
 #[test]

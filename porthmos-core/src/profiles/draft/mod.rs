@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, fmt};
 
 use porthmos_vfs::{ConnectionForm, OptionKind};
 
-use super::{ConnectionEntry, ConnectionProfile};
+use super::{ConnectionEntry, ConnectionProfile, labels};
 
 const REMOTE_PATH: &str = "remote_path";
 
@@ -15,6 +15,8 @@ pub struct ProfileDraft {
     pub username: String,
     pub password: String,
     pub remote_path: String,
+    pub group: String,
+    pub tags: String,
     pub options: BTreeMap<String, String>,
 }
 
@@ -28,6 +30,8 @@ impl fmt::Debug for ProfileDraft {
             .field("username", &self.username)
             .field("password", &"<redacted>")
             .field("remote_path", &self.remote_path)
+            .field("group", &self.group)
+            .field("tags", &self.tags)
             .field("options", &self.options.keys().collect::<Vec<_>>())
             .finish()
     }
@@ -90,6 +94,8 @@ impl ProfileDraft {
             port: Some(port),
             username: username.to_string(),
             password: if self.password.is_empty() { None } else { Some(self.password.clone()) },
+            group: labels::normalize_group(&self.group),
+            tags: labels::parse_tags(&self.tags),
             options,
         })
     }

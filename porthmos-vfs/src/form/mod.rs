@@ -1,4 +1,5 @@
-pub const RESERVED_KEYS: [&str; 7] = ["protocol", "name", "host", "port", "username", "password", "remote_path"];
+pub const RESERVED_KEYS: [&str; 9] =
+    ["protocol", "name", "group", "tags", "host", "port", "username", "password", "remote_path"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommonField {

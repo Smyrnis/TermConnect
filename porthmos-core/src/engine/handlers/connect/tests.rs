@@ -462,3 +462,45 @@ fn preparing_a_shell_for_a_protocol_without_one_warns() {
         vec![(Severity::Warning, "This connection doesn't support a terminal session".to_string())]
     );
 }
+
+#[test]
+fn connecting_to_a_missing_ssh_host_fails_with_a_message() {
+    let mut t = test_engine();
+    crate::profiles::store::save_ssh_labels(
+        &t.engine.paths,
+        "old",
+        &crate::profiles::Labels { group: Some("A".into()), tags: Vec::new() },
+    )
+    .unwrap();
+
+    t.engine.handle_command(Command::Connect { profile: "old".into() });
+
+    assert!(t.drain().iter().any(|event| matches!(
+        event,
+        Event::ConnectFailed { name, message } if name == "old" && message == "old is no longer in ~/.ssh/config"
+    )));
+}
+
+#[tokio::test]
+async fn a_profile_wins_over_shadowed_labels_of_the_same_name() {
+    let (mut t, _remote) = with_fake_profile_lines("[ssh_hosts.srv]\ngroup = \"A\"\n", |fs| {
+        FakeProtocol::new(fs).with_discovered(vec![porthmos_vfs::Target {
+            name: "srv".into(),
+            host: "srv.example".into(),
+            port: 22,
+            username: "u".into(),
+            password: None,
+            options: Default::default(),
+        }])
+    });
+
+    t.engine.handle_command(Command::Connect { profile: "srv".into() });
+    t.run_internal().await;
+
+    next_matching(&mut t, |event| match event {
+        Event::Connected { name, .. } if name == "srv" => Some(()),
+        Event::ConnectFailed { message, .. } => panic!("connect failed: {message}"),
+        _ => None,
+    })
+    .await;
+}

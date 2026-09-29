@@ -1,5 +1,5 @@
 use super::*;
-use crate::widgets::panel_view::PanelView;
+use crate::widgets::{filter_line::FilterLine, panel_view::PanelView};
 
 impl App {
     fn active_panel_view(&self) -> Option<&PanelView> {
@@ -16,26 +16,36 @@ impl App {
         }
     }
 
+    fn active_filter_line(&self) -> Option<&dyn FilterLine> {
+        match self.screen {
+            Screen::Files => self.active_panel_view().map(|panel| panel as &dyn FilterLine),
+            Screen::Connections => Some(&self.connections),
+            _ => None,
+        }
+    }
+
+    fn active_filter_line_mut(&mut self) -> Option<&mut dyn FilterLine> {
+        match self.screen {
+            Screen::Files => self.active_panel_view_mut().map(|panel| panel as &mut dyn FilterLine),
+            Screen::Connections => Some(&mut self.connections),
+            _ => None,
+        }
+    }
+
     pub(super) fn editing_filter(&self) -> bool {
-        self.screen == Screen::Files && self.active_panel_view().is_some_and(PanelView::editing_filter)
+        self.active_filter_line().is_some_and(FilterLine::editing_filter)
     }
 
     pub(super) fn start_filter(&mut self) {
-        if self.screen != Screen::Files {
-            return;
-        }
-        if let Some(panel) = self.active_panel_view_mut() {
-            panel.start_filter();
+        if let Some(line) = self.active_filter_line_mut() {
+            line.start_filter();
         }
     }
 
     pub(super) fn clear_active_filter(&mut self) -> bool {
-        if self.screen != Screen::Files {
-            return false;
-        }
-        match self.active_panel_view_mut() {
-            Some(panel) if panel.filter().is_some() || panel.editing_filter() => {
-                panel.clear_filter();
+        match self.active_filter_line_mut() {
+            Some(line) if line.filter().is_some() || line.editing_filter() => {
+                line.clear_filter();
                 true
             }
             _ => false,
@@ -43,20 +53,20 @@ impl App {
     }
 
     pub(super) fn apply_filter_key(&mut self, key: KeyEvent) {
-        let Some(panel) = self.active_panel_view_mut() else {
+        let Some(line) = self.active_filter_line_mut() else {
             return;
         };
         match key.code {
             KeyCode::Char(character) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
-                panel.type_filter(character)
+                line.type_filter(character)
             }
-            KeyCode::Backspace => panel.erase_filter(),
-            KeyCode::Enter => panel.finish_filter(),
-            KeyCode::Esc => panel.clear_filter(),
-            KeyCode::Up => panel.move_cursor(-1),
-            KeyCode::Down => panel.move_cursor(1),
+            KeyCode::Backspace => line.erase_filter(),
+            KeyCode::Enter => line.finish_filter(),
+            KeyCode::Esc => line.clear_filter(),
+            KeyCode::Up => line.move_cursor(-1),
+            KeyCode::Down => line.move_cursor(1),
             _ => {
-                panel.finish_filter();
+                line.finish_filter();
                 let action = self.key_bindings.map_key(key);
                 self.apply_action(action);
             }

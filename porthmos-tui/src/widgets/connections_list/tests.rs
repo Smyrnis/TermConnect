@@ -4,6 +4,13 @@ use porthmos_core::profiles::{ConnectionEntry, ConnectionSource};
 use ratatui::{Terminal, backend::TestBackend};
 
 use super::*;
+use crate::widgets::filter_line::FilterLine;
+
+fn view_of(entries: Vec<ConnectionEntry>) -> ConnectionsView {
+    let mut view = ConnectionsView::new();
+    view.replace(entries);
+    view
+}
 
 #[test]
 fn renders_connection_names() {
@@ -16,12 +23,16 @@ fn renders_connection_names() {
         options: std::collections::BTreeMap::new(),
         password: None,
         source: ConnectionSource::Profile,
+        group: None,
+        tags: Vec::new(),
     }];
 
     let backend = TestBackend::new(60, 8);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_connections_list(frame, frame.area(), &entries, 0, &HashSet::new(), None, &[]))
+        .draw(|frame| {
+            render_connections_list(frame, frame.area(), &view_of(entries.clone()), &HashSet::new(), None, &[])
+        })
         .unwrap();
 
     let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
@@ -40,14 +51,20 @@ fn entry(name: &str) -> ConnectionEntry {
         options: std::collections::BTreeMap::new(),
         password: None,
         source: ConnectionSource::Profile,
+        group: None,
+        tags: Vec::new(),
     }
 }
 
 fn render_rows(entries: &[ConnectionEntry], connected: &HashSet<&str>, active: Option<&str>) -> Vec<String> {
+    render_view(&view_of(entries.to_vec()), connected, active)
+}
+
+fn render_view(view: &ConnectionsView, connected: &HashSet<&str>, active: Option<&str>) -> Vec<String> {
     let width = 60;
     let backend = TestBackend::new(width, 8);
     let mut terminal = Terminal::new(backend).unwrap();
-    terminal.draw(|frame| render_connections_list(frame, frame.area(), entries, 0, connected, active, &[])).unwrap();
+    terminal.draw(|frame| render_connections_list(frame, frame.area(), view, connected, active, &[])).unwrap();
 
     let buffer = terminal.backend().buffer().clone();
     (0..buffer.area.height)
@@ -85,7 +102,9 @@ fn each_row_shows_its_protocol_name_or_raw_id_when_unavailable() {
     let backend = TestBackend::new(70, 8);
     let mut terminal = Terminal::new(backend).unwrap();
     terminal
-        .draw(|frame| render_connections_list(frame, frame.area(), &[sftp, ftp], 0, &HashSet::new(), None, &protocols))
+        .draw(|frame| {
+            render_connections_list(frame, frame.area(), &view_of(vec![sftp, ftp]), &HashSet::new(), None, &protocols)
+        })
         .unwrap();
     let buffer = terminal.backend().buffer();
     let rows: Vec<String> = (0..8).map(|y| (0..70).map(|x| buffer[(x, y)].symbol()).collect()).collect();
@@ -105,4 +124,58 @@ fn the_protocol_column_is_as_wide_as_the_longest_protocol_name() {
 
     let column = |name: &str| rows.iter().find_map(|row| row.find(&format!(" {name} ("))).unwrap();
     assert_eq!(column("alpha"), column("beta"));
+}
+
+fn grouped(name: &str, group: &str, tags: &[&str]) -> ConnectionEntry {
+    let mut entry = entry(name);
+    entry.group = Some(group.to_string());
+    entry.tags = tags.iter().map(|tag| tag.to_string()).collect();
+    entry
+}
+
+#[test]
+fn a_group_row_shows_its_arrow_and_count() {
+    let mut view = view_of(vec![grouped("a", "Work", &[]), grouped("b", "Work", &[])]);
+    assert!(render_view(&view, &HashSet::new(), None).join("\n").contains("\u{25B8} Work (2)"));
+
+    view.toggle();
+
+    let text = render_view(&view, &HashSet::new(), None).join("\n");
+    assert!(text.contains("\u{25BE} Work (2)"), "{text}");
+}
+
+#[test]
+fn connections_are_indented_by_depth_and_show_their_tags() {
+    let mut view = view_of(vec![grouped("web", "Work", &["prod", "db"])]);
+    view.toggle();
+
+    let rows = render_view(&view, &HashSet::new(), None);
+
+    let row = rows.iter().find(|row| row.contains("web (")).unwrap();
+    assert!(row.starts_with("\u{2502}    sftp web ("), "{row}");
+    assert!(row.contains(" #prod #db"), "{row}");
+}
+
+#[test]
+fn orphan_label_rows_say_why_they_are_flagged() {
+    let missing = ConnectionEntry::orphan_labels("old".into(), Default::default(), ConnectionSource::MissingSshHost);
+    let shadowed = ConnectionEntry::orphan_labels("web1".into(), Default::default(), ConnectionSource::ShadowedSshHost);
+
+    let text = render_rows(&[missing, shadowed], &HashSet::new(), None).join("\n");
+
+    assert!(text.contains("\u{26A0} old (not in ~/.ssh/config)"), "{text}");
+    assert!(text.contains("\u{26A0} web1 (hidden by a saved connection)"), "{text}");
+}
+
+#[test]
+fn a_kept_filter_shows_in_the_bottom_border() {
+    let mut view = view_of(vec![entry("web"), entry("db"), entry("mail")]);
+    view.start_filter();
+    view.type_filter('w');
+    view.type_filter('e');
+    view.finish_filter();
+
+    let rows = render_view(&view, &HashSet::new(), None);
+
+    assert!(rows.last().unwrap().contains("filter: we (1 of 3)"), "{rows:#?}");
 }

@@ -1,6 +1,8 @@
 pub mod connections_list;
+pub mod connections_view;
 pub mod dialog;
 pub mod file_list;
+pub mod filter_line;
 pub mod help;
 pub mod layout;
 pub mod notifications;

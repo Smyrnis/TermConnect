@@ -45,6 +45,8 @@ fn draft(port: &str) -> ProfileDraft {
             ("security".to_string(), "explicit".to_string()),
             ("path_style".to_string(), "true".to_string()),
         ]),
+        group: String::new(),
+        tags: String::new(),
     }
 }
 
@@ -58,6 +60,8 @@ fn entry(protocol: &str, options: &[(&str, &str)]) -> ConnectionEntry {
         password: None,
         options: options.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect(),
         source: ConnectionSource::Profile,
+        group: None,
+        tags: Vec::new(),
     }
 }
 
@@ -217,4 +221,21 @@ fn a_required_secret_of_only_spaces_counts_as_empty() {
     blank.options.insert("key".to_string(), "   ".to_string());
 
     assert_eq!(blank.validate(&form, None).unwrap_err(), "Secret key can't be empty");
+}
+
+#[test]
+fn validate_normalizes_group_and_tags() {
+    let form = ConnectionForm::standard(22);
+    let draft = ProfileDraft {
+        protocol: "sftp".into(),
+        name: "web".into(),
+        host: "h".into(),
+        username: "u".into(),
+        group: " Work / Web ".into(),
+        tags: "prod, #db, Prod".into(),
+        ..Default::default()
+    };
+    let profile = draft.validate(&form, None).unwrap();
+    assert_eq!(profile.group.as_deref(), Some("Work/Web"));
+    assert_eq!(profile.tags, vec!["prod", "db"]);
 }
