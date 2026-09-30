@@ -45,6 +45,7 @@ fn engine_with(secrets: Secrets) -> TestEngine {
         bookmarks: Bookmarks::default(),
         secrets,
         history,
+        edit: crate::config::settings::EditSettings::default(),
     };
     TestEngine { engine: Engine::new(parts, events_tx, internal_tx), events, internal, dir }
 }

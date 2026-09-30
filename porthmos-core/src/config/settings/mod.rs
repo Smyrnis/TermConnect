@@ -11,6 +11,18 @@ pub struct PanelSettings {
     pub sort: SortSpec,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditSettings {
+    pub auto_upload: bool,
+    pub editor: Option<String>,
+}
+
+impl Default for EditSettings {
+    fn default() -> Self {
+        Self { auto_upload: true, editor: None }
+    }
+}
+
 pub const MAX_PARALLEL_CAP: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,6 +41,7 @@ impl Default for TransferSettings {
 pub struct Settings {
     pub panel: PanelSettings,
     pub transfers: TransferSettings,
+    pub edit: EditSettings,
     pub frontend: toml::Table,
 }
 
@@ -38,6 +51,8 @@ pub(crate) struct SettingsFile {
     pub panel: PanelSettingsFile,
     #[serde(default)]
     pub transfers: TransferSettingsFile,
+    #[serde(default)]
+    pub edit: EditSettingsFile,
     #[serde(flatten)]
     pub frontend: toml::Table,
 }
@@ -46,6 +61,12 @@ pub(crate) struct SettingsFile {
 pub(crate) struct TransferSettingsFile {
     pub max_parallel: Option<i64>,
     pub on_conflict: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub(crate) struct EditSettingsFile {
+    pub auto_upload: Option<bool>,
+    pub editor: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
@@ -105,6 +126,10 @@ pub(crate) fn settings_from_file(file: SettingsFile) -> (Settings, Vec<String>) 
         Settings {
             panel: PanelSettings { show_hidden, sort: SortSpec { key, order } },
             transfers: TransferSettings { max_parallel, on_conflict },
+            edit: EditSettings {
+                auto_upload: file.edit.auto_upload.unwrap_or(true),
+                editor: file.edit.editor.map(|editor| editor.trim().to_string()).filter(|editor| !editor.is_empty()),
+            },
             frontend: file.frontend,
         },
         warnings,

@@ -375,6 +375,7 @@ impl Engine {
         }
         self.transfers.cancel_all_queued();
         self.refresh_destinations_without_pending(&cancelled_destinations);
+        self.cancel_edit_downloads();
     }
 
     fn refresh_destinations_without_pending(&mut self, destinations: &[(u64, Direction)]) {

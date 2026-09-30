@@ -3,6 +3,7 @@ compile_error!("porthmos only supports Unix-like platforms (Linux/macOS)");
 
 pub mod config;
 pub mod connections_tree;
+pub mod edit;
 mod engine;
 pub mod error;
 pub mod history;
@@ -192,6 +193,7 @@ impl CoreBuilder {
             bookmarks,
             secrets: self.secrets.unwrap_or_else(secrets::Secrets::native),
             history,
+            edit: self.settings.edit,
         };
 
         let (events, event_receiver) = unbounded_channel();

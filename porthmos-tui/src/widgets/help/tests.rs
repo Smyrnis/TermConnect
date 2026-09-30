@@ -40,3 +40,16 @@ fn lists_open_history() {
     assert!(content.contains("open_history"));
     assert!(content.contains("Ctrl+Y"));
 }
+
+#[test]
+fn lists_edit() {
+    let bindings = KeyBindings::defaults();
+    let backend = TestBackend::new(50, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| render_help(frame, frame.area(), &bindings)).unwrap();
+
+    let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
+
+    assert!(content.contains("F3"));
+    assert!(content.contains("edit"));
+}

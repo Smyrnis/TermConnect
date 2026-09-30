@@ -99,14 +99,19 @@ impl App {
             DialogOutcome::Cancelled => {
                 self.dialog = None;
                 self.reveal = None;
-                if let Some(
-                    PendingAction::SubmitPassword { request_id }
-                    | PendingAction::TrustHostKey { request_id }
-                    | PendingAction::TrustCertificate { request_id },
-                ) = self.pending_action.take()
-                {
-                    self.core.send(Command::Answer { request_id, answer: None, save: false });
-                    self.connection_status = ConnectionStatus::Disconnected;
+                match self.pending_action.take() {
+                    Some(
+                        PendingAction::SubmitPassword { request_id }
+                        | PendingAction::TrustHostKey { request_id }
+                        | PendingAction::TrustCertificate { request_id },
+                    ) => {
+                        self.core.send(Command::Answer { request_id, answer: None, save: false });
+                        self.connection_status = ConnectionStatus::Disconnected;
+                    }
+                    Some(PendingAction::EditUpload { edit_id } | PendingAction::EditConflict { edit_id }) => {
+                        self.core.send(Command::ResolveEdit { edit_id, choice: EditChoice::Cancel });
+                    }
+                    _ => {}
                 }
             }
             DialogOutcome::Confirmed => {
@@ -117,6 +122,10 @@ impl App {
                         self.core.send(Command::DeleteProfile { name });
                     }
                     Some(PendingAction::ClearHistory) => self.core.send(Command::ClearHistory),
+                    Some(PendingAction::QuitWhileSaving) => self.should_quit = true,
+                    Some(PendingAction::EditUpload { edit_id }) => {
+                        self.core.send(Command::ResolveEdit { edit_id, choice: EditChoice::Upload })
+                    }
                     Some(
                         PendingAction::TrustHostKey { request_id } | PendingAction::TrustCertificate { request_id },
                     ) => {
@@ -143,6 +152,9 @@ impl App {
                     | Some(PendingAction::MoveLabels { .. })
                     | Some(PendingAction::ResolveConflict)
                     | Some(PendingAction::ClearHistory)
+                    | Some(PendingAction::EditUpload { .. })
+                    | Some(PendingAction::EditConflict { .. })
+                    | Some(PendingAction::QuitWhileSaving)
                     | None => {}
                 }
             }
@@ -150,6 +162,7 @@ impl App {
                 self.dialog = None;
                 match self.pending_action.take() {
                     Some(PendingAction::FixMissingHost { name }) => self.apply_missing_host_choice(name, index),
+                    Some(PendingAction::EditConflict { edit_id }) => self.answer_edit_conflict(edit_id, index),
                     Some(PendingAction::MoveLabels { from, candidates }) => {
                         self.move_labels_to(from, candidates, index)
                     }

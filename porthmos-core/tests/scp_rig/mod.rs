@@ -105,6 +105,25 @@ impl Rig {
         }
     }
 
+    pub async fn open_for_edit(&mut self, name: &str) -> (u64, PathBuf) {
+        self.core.send(Command::EditFile { location: Location::Session(self.session), path: self.remote(name) });
+        loop {
+            if let Event::EditReady { edit_id, file, .. } = self.event().await {
+                return (edit_id, file);
+            }
+        }
+    }
+
+    pub async fn wait_for_notice(&mut self, containing: &str) {
+        loop {
+            if let Event::Notice { message, .. } = self.event().await
+                && message.contains(containing)
+            {
+                return;
+            }
+        }
+    }
+
     pub fn remote(&self, name: &str) -> PathBuf {
         self.server.root.path().join(name)
     }

@@ -168,6 +168,17 @@ impl PanelView {
         }
     }
 
+    pub fn current_entry(&self) -> Option<&Entry> {
+        match self.rows().get(self.cursor) {
+            Some(Row::Entry(entry)) => Some(entry),
+            _ => None,
+        }
+    }
+
+    pub fn on_parent_row(&self) -> bool {
+        matches!(self.rows().get(self.cursor), Some(Row::Parent))
+    }
+
     pub fn targets(&self) -> Vec<PathBuf> {
         let selected = self.visible_selected();
         if !selected.is_empty() {

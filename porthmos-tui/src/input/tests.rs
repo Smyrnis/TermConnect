@@ -280,3 +280,11 @@ fn ctrl_y_maps_to_open_history() {
     assert_eq!(Action::from_name("open_history"), Some(Action::OpenHistory));
     assert!(ALL_ACTIONS.contains(&Action::OpenHistory));
 }
+
+#[test]
+fn f3_maps_to_edit() {
+    assert_eq!(map_key_via_defaults(KeyCode::F(3)), Action::Edit);
+    assert_eq!(Action::Edit.name(), "edit");
+    assert_eq!(Action::from_name("edit"), Some(Action::Edit));
+    assert!(ALL_ACTIONS.contains(&Action::Edit));
+}

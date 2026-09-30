@@ -21,6 +21,7 @@ fn settings_from_file_accepts_valid_panel_values() {
         },
         frontend: toml::Table::new(),
         transfers: TransferSettingsFile::default(),
+        edit: EditSettingsFile::default(),
     };
 
     let (settings, warnings) = settings_from_file(file);
@@ -37,6 +38,7 @@ fn settings_from_file_falls_back_and_warns_on_an_unknown_sort_key() {
         panel: PanelSettingsFile { show_hidden: None, sort_key: Some("date".to_string()), sort_order: None },
         frontend: toml::Table::new(),
         transfers: TransferSettingsFile::default(),
+        edit: EditSettingsFile::default(),
     };
 
     let (settings, warnings) = settings_from_file(file);
@@ -178,4 +180,38 @@ fn the_example_config_parses_without_warnings() {
 
     assert!(warnings.is_empty(), "{warnings:?}");
     assert_eq!(settings, Settings { frontend: settings.frontend.clone(), ..Settings::default() });
+}
+
+#[test]
+fn edit_settings_default_to_auto_upload_and_no_editor() {
+    let (settings, warnings) = settings_from_file(SettingsFile::default());
+
+    assert!(warnings.is_empty());
+    assert_eq!(settings.edit, EditSettings { auto_upload: true, editor: None });
+}
+
+#[test]
+fn edit_settings_are_read_from_the_file() {
+    let file: SettingsFile = toml::from_str("[edit]\nauto_upload = false\neditor = \"code --wait\"\n").unwrap();
+
+    let (settings, warnings) = settings_from_file(file);
+
+    assert!(warnings.is_empty());
+    assert_eq!(settings.edit, EditSettings { auto_upload: false, editor: Some("code --wait".to_string()) });
+}
+
+#[test]
+fn a_blank_editor_setting_means_unset() {
+    let file: SettingsFile = toml::from_str("[edit]\neditor = \"   \"\n").unwrap();
+
+    let (settings, _) = settings_from_file(file);
+
+    assert_eq!(settings.edit.editor, None);
+    assert!(settings.edit.auto_upload);
+}
+
+#[test]
+fn an_edit_setting_of_the_wrong_type_does_not_parse() {
+    assert!(toml::from_str::<SettingsFile>("[edit]\nauto_upload = \"yes\"\n").is_err());
+    assert!(toml::from_str::<SettingsFile>("[edit]\neditor = 3\n").is_err());
 }

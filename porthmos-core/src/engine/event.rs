@@ -6,6 +6,7 @@ use super::{Location, RequestId, SessionId};
 use crate::{
     Severity,
     config::bookmarks::Bookmark,
+    edit::{EditQuestionKind, EditorCommand},
     history::HistoryEntry,
     profiles::ConnectionEntry,
     transfer::{TransferSnapshot, conflicts::ConflictInfo},
@@ -36,4 +37,7 @@ pub enum Event {
     KeyringWaiting { waiting: bool },
     SaveChoice { save: bool },
     History(Vec<HistoryEntry>),
+    EditReady { edit_id: u64, file: PathBuf, editor: EditorCommand },
+    EditQuestion { edit_id: u64, name: String, kind: EditQuestionKind },
+    EditsBusy(bool),
 }

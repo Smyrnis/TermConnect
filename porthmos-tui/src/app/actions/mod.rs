@@ -4,7 +4,7 @@ use crate::widgets::filter_line::FilterLine;
 impl App {
     pub(super) fn apply_action(&mut self, action: Action) {
         match action {
-            Action::Quit => self.should_quit = true,
+            Action::Quit => self.request_quit(),
             Action::SwitchPanel => self.active_panel.toggle(),
             Action::Mkdir => self.open_mkdir_dialog(),
             Action::Rename => match self.screen {
@@ -18,6 +18,7 @@ impl App {
                 _ => self.open_delete_dialog(),
             },
             Action::Copy => self.start_copy(),
+            Action::Edit => self.start_edit(),
             Action::CancelTransfer => self.core.send(Command::CancelAllTransfers),
             Action::OpenConnections => self.open_connections_screen(),
             Action::AddConnection => self.open_add_connection_dialog(),

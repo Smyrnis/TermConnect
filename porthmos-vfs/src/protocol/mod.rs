@@ -38,6 +38,7 @@ pub struct Environment {
     pub home: Option<PathBuf>,
     pub user: Option<String>,
     pub path: Option<OsString>,
+    pub editor: Option<String>,
 }
 
 impl Environment {
@@ -46,7 +47,12 @@ impl Environment {
             home: std::env::var_os("HOME").map(PathBuf::from),
             user: std::env::var("USER").ok(),
             path: std::env::var_os("PATH"),
+            editor: Self::editor_from(std::env::var("VISUAL").ok(), std::env::var("EDITOR").ok()),
         }
+    }
+
+    pub fn editor_from(visual: Option<String>, editor: Option<String>) -> Option<String> {
+        [visual, editor].into_iter().flatten().find(|value| !value.trim().is_empty())
     }
 }
 

@@ -10,6 +10,7 @@ use futures_util::StreamExt;
 use porthmos_core::{
     Command, CoreHandle, Event, Location, Question, RequestId, Severity, ShellInvocation,
     config::{bookmarks::Bookmark, settings::PanelSettings},
+    edit::{EditChoice, EditQuestionKind},
     profiles::{ConnectionEntry, ConnectionSource},
     transfer::{
         Direction, TransferSnapshot,
@@ -50,6 +51,7 @@ mod bookmarks;
 mod conflicts;
 mod connections;
 mod dialogs;
+mod edit;
 mod filter;
 mod history;
 mod render;
@@ -73,6 +75,9 @@ enum PendingAction {
     MoveLabels { from: String, candidates: Vec<String> },
     ResolveConflict,
     ClearHistory,
+    EditUpload { edit_id: u64 },
+    EditConflict { edit_id: u64 },
+    QuitWhileSaving,
 }
 
 enum Reveal {
@@ -129,6 +134,9 @@ pub struct App {
     search: Option<SearchSession>,
     transfers: TransferSnapshot,
     history: HistoryView,
+    edit_questions: VecDeque<edit::EditPrompt>,
+    open_edit_question: Option<edit::EditPrompt>,
+    edits_busy: bool,
     conflict_prompts: VecDeque<ConflictPrompt>,
     key_bindings: input::KeyBindings,
     bookmarks: Vec<Bookmark>,
@@ -159,6 +167,9 @@ impl App {
             search: None,
             transfers: TransferSnapshot::default(),
             history: HistoryView::new(),
+            edit_questions: VecDeque::new(),
+            open_edit_question: None,
+            edits_busy: false,
             conflict_prompts: VecDeque::new(),
             key_bindings,
             bookmarks: Vec::new(),
@@ -193,6 +204,9 @@ impl App {
                     if let Event::ShellReady { invocation, .. } = core_event {
                         self.launch_shell(terminal, invocation).await?;
                         events = EventStream::new();
+                    } else if let Event::EditReady { edit_id, file, editor } = core_event {
+                        self.launch_editor(terminal, edit_id, file, editor).await?;
+                        events = EventStream::new();
                     } else {
                         self.apply_core_event(core_event);
                     }
@@ -212,6 +226,7 @@ impl App {
             self.help_visible = false;
         } else if self.dialog.is_some() {
             self.apply_dialog_key(key);
+            self.after_dialog_key();
         } else if self.screen == Screen::Search {
             self.apply_search_key(key);
         } else if self.editing_filter() {
@@ -286,10 +301,14 @@ impl App {
             Event::KeyringWaiting { waiting } => self.keyring_waiting = waiting,
             Event::SaveChoice { save } => self.save_choice = save,
             Event::History(entries) => self.history.replace(entries),
+            Event::EditReady { .. } => {}
+            Event::EditsBusy(busy) => self.edits_busy = busy,
+            Event::EditQuestion { edit_id, name, kind } => self.ask_edit_question(edit_id, &name, kind),
         }
     }
 
     fn ask(&mut self, request_id: RequestId, question: Question) {
+        self.requeue_open_edit_question();
         match question {
             Question::Password { username, name } => self.open_password_prompt(request_id, username, name),
             Question::TrustHostKey { name, host, port, key_type, fingerprint } => {

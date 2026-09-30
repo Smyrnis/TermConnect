@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use porthmos_vfs::{Answer, Entry};
 
 use crate::{
+    edit::{EditChoice, EditorExit},
     profiles::ProfileDraft,
     transfer::{conflicts::Resolution, rows::RowKind},
 };
@@ -46,5 +47,8 @@ pub enum Command {
     RemoveBookmark { index: usize },
     ListHistory,
     ClearHistory,
+    EditFile { location: Location, path: PathBuf },
+    FinishEdit { edit_id: u64, exit: EditorExit },
+    ResolveEdit { edit_id: u64, choice: EditChoice },
     Shutdown,
 }

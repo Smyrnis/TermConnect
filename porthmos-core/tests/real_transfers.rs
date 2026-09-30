@@ -7,6 +7,7 @@ use std::{
 
 use porthmos_core::{
     Command, Event,
+    edit::{EditChoice, EditQuestionKind, EditorExit},
     history::{History, HistoryResult},
     transfer::{
         Direction,
@@ -261,4 +262,48 @@ async fn a_file_that_cannot_be_read_is_kept_as_partly_failed() {
     assert_eq!((listed[0].files_done, listed[0].files_total), (1, 2));
     let text = std::fs::read_to_string(rig.state_paths().history_file()).unwrap();
     assert!(!text.to_lowercase().contains("permission denied"), "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_edited_remote_file_is_uploaded_in_place() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::write(rig.remote("script.sh"), b"echo old\n").unwrap();
+    std::fs::set_permissions(rig.remote("script.sh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let before = std::fs::metadata(rig.remote("script.sh")).unwrap();
+    let (edit_id, file) = rig.open_for_edit("script.sh").await;
+    assert_eq!(std::fs::read(&file).unwrap(), b"echo old\n");
+    std::fs::write(&file, b"echo new and longer\n").unwrap();
+
+    rig.core.send(Command::FinishEdit { edit_id, exit: EditorExit::Success });
+    rig.wait_for_notice("Uploaded script.sh").await;
+
+    assert_eq!(std::fs::read(rig.remote("script.sh")).unwrap(), b"echo new and longer\n");
+    let after = std::fs::metadata(rig.remote("script.sh")).unwrap();
+    assert_eq!(after.ino(), before.ino());
+    assert_eq!(after.permissions().mode() & 0o777, 0o755);
+    assert!(!file.exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_remote_file_changed_behind_our_back_asks_and_cancel_keeps_both() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::write(rig.remote("n.txt"), b"original").unwrap();
+    let (edit_id, file) = rig.open_for_edit("n.txt").await;
+    std::fs::write(&file, b"my edit").unwrap();
+    std::fs::write(rig.remote("n.txt"), b"changed by somebody else").unwrap();
+
+    rig.core.send(Command::FinishEdit { edit_id, exit: EditorExit::Success });
+    loop {
+        if let Event::EditQuestion { kind, .. } = rig.event().await {
+            assert_eq!(kind, EditQuestionKind::Conflict);
+            break;
+        }
+    }
+    rig.core.send(Command::ResolveEdit { edit_id, choice: EditChoice::Cancel });
+    rig.wait_for_notice("your changes are kept in").await;
+
+    assert_eq!(std::fs::read(rig.remote("n.txt")).unwrap(), b"changed by somebody else");
+    assert_eq!(std::fs::read(&file).unwrap(), b"my edit");
 }

@@ -17,6 +17,15 @@ max_parallel = 4
 # "ask", "overwrite", "skip" or "rename".
 on_conflict = "ask"
 
+[edit]
+# Upload an edited remote file as soon as the editor exits. When false,
+# Porthmos asks first. A remote file that changed while you edited is always
+# asked about.
+auto_upload = true
+# Editor command; empty means $VISUAL, then $EDITOR, then "vi". The editor
+# must wait until you close the file ("code --wait", not "code").
+editor = ""
+
 # Key bindings. A key is written as a name ("f5", "tab", "enter", "esc",
 # "space", "up", "down", "left", "right", "home", "end", "backspace",
 # "delete" or a single character), optionally prefixed with "ctrl+", "alt+"
@@ -47,5 +56,6 @@ open_search = "ctrl+f"
 filter = "/"
 open_transfers = "ctrl+t"
 open_history = "ctrl+y"
+edit = "f3"
 cycle_session = "ctrl+n"
 help = "f1"

@@ -72,6 +72,10 @@ impl Paths {
         self.state_dir.join("history.toml")
     }
 
+    pub fn edit_dir(&self) -> PathBuf {
+        self.state_dir.join("edit")
+    }
+
     pub fn log_file(&self) -> PathBuf {
         self.state_dir.join("porthmos.log")
     }

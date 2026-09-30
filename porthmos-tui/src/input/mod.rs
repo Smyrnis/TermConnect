@@ -15,6 +15,7 @@ pub enum Action {
     Delete,
     Refresh,
     Copy,
+    Edit,
     CancelTransfer,
     OpenConnections,
     AddConnection,
@@ -48,6 +49,7 @@ impl Action {
             Action::Delete => "delete",
             Action::Refresh => "refresh",
             Action::Copy => "copy",
+            Action::Edit => "edit",
             Action::CancelTransfer => "cancel_transfer",
             Action::OpenConnections => "open_connections",
             Action::AddConnection => "add_connection",
@@ -81,6 +83,7 @@ impl Action {
             "delete" => Action::Delete,
             "refresh" => Action::Refresh,
             "copy" => Action::Copy,
+            "edit" => Action::Edit,
             "cancel_transfer" => Action::CancelTransfer,
             "open_connections" => Action::OpenConnections,
             "add_connection" => Action::AddConnection,
@@ -223,6 +226,7 @@ impl KeyBindings {
         bind(Action::Open, KeyCode::Enter, KeyModifiers::NONE);
         bind(Action::ToggleSelect, KeyCode::Char(' '), KeyModifiers::NONE);
         bind(Action::Rename, KeyCode::F(2), KeyModifiers::NONE);
+        bind(Action::Edit, KeyCode::F(3), KeyModifiers::NONE);
         bind(Action::OpenTerminal, KeyCode::F(4), KeyModifiers::NONE);
         bind(Action::Copy, KeyCode::F(5), KeyModifiers::NONE);
         bind(Action::Mkdir, KeyCode::F(7), KeyModifiers::NONE);
@@ -311,6 +315,7 @@ pub const ALL_ACTIONS: &[Action] = &[
     Action::Delete,
     Action::Refresh,
     Action::Copy,
+    Action::Edit,
     Action::CancelTransfer,
     Action::OpenConnections,
     Action::AddConnection,

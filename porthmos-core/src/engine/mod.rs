@@ -20,7 +20,10 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::{
     Paths, Severity,
-    config::{bookmarks::Bookmarks, settings::TransferSettings},
+    config::{
+        bookmarks::Bookmarks,
+        settings::{EditSettings, TransferSettings},
+    },
     history::History,
     profiles::ConnectionEntry,
     secrets::Secrets,
@@ -56,6 +59,7 @@ pub(crate) enum Internal {
         message: String,
     },
     Transfer(TransferEvent),
+    Edit(handlers::EditEvent),
     KeyringProbed {
         available: bool,
     },
@@ -111,6 +115,7 @@ pub(crate) struct Engine {
     last_progress_publish: Option<Instant>,
     secrets: Secrets,
     history: handlers::HistoryLog,
+    edit: handlers::EditState,
     keyring_jobs: Option<UnboundedSender<handlers::KeyringJob>>,
     next_keyring_job: u64,
     latest_keyring_job: HashMap<String, u64>,
@@ -126,6 +131,7 @@ pub(crate) struct EngineParts {
     pub(crate) bookmarks: Bookmarks,
     pub(crate) secrets: Secrets,
     pub(crate) history: History,
+    pub(crate) edit: EditSettings,
 }
 
 impl Engine {
@@ -156,6 +162,7 @@ impl Engine {
             last_progress_publish: None,
             secrets: parts.secrets,
             history: handlers::HistoryLog::new(parts.history),
+            edit: handlers::EditState::new(parts.edit),
             keyring_jobs: None,
             next_keyring_job: 0,
             latest_keyring_job: HashMap::new(),
@@ -207,8 +214,12 @@ impl Engine {
             Command::RemoveBookmark { index } => self.remove_bookmark(index),
             Command::ListHistory => self.publish_history(),
             Command::ClearHistory => self.clear_history(),
+            Command::EditFile { location, path } => self.edit_file(location, path),
+            Command::FinishEdit { edit_id, exit } => self.finish_edit(edit_id, exit),
+            Command::ResolveEdit { edit_id, choice } => self.resolve_edit(edit_id, choice),
             Command::Shutdown => {}
         }
+        self.publish_edit_busy();
         self.publish_transfers();
     }
 
@@ -219,6 +230,7 @@ impl Engine {
                 self.connecting.remove(&name);
                 self.emit(Event::ConnectFailed { name, message })
             }
+            Internal::Edit(event) => self.handle_edit_event(event),
             Internal::KeyringProbed { available } => self.emit(Event::KeyringStatus { available }),
             Internal::KeyringDone(done) => self.finish_keyring_job(done),
             Internal::Transfer(TransferEvent::Progress { id, transferred }) => {
@@ -235,6 +247,7 @@ impl Engine {
             }
             Internal::Transfer(event) => self.handle_transfer_event(event),
         }
+        self.publish_edit_busy();
         self.publish_transfers();
     }
 

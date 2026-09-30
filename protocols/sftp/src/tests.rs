@@ -10,7 +10,7 @@ fn discover_fills_missing_fields_from_the_environment() {
     std::fs::create_dir(dir.path().join(".ssh")).unwrap();
     std::fs::write(dir.path().join(".ssh/config"), "Host box\n  HostName 10.0.0.2\n  IdentityFile ~/.ssh/id\n")
         .unwrap();
-    let env = Environment { home: Some(dir.path().into()), user: Some("alice".into()), path: None };
+    let env = Environment { home: Some(dir.path().into()), user: Some("alice".into()), path: None, editor: None };
 
     let targets = Sftp.discover(&env).unwrap();
 
@@ -30,7 +30,7 @@ fn discover_falls_back_to_root_when_no_user_is_known() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join(".ssh")).unwrap();
     std::fs::write(dir.path().join(".ssh/config"), "Host box\n").unwrap();
-    let env = Environment { home: Some(dir.path().into()), user: None, path: None };
+    let env = Environment { home: Some(dir.path().into()), user: None, path: None, editor: None };
 
     let targets = Sftp.discover(&env).unwrap();
 
@@ -76,7 +76,12 @@ fn shell_command_is_always_available_for_sftp() {
         password: None,
         options: Default::default(),
     };
-    let env = Environment { home: None, user: None, path: Some(Path::new("/nonexistent").as_os_str().to_owned()) };
+    let env = Environment {
+        home: None,
+        user: None,
+        path: Some(Path::new("/nonexistent").as_os_str().to_owned()),
+        editor: None,
+    };
 
     let invocation = Sftp.shell_command(&target, &env).unwrap();
 
@@ -91,6 +96,7 @@ fn home_with_ssh_config(config: &str) -> (tempfile::TempDir, Environment) {
         home: Some(dir.path().into()),
         user: Some("alice".into()),
         path: Some(Path::new("/nonexistent").as_os_str().to_owned()),
+        editor: None,
     };
     (dir, env)
 }

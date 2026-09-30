@@ -1,5 +1,6 @@
 mod bookmarks;
 mod connect;
+mod edit;
 mod fs;
 mod history;
 mod profiles;
@@ -9,6 +10,7 @@ mod transfer;
 
 use std::fmt::Display;
 
+pub(crate) use edit::{EditEvent, EditState};
 pub(crate) use history::HistoryLog;
 pub(crate) use profiles::{KeyringDone, KeyringJob};
 
