@@ -13,6 +13,13 @@ impl KeyringBackend {
         Self { store: OnceLock::new() }
     }
 
+    #[cfg(test)]
+    fn with_store(store: Arc<CredentialStore>) -> Self {
+        let cell = OnceLock::new();
+        let _ = cell.set(Ok(store));
+        Self { store: cell }
+    }
+
     fn store(&self) -> Result<&Arc<CredentialStore>, SecretError> {
         let opened = self.store.get_or_init(|| {
             open_store().map_err(|err| {
@@ -25,6 +32,14 @@ impl KeyringBackend {
 
     fn entry(&self, account: &str) -> Result<Entry, SecretError> {
         self.store()?.build(SERVICE, account, None).map_err(backend_error)
+    }
+}
+
+impl Drop for KeyringBackend {
+    fn drop(&mut self) {
+        if let Some(Ok(store)) = self.store.take() {
+            std::thread::spawn(move || drop(store));
+        }
     }
 }
 
@@ -67,3 +82,6 @@ impl SecretBackend for KeyringBackend {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
