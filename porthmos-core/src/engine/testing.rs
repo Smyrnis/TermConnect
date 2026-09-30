@@ -46,6 +46,7 @@ fn engine_with(secrets: Secrets) -> TestEngine {
         secrets,
         history,
         edit: crate::config::settings::EditSettings::default(),
+        publish_interval: std::time::Duration::ZERO,
     };
     TestEngine { engine: Engine::new(parts, events_tx, internal_tx), events, internal, dir }
 }

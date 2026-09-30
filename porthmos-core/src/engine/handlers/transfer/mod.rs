@@ -103,7 +103,7 @@ impl Engine {
         let display_name = job.display_name.clone();
 
         let Some((source, destination)) = self.filesystems_for(session_id, job.direction) else {
-            if let Some(job) = self.transfers.get_mut(id) {
+            if let Some(mut job) = self.transfers.get_mut(id) {
                 job.status = JobStatus::Failed("session disconnected".to_string());
             }
             self.notice(Severity::Error, format!("Transfer failed: {display_name} \u{2014} session disconnected"));
@@ -111,7 +111,7 @@ impl Engine {
             return;
         };
 
-        let Some(job) = self.transfers.get_mut(id) else {
+        let Some(mut job) = self.transfers.get_mut(id) else {
             return;
         };
         job.status = JobStatus::InProgress;
@@ -160,13 +160,13 @@ impl Engine {
     pub(crate) fn handle_transfer_event(&mut self, event: TransferEvent) {
         match event {
             TransferEvent::Progress { id, transferred } => {
-                if let Some(job) = self.transfers.get_mut(id) {
+                if let Some(mut job) = self.transfers.get_mut(id) {
                     job.transferred_bytes = transferred;
                 }
             }
             TransferEvent::Finished { id, outcome } => {
                 self.transfer_cancels.remove(&id);
-                if let Some(job) = self.transfers.get_mut(id) {
+                if let Some(mut job) = self.transfers.get_mut(id) {
                     job.status = match outcome {
                         TransferOutcome::Completed => JobStatus::Completed,
                         TransferOutcome::Cancelled => JobStatus::Cancelled,
@@ -177,7 +177,7 @@ impl Engine {
             }
             TransferEvent::Failed { id, message } => {
                 let cancelled = self.transfer_cancels.remove(&id).is_some_and(|cancel| cancel.load(Ordering::Relaxed));
-                if let Some(job) = self.transfers.get_mut(id) {
+                if let Some(mut job) = self.transfers.get_mut(id) {
                     job.status = if cancelled { JobStatus::Cancelled } else { JobStatus::Failed(message.clone()) };
                 }
                 let retried = !cancelled && self.transfers.retry_or_give_up(id);
@@ -301,7 +301,7 @@ impl Engine {
                 file.size,
                 Some(batch_id),
             );
-            if resume && let Some(job) = self.transfers.get_mut(id) {
+            if resume && let Some(mut job) = self.transfers.get_mut(id) {
                 job.resume = true;
             }
         }
@@ -367,7 +367,7 @@ impl Engine {
             cancel.store(true, Ordering::Relaxed);
         }
         let mut cancelled_destinations: Vec<(u64, Direction)> = Vec::new();
-        for job in self.transfers.jobs().filter(|job| job.status == JobStatus::Queued) {
+        for job in self.transfers.queued_jobs() {
             let destination = (job.session_id, job.direction);
             if !cancelled_destinations.contains(&destination) {
                 cancelled_destinations.push(destination);
@@ -401,24 +401,18 @@ impl Engine {
         session_scans.len() + active_ids.len()
     }
 
-    fn row(&self, kind: RowKind) -> Option<QueueRow> {
-        self.snapshot().rows.into_iter().find(|row| row.kind == kind)
-    }
-
     pub(crate) fn cancel_row(&mut self, kind: RowKind) {
-        let Some(row) = self.row(kind) else {
-            return;
-        };
-        if let RowKind::Scan(batch_id) = row.kind {
+        if let RowKind::Scan(batch_id) = kind {
             for scan in self.planning.iter().filter(|scan| scan.batch_id == batch_id) {
                 scan.cancel.store(true, Ordering::Relaxed);
             }
             self.drop_conflict_reviews(|review| review.batch_id == batch_id);
             return;
         }
+        let ids: Vec<u64> = self.transfers.jobs_of(kind).iter().map(|job| job.id).collect();
         let mut cancelled_destinations: Vec<(u64, Direction)> = Vec::new();
-        for id in &row.job_ids {
-            let Some(job) = self.transfers.get_mut(*id) else {
+        for id in &ids {
+            let Some(mut job) = self.transfers.get_mut(*id) else {
                 continue;
             };
             match job.status {
@@ -441,30 +435,35 @@ impl Engine {
     }
 
     pub(crate) fn retry_row(&mut self, kind: RowKind) {
-        let Some(row) = self.row(kind) else {
-            return;
-        };
-        let retryable: Vec<&TransferJob> = row
-            .job_ids
+        let retryable: Vec<u64> = self
+            .transfers
+            .jobs_of(kind)
             .iter()
-            .filter_map(|id| self.transfers.get(*id))
             .filter(|job| matches!(job.status, JobStatus::Failed(_) | JobStatus::Cancelled))
+            .map(|job| job.id)
             .collect();
-        let Some(session_id) = retryable.first().map(|job| job.session_id) else {
+        let Some(session_id) = retryable.first().and_then(|id| self.transfers.get(*id)).map(|job| job.session_id)
+        else {
             return;
         };
         if !self.sessions.contains_key(&session_id) {
             self.notice(Severity::Warning, "Can't retry: session disconnected");
             return;
         }
-        if self.transfers.retry_jobs(&row.job_ids) > 0 {
+        if self.transfers.retry_jobs(&retryable) > 0 {
             self.fill_transfer_slots();
         }
     }
 
     pub(crate) fn clear_finished_rows(&mut self) {
-        let finished_ids: Vec<u64> =
-            self.snapshot().rows.into_iter().filter(QueueRow::is_finished).flat_map(|row| row.job_ids).collect();
+        let finished_ids: Vec<u64> = self
+            .transfers
+            .rows()
+            .into_iter()
+            .filter(QueueRow::is_finished)
+            .flat_map(|row| self.transfers.jobs_of(row.kind).into_iter().map(|job| job.id).collect::<Vec<_>>())
+            .collect();
+
         let interrupted: Vec<TransferJob> = finished_ids
             .iter()
             .filter_map(|id| self.transfers.get(*id))

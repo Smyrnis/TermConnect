@@ -624,3 +624,121 @@ fn a_retry_entry_counts_only_what_that_attempt_did() {
     assert_eq!((entries[1].files_done, entries[1].files_total, entries[1].bytes), (1, 1, 100));
     assert!(entries[1].failed_files.is_empty());
 }
+
+#[test]
+fn a_finished_row_is_recorded_when_its_change_is_processed_without_building_a_snapshot() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    job(&mut t, session, "a", None, JobStatus::Completed);
+
+    t.engine.process_row_changes();
+
+    assert_eq!(recorded(&t).len(), 1);
+    assert!(!t.drain().iter().any(|event| matches!(event, Event::TransfersChanged(_))));
+}
+
+#[test]
+fn processing_twice_records_a_row_once() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    job(&mut t, session, "a", None, JobStatus::Completed);
+
+    t.engine.process_row_changes();
+    t.engine.process_row_changes();
+
+    assert_eq!(recorded(&t).len(), 1);
+}
+
+#[test]
+fn a_finish_reopen_finish_burst_inside_one_drain_is_recorded_once() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    let batch = t.engine.transfers.start_batch("docs".to_string());
+    job(&mut t, session, "a", Some(batch), JobStatus::Completed);
+    job(&mut t, session, "b", Some(batch), JobStatus::Failed("boom".to_string()));
+
+    t.engine.process_row_changes();
+
+    let entries = recorded(&t);
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].result, HistoryResult::PartlyFailed { failed: 1 });
+}
+
+#[test]
+fn a_row_that_reopens_before_the_drain_is_not_recorded_until_it_finishes() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    let id = job(&mut t, session, "a", None, JobStatus::Failed("boom".to_string()));
+    t.engine.transfers.retry_jobs(&[id]);
+
+    t.engine.process_row_changes();
+
+    assert!(recorded(&t).is_empty());
+    t.engine.transfers.get_mut(id).unwrap().status = JobStatus::Completed;
+    t.engine.process_row_changes();
+    assert_eq!(recorded(&t).len(), 1);
+}
+
+#[test]
+fn a_row_cleared_before_the_drain_leaves_no_entry_and_no_stale_marks() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    let id = job(&mut t, session, "a", None, JobStatus::Completed);
+    t.engine.transfers.remove_jobs(&[id]);
+
+    t.engine.process_row_changes();
+
+    assert!(recorded(&t).is_empty());
+    assert!(t.engine.history.recorded.is_empty());
+    assert!(t.engine.history.counted.is_empty());
+}
+
+#[test]
+fn unprocessed_finished_rows_are_recorded_before_the_interrupted_ones() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    job(&mut t, session, "done.txt", None, JobStatus::Completed);
+    job(&mut t, session, "running.txt", None, JobStatus::InProgress);
+
+    t.engine.record_interrupted();
+
+    let results: Vec<(String, HistoryResult)> =
+        recorded(&t).into_iter().map(|entry| (entry.label, entry.result)).collect();
+    assert_eq!(
+        results,
+        vec![("done.txt".to_string(), HistoryResult::Done), ("running.txt".to_string(), HistoryResult::Interrupted)]
+    );
+}
+
+#[test]
+fn finishing_a_huge_batch_costs_the_same_per_event_as_a_small_one() {
+    fn total_time(jobs: usize) -> f64 {
+        let mut t = test_engine();
+        let (session, _fs) = t.add_session("prod");
+        let batch = t.engine.transfers.start_batch("big".to_string());
+        let ids: Vec<u64> = (0..jobs)
+            .map(|index| {
+                t.engine.transfers.enqueue(
+                    session,
+                    Direction::Upload,
+                    PathBuf::from(format!("/local/f{index}")),
+                    format!("/remote/f{index}"),
+                    format!("f{index}"),
+                    10,
+                    Some(batch),
+                )
+            })
+            .collect();
+        let start = std::time::Instant::now();
+        for id in &ids {
+            t.engine.transfers.get_mut(*id).unwrap().status = JobStatus::Completed;
+            t.engine.process_row_changes();
+        }
+        start.elapsed().as_secs_f64() / jobs as f64
+    }
+
+    let small = (0..3).map(|_| total_time(1_000)).fold(f64::MAX, f64::min);
+    let large = (0..3).map(|_| total_time(50_000)).fold(f64::MAX, f64::min);
+
+    assert!(large < small * 30.0, "per event: {small:.9}s for 1k jobs, {large:.9}s for 50k jobs");
+}

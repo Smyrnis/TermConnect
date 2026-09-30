@@ -10,7 +10,7 @@ use crate::{
     Severity,
     history::{History, HistoryEntry, HistoryResult, MAX_FAILED_FILES},
     transfer::{
-        Direction, JobStatus, TransferJob,
+        Direction, JobStatus, RowChange, TransferJob,
         rows::{QueueRow, RowKind, RowState},
     },
 };
@@ -124,42 +124,64 @@ impl Engine {
         }
     }
 
-    pub(crate) fn record_finished_rows(&mut self, rows: &[QueueRow]) {
-        let mut recorded_any = false;
-        for row in rows {
-            if !row.is_finished() {
-                self.history.recorded.remove(&row.kind);
-            } else if self.history.recorded.insert(row.kind) {
-                let entry = self.entry_for_row(row);
-                self.log_failed_jobs(row, &entry.connection);
-                let completed = self.completed_ids(row);
-                self.history.counted.insert(row.kind, completed);
-                self.store_entry(entry);
-                recorded_any = true;
+    pub(crate) fn process_row_changes(&mut self) {
+        let changes = self.transfers.take_changes();
+        if changes.is_empty() {
+            return;
+        }
+        let mut seen: HashSet<RowKind> = HashSet::new();
+        let mut kinds: Vec<RowKind> = Vec::new();
+        for change in changes {
+            let kind = match change {
+                RowChange::Finished(kind) | RowChange::Reopened(kind) | RowChange::Removed(kind) => kind,
+            };
+            if seen.insert(kind) {
+                kinds.push(kind);
             }
         }
-        self.history.recorded.retain(|kind| rows.iter().any(|row| row.kind == *kind));
-        self.history.counted.retain(|kind, _| rows.iter().any(|row| row.kind == *kind));
+        let mut recorded_any = false;
+        for kind in kinds {
+            match self.transfers.row(kind) {
+                None => {
+                    self.history.recorded.remove(&kind);
+                    self.history.counted.remove(&kind);
+                }
+                Some(row) if row.is_finished() => {
+                    if self.history.recorded.insert(kind) {
+                        let entry = self.entry_for_row(&row);
+                        self.log_failed_jobs(&row, &entry.connection);
+                        let completed = self.completed_ids(&row);
+                        self.history.counted.insert(kind, completed);
+                        self.store_entry(entry);
+                        recorded_any = true;
+                    }
+                }
+                Some(_) => {
+                    self.history.recorded.remove(&kind);
+                }
+            }
+        }
         if recorded_any {
             self.publish_history();
         }
     }
 
     fn completed_ids(&self, row: &QueueRow) -> HashSet<u64> {
-        row.job_ids
-            .iter()
-            .copied()
-            .filter(|id| self.transfers.get(*id).is_some_and(|job| job.status == JobStatus::Completed))
+        self.transfers
+            .jobs_of(row.kind)
+            .into_iter()
+            .filter(|job| job.status == JobStatus::Completed)
+            .map(|job| job.id)
             .collect()
     }
 
     pub(crate) fn entry_for_row(&self, row: &QueueRow) -> HistoryEntry {
         let earlier = self.history.counted.get(&row.kind);
-        let jobs: Vec<&TransferJob> = row
-            .job_ids
-            .iter()
-            .filter(|id| earlier.is_none_or(|counted| !counted.contains(id)))
-            .filter_map(|id| self.transfers.get(*id))
+        let jobs: Vec<&TransferJob> = self
+            .transfers
+            .jobs_of(row.kind)
+            .into_iter()
+            .filter(|job| earlier.is_none_or(|counted| !counted.contains(&job.id)))
             .collect();
         let session_id = jobs.first().map(|job| job.session_id).or_else(|| match row.kind {
             RowKind::Scan(batch_id) => self.scan_session(batch_id),
@@ -199,6 +221,7 @@ impl Engine {
     }
 
     pub(crate) fn record_interrupted(&mut self) {
+        self.process_row_changes();
         let rows = self.snapshot().rows;
         for row in rows.iter().filter(|row| !row.is_finished()) {
             if self.history.recorded.insert(row.kind) {
@@ -210,10 +233,8 @@ impl Engine {
     }
 
     fn log_failed_jobs(&self, row: &QueueRow, connection: &str) {
-        for id in &row.job_ids {
-            if let Some(job) = self.transfers.get(*id)
-                && let JobStatus::Failed(message) = &job.status
-            {
+        for job in self.transfers.jobs_of(row.kind) {
+            if let JobStatus::Failed(message) = &job.status {
                 tracing::error!(target: "porthmos::transfers", connection = %connection, file = %job.display_name, "{message}");
             }
         }

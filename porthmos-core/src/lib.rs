@@ -194,6 +194,7 @@ impl CoreBuilder {
             secrets: self.secrets.unwrap_or_else(secrets::Secrets::native),
             history,
             edit: self.settings.edit,
+            publish_interval: engine::PROGRESS_SNAPSHOT_INTERVAL,
         };
 
         let (events, event_receiver) = unbounded_channel();

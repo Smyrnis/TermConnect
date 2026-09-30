@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use super::*;
+use crate::transfer::JobStatus;
 
 fn job(queue: &mut TransferQueue, name: &str, batch_id: Option<u64>, status: JobStatus) -> u64 {
     let id = queue.enqueue(
@@ -12,7 +13,7 @@ fn job(queue: &mut TransferQueue, name: &str, batch_id: Option<u64>, status: Job
         100,
         batch_id,
     );
-    let job = queue.get_mut(id).unwrap();
+    let mut job = queue.get_mut(id).unwrap();
     if status == JobStatus::Completed {
         job.transferred_bytes = 100;
     }
@@ -45,7 +46,10 @@ fn a_batch_is_one_row_and_singles_are_their_own_rows_in_queue_order() {
         vec![RowKind::Single(single_before), RowKind::Batch(batch_id), RowKind::Single(single_between)]
     );
     assert_eq!(rows[1].label, "photos");
-    assert_eq!(rows[1].job_ids, vec![first_in_batch, second_in_batch]);
+    assert_eq!(
+        queue.jobs_of(RowKind::Batch(batch_id)).iter().map(|job| job.id).collect::<Vec<_>>(),
+        vec![first_in_batch, second_in_batch]
+    );
     assert_eq!((rows[1].files_done, rows[1].files_total, rows[1].bytes_done, rows[1].bytes_total), (1, 2, 100, 200));
     assert_eq!(rows[0].label, "before.txt");
 }
@@ -63,7 +67,7 @@ fn a_batch_without_a_stored_label_uses_its_first_files_name() {
 
     assert_eq!(rows.iter().find(|row| row.kind == RowKind::Batch(batch_id)).unwrap().label, "sub/b.jpg");
     assert!(rows.iter().any(|row| row.kind == RowKind::Single(other)));
-    assert_eq!(rows.iter().find(|row| row.kind == RowKind::Batch(batch_id)).unwrap().job_ids, vec![new_only]);
+    assert_eq!(queue.jobs_of(RowKind::Batch(batch_id)).iter().map(|job| job.id).collect::<Vec<_>>(), vec![new_only]);
 }
 
 #[test]
@@ -94,7 +98,6 @@ fn scans_are_appended_as_scanning_rows() {
     assert_eq!(rows[1].label, "photos");
     assert_eq!(rows[1].direction, Direction::Download);
     assert_eq!(rows[1].state, RowState::Scanning);
-    assert!(rows[1].job_ids.is_empty());
 }
 
 #[test]

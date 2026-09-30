@@ -102,7 +102,7 @@ fn transfer_status_text_shows_batch_progress_for_a_batch_job() {
         Some(batch_id),
     );
     {
-        let job = queue.get_mut(active).unwrap();
+        let mut job = queue.get_mut(active).unwrap();
         job.status = JobStatus::InProgress;
         job.transferred_bytes = 50;
     }
@@ -128,7 +128,7 @@ fn transfer_status_text_is_unchanged_for_a_non_batch_job() {
         None,
     );
     {
-        let job = queue.get_mut(active).unwrap();
+        let mut job = queue.get_mut(active).unwrap();
         job.status = JobStatus::InProgress;
         job.transferred_bytes = 50;
     }
@@ -176,7 +176,7 @@ fn active_job(
         total_bytes,
         batch_id,
     );
-    let job = queue.get_mut(id).unwrap();
+    let mut job = queue.get_mut(id).unwrap();
     job.status = JobStatus::InProgress;
     job.transferred_bytes = transferred_bytes;
     id

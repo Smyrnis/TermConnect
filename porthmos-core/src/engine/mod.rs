@@ -35,7 +35,7 @@ use crate::{
     },
 };
 
-const PROGRESS_SNAPSHOT_INTERVAL: Duration = Duration::from_millis(100);
+pub(crate) const PROGRESS_SNAPSHOT_INTERVAL: Duration = Duration::from_millis(100);
 
 pub(crate) enum TransferEvent {
     Progress { id: u64, transferred: u64 },
@@ -113,6 +113,8 @@ pub(crate) struct Engine {
     bookmarks: Bookmarks,
     published: TransferSnapshot,
     last_progress_publish: Option<Instant>,
+    publish_interval: Duration,
+    transfers_dirty: bool,
     secrets: Secrets,
     history: handlers::HistoryLog,
     edit: handlers::EditState,
@@ -132,6 +134,7 @@ pub(crate) struct EngineParts {
     pub(crate) secrets: Secrets,
     pub(crate) history: History,
     pub(crate) edit: EditSettings,
+    pub(crate) publish_interval: Duration,
 }
 
 impl Engine {
@@ -160,6 +163,8 @@ impl Engine {
             bookmarks: parts.bookmarks,
             published: TransferSnapshot::default(),
             last_progress_publish: None,
+            publish_interval: parts.publish_interval,
+            transfers_dirty: false,
             secrets: parts.secrets,
             history: handlers::HistoryLog::new(parts.history),
             edit: handlers::EditState::new(parts.edit),
@@ -174,13 +179,18 @@ impl Engine {
         mut self, mut commands: UnboundedReceiver<Command>, mut internal: UnboundedReceiver<Internal>,
     ) {
         loop {
+            let flush_at = self.flush_deadline();
             tokio::select! {
                 command = commands.recv() => match command {
                     Some(Command::Shutdown) | None => break,
                     Some(command) => self.handle_command(command),
                 },
                 Some(done) = internal.recv() => self.handle_internal(done),
+                () = sleep_until_or_pending(flush_at) => self.publish_transfers(),
             }
+        }
+        if self.transfers_dirty {
+            self.publish_transfers();
         }
     }
 
@@ -219,8 +229,9 @@ impl Engine {
             Command::ResolveEdit { edit_id, choice } => self.resolve_edit(edit_id, choice),
             Command::Shutdown => {}
         }
+        self.process_row_changes();
         self.publish_edit_busy();
-        self.publish_transfers();
+        self.request_publish();
     }
 
     pub(crate) fn handle_internal(&mut self, done: Internal) {
@@ -234,21 +245,17 @@ impl Engine {
             Internal::KeyringProbed { available } => self.emit(Event::KeyringStatus { available }),
             Internal::KeyringDone(done) => self.finish_keyring_job(done),
             Internal::Transfer(TransferEvent::Progress { id, transferred }) => {
-                if let Some(job) = self.transfers.get_mut(id) {
+                if let Some(mut job) = self.transfers.get_mut(id) {
                     job.transferred_bytes = transferred;
                 }
-                let due = self
-                    .last_progress_publish
-                    .is_none_or(|published_at| published_at.elapsed() >= PROGRESS_SNAPSHOT_INTERVAL);
-                if due {
-                    self.publish_transfers();
-                }
+                self.request_publish();
                 return;
             }
             Internal::Transfer(event) => self.handle_transfer_event(event),
         }
+        self.process_row_changes();
         self.publish_edit_busy();
-        self.publish_transfers();
+        self.request_publish();
     }
 
     fn emit(&self, event: Event) {
@@ -289,15 +296,43 @@ impl Engine {
     }
 
     fn publish_transfers(&mut self) {
+        self.process_row_changes();
+        self.transfers_dirty = false;
+        self.last_progress_publish = Some(Instant::now());
         let snapshot = self.snapshot();
-        self.record_finished_rows(&snapshot.rows);
         if snapshot != self.published {
             self.published = snapshot.clone();
-            self.last_progress_publish = Some(Instant::now());
             self.emit(Event::TransfersChanged(snapshot));
         }
+    }
+
+    fn request_publish(&mut self) {
+        let due = self.publish_interval.is_zero()
+            || self.last_progress_publish.is_none_or(|published_at| published_at.elapsed() >= self.publish_interval);
+        if due {
+            self.publish_transfers();
+        } else {
+            self.transfers_dirty = true;
+        }
+    }
+
+    fn flush_deadline(&self) -> Option<Instant> {
+        if !self.transfers_dirty {
+            return None;
+        }
+        self.last_progress_publish.map(|published_at| published_at + self.publish_interval)
+    }
+}
+
+async fn sleep_until_or_pending(deadline: Option<Instant>) {
+    match deadline {
+        Some(deadline) => tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await,
+        None => std::future::pending().await,
     }
 }
 
 #[cfg(test)]
 pub(crate) mod testing;
+
+#[cfg(test)]
+mod tests;

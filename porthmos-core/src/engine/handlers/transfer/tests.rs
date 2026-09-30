@@ -554,6 +554,7 @@ fn a_ready_plan_keeps_its_label_only_when_it_has_files() {
 #[test]
 fn progress_events_update_the_job_and_are_published_at_most_every_interval() {
     let mut t = test_engine();
+    t.engine.publish_interval = std::time::Duration::from_secs(30);
     let job = enqueue_job(&mut t, 1, "a.txt", None);
     mark_active(&mut t, job);
     t.engine.publish_transfers();
@@ -567,6 +568,8 @@ fn progress_events_update_the_job_and_are_published_at_most_every_interval() {
     assert_eq!(snapshots, 0, "progress right after a publish is held back");
     t.engine
         .handle_internal(Internal::Transfer(TransferEvent::Finished { id: job, outcome: TransferOutcome::Completed }));
+    assert!(t.engine.flush_deadline().is_some(), "the finish is published by the trailing flush");
+    t.engine.publish_transfers();
     assert!(
         t.drain().iter().any(|event| matches!(event, Event::TransfersChanged(snapshot) if snapshot.active.is_empty()))
     );

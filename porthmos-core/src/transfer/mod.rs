@@ -8,5 +8,5 @@ pub mod snapshot;
 
 pub use execute::{TransferOutcome, execute as run};
 pub use job::{Direction, JobStatus, TransferJob};
-pub use queue::TransferQueue;
+pub use queue::{RowChange, TransferQueue};
 pub use snapshot::{ActiveJob, TransferSnapshot};

@@ -170,3 +170,43 @@ async fn the_history_is_empty_until_something_is_transferred() {
 
     assert!(entries.is_empty());
 }
+
+#[tokio::test]
+async fn a_big_copy_publishes_far_fewer_snapshots_than_files_and_ends_on_the_final_one() {
+    let mut harness = support::start();
+    let mut entries = Vec::new();
+    for index in 0..300 {
+        let path = format!("/home/user/f{index}.bin");
+        harness.remote.file(&path, b"data", Some(1));
+        entries.push(Entry {
+            name: format!("f{index}.bin"),
+            path: PathBuf::from(path),
+            is_dir: false,
+            size: 4,
+            permissions: None,
+        });
+    }
+    let session = harness.connect().await;
+
+    harness.core.send(Command::Copy {
+        from: Location::Session(session),
+        entries,
+        to: Location::Local,
+        dest_dir: harness.local.path().to_path_buf(),
+    });
+    let started = std::time::Instant::now();
+    let mut snapshots = 0;
+    loop {
+        let event = harness.next(|event| Some(event.clone())).await;
+        if let Event::TransfersChanged(snapshot) = event {
+            snapshots += 1;
+            if snapshot.rows.first().is_some_and(|row| row.state == RowState::Done) {
+                break;
+            }
+        }
+    }
+
+    let allowed = started.elapsed().as_millis() as usize / 100 + 6;
+    assert!(snapshots <= allowed, "{snapshots} snapshots in {:?} for 300 files", started.elapsed());
+    assert_eq!(std::fs::read_dir(harness.local.path()).unwrap().count(), 300);
+}

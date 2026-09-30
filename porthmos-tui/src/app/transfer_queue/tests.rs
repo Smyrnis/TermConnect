@@ -131,7 +131,7 @@ fn clearing_keeps_the_cursor_on_the_same_row() {
     queue.remove_jobs(&finished);
     show(&mut test, &queue, &[]);
 
-    assert_eq!(test.app.transfer_rows()[test.app.transfers_cursor].job_ids, vec![selected]);
+    assert_eq!(test.app.transfer_rows()[test.app.transfers_cursor].kind, RowKind::Single(selected));
 }
 
 #[test]

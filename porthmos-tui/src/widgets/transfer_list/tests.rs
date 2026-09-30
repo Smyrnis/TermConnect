@@ -18,7 +18,6 @@ fn row(
         bytes_done: bytes.0,
         bytes_total: bytes.1,
         state,
-        job_ids: Vec::new(),
     }
 }
 
