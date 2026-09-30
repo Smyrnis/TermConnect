@@ -11,6 +11,7 @@ repository = "https://github.com/Smyrnis/Porthmos"
 
 [workspace.dependencies]
 anyhow = "1.0.104"
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde", "std"] }
 async-trait = "0.1"
 crossterm = { version = "0.29.0", features = ["event-stream"] }
 futures-util = { version = "0.3.34", default-features = false, features = ["std"] }

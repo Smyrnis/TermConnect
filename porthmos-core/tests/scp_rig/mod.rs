@@ -9,6 +9,7 @@ use std::{
 use porthmos_core::{
     Answer, Command, Core, CoreHandle, Entry, Event, Location, Paths, Question,
     config::{Settings, settings::TransferSettings},
+    history::HistoryEntry,
     transfer::{
         conflicts::{ConflictInfo, ConflictPolicy, Resolution},
         rows::RowState,
@@ -89,6 +90,19 @@ impl Rig {
             _ => {}
         }
         event
+    }
+
+    pub fn state_paths(&self) -> Paths {
+        Paths::in_dir(self._config.path())
+    }
+
+    pub async fn history(&mut self) -> Vec<HistoryEntry> {
+        self.core.send(Command::ListHistory);
+        loop {
+            if let Event::History(entries) = self.event().await {
+                return entries;
+            }
+        }
     }
 
     pub fn remote(&self, name: &str) -> PathBuf {

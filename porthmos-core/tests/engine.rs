@@ -155,3 +155,18 @@ async fn a_core_without_a_keyring_says_so_and_publishes_the_save_choice() {
 
     assert_eq!((saw_choice, saw_status), (Some(false), Some(false)));
 }
+
+#[tokio::test]
+async fn the_history_is_empty_until_something_is_transferred() {
+    let mut harness = support::start();
+
+    harness.core.send(Command::ListHistory);
+    let entries = harness
+        .next(|event| match event {
+            Event::History(entries) => Some(entries.clone()),
+            _ => None,
+        })
+        .await;
+
+    assert!(entries.is_empty());
+}

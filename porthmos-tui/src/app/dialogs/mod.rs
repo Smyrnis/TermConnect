@@ -116,6 +116,7 @@ impl App {
                     Some(PendingAction::DeleteConnection { name }) => {
                         self.core.send(Command::DeleteProfile { name });
                     }
+                    Some(PendingAction::ClearHistory) => self.core.send(Command::ClearHistory),
                     Some(
                         PendingAction::TrustHostKey { request_id } | PendingAction::TrustCertificate { request_id },
                     ) => {
@@ -141,6 +142,7 @@ impl App {
                     | Some(PendingAction::FixMissingHost { .. })
                     | Some(PendingAction::MoveLabels { .. })
                     | Some(PendingAction::ResolveConflict)
+                    | Some(PendingAction::ClearHistory)
                     | None => {}
                 }
             }

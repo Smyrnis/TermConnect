@@ -34,14 +34,17 @@ fn engine_with(secrets: Secrets) -> TestEngine {
     let dir = tempfile::tempdir().unwrap();
     let (events_tx, events) = unbounded_channel();
     let (internal_tx, internal) = unbounded_channel();
+    let paths = Paths::in_dir(dir.path());
+    let history = crate::history::History::load(&paths).0;
     let parts = EngineParts {
-        paths: Paths::in_dir(dir.path()),
+        paths,
         env: Environment::default(),
         protocols: Vec::new(),
         local_fs: Arc::new(porthmos_lfs::LocalFs::new(dir.path().to_path_buf())),
         transfers: TransferSettings::default(),
         bookmarks: Bookmarks::default(),
         secrets,
+        history,
     };
     TestEngine { engine: Engine::new(parts, events_tx, internal_tx), events, internal, dir }
 }

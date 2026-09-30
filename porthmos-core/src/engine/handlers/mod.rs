@@ -1,6 +1,7 @@
 mod bookmarks;
 mod connect;
 mod fs;
+mod history;
 mod profiles;
 mod search;
 mod secrets;
@@ -8,6 +9,7 @@ mod transfer;
 
 use std::fmt::Display;
 
+pub(crate) use history::HistoryLog;
 pub(crate) use profiles::{KeyringDone, KeyringJob};
 
 use super::Location;

@@ -13,6 +13,7 @@ impl App {
             Screen::Connections => self.render_connections(frame, main_area),
             Screen::Search => self.render_search(frame, main_area),
             Screen::Transfers => self.render_transfers(frame, main_area),
+            Screen::History => self.render_history(frame, main_area),
         }
 
         self.render_status(frame, status_area);
@@ -122,6 +123,10 @@ impl App {
             self.transfers_cursor,
             copy_key.as_deref(),
         );
+    }
+
+    fn render_history(&self, frame: &mut Frame, area: Rect) {
+        history_view::render_history(frame, area, &self.history);
     }
 
     fn render_search(&self, frame: &mut Frame, area: Rect) {

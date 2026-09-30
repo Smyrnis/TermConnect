@@ -27,6 +27,7 @@ pub enum Action {
     OpenSearch,
     Filter,
     OpenTransfers,
+    OpenHistory,
     CycleSession,
     Help,
     Back,
@@ -59,6 +60,7 @@ impl Action {
             Action::OpenSearch => "open_search",
             Action::Filter => "filter",
             Action::OpenTransfers => "open_transfers",
+            Action::OpenHistory => "open_history",
             Action::CycleSession => "cycle_session",
             Action::Help => "help",
             Action::Back => "back",
@@ -91,6 +93,7 @@ impl Action {
             "open_search" => Action::OpenSearch,
             "filter" => Action::Filter,
             "open_transfers" => Action::OpenTransfers,
+            "open_history" => Action::OpenHistory,
             "cycle_session" => Action::CycleSession,
             "help" => Action::Help,
             "back" => Action::Back,
@@ -237,6 +240,7 @@ impl KeyBindings {
         bind(Action::OpenSearch, KeyCode::Char('f'), KeyModifiers::CONTROL);
         bind(Action::Filter, KeyCode::Char('/'), KeyModifiers::NONE);
         bind(Action::OpenTransfers, KeyCode::Char('t'), KeyModifiers::CONTROL);
+        bind(Action::OpenHistory, KeyCode::Char('y'), KeyModifiers::CONTROL);
         bind(Action::CycleSession, KeyCode::Char('n'), KeyModifiers::CONTROL);
         bind(Action::Help, KeyCode::F(1), KeyModifiers::NONE);
 
@@ -319,6 +323,7 @@ pub const ALL_ACTIONS: &[Action] = &[
     Action::OpenSearch,
     Action::Filter,
     Action::OpenTransfers,
+    Action::OpenHistory,
     Action::CycleSession,
     Action::Help,
     Action::Back,

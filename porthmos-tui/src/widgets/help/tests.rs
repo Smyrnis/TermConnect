@@ -27,3 +27,16 @@ fn lists_open_transfers() {
 
     assert!(content.contains("open_transfers"));
 }
+
+#[test]
+fn lists_open_history() {
+    let bindings = KeyBindings::defaults();
+    let backend = TestBackend::new(50, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| render_help(frame, frame.area(), &bindings)).unwrap();
+
+    let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
+
+    assert!(content.contains("open_history"));
+    assert!(content.contains("Ctrl+Y"));
+}

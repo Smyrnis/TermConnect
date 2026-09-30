@@ -14,6 +14,7 @@ impl App {
             Action::Delete => match self.screen {
                 Screen::Connections => self.disconnect_selected(),
                 Screen::Transfers => self.cancel_selected_row(),
+                Screen::History => self.open_clear_history_dialog(),
                 _ => self.open_delete_dialog(),
             },
             Action::Copy => self.start_copy(),
@@ -26,6 +27,7 @@ impl App {
             Action::OpenSearch => self.open_search_screen(),
             Action::Filter => self.start_filter(),
             Action::OpenTransfers => self.open_transfers_screen(),
+            Action::OpenHistory => self.open_history_screen(),
             Action::CycleSession => {
                 if self.screen == Screen::Files {
                     self.sessions.cycle();
@@ -65,6 +67,7 @@ impl App {
             Screen::Connections => self.apply_connections_action(action),
             Screen::Search => {}
             Screen::Transfers => self.apply_transfers_action(action),
+            Screen::History => self.apply_history_action(action),
         }
     }
 

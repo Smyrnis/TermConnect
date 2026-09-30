@@ -171,6 +171,7 @@ impl Engine {
         let Some(live) = self.sessions.remove(&session) else {
             return;
         };
+        self.history.remember_session(session, live.name.clone());
 
         let affected = self.transfers.fail_queued_for_session(session, "session disconnected")
             + self.cancel_session_transfers(session)

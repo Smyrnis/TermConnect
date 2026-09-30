@@ -44,6 +44,7 @@ fn files_live_in_their_directories() {
     assert_eq!(paths.bookmarks_file(), PathBuf::from("/tmp/t/config/bookmarks.toml"));
     assert_eq!(paths.known_certificates_file(), PathBuf::from("/tmp/t/config/known_certificates.toml"));
     assert_eq!(paths.log_file(), PathBuf::from("/tmp/t/state/porthmos.log"));
+    assert_eq!(paths.history_file(), PathBuf::from("/tmp/t/state/history.toml"));
 }
 
 fn paths_with_config_home(config_home: &Path) -> Paths {

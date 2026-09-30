@@ -44,5 +44,7 @@ pub enum Command {
     ForgetSshPassword { alias: String },
     AddBookmark { label: String, location: Location, path: PathBuf },
     RemoveBookmark { index: usize },
+    ListHistory,
+    ClearHistory,
     Shutdown,
 }

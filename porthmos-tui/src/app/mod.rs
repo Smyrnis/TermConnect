@@ -32,8 +32,12 @@ use crate::{
     widgets::{
         connections_list,
         connections_view::{ConnectionsView, Selection},
-        dialog::{ConfirmDialog, ConflictDialog, Dialog, DialogOutcome, ListDialog, TextInputDialog},
-        help, layout,
+        dialog::{
+            ConfirmDialog, ConflictDialog, Dialog, DialogOutcome, ListDialog, TextInputDialog, message::MessageDialog,
+        },
+        help,
+        history_view::{self, HistoryView},
+        layout,
         notifications::Notifications,
         panel_view::{self, ActivePanel, PanelView},
         search_view::{self, SearchOutcome, SearchView},
@@ -47,6 +51,7 @@ mod conflicts;
 mod connections;
 mod dialogs;
 mod filter;
+mod history;
 mod render;
 mod search;
 mod transfer_queue;
@@ -67,6 +72,7 @@ enum PendingAction {
     FixMissingHost { name: String },
     MoveLabels { from: String, candidates: Vec<String> },
     ResolveConflict,
+    ClearHistory,
 }
 
 enum Reveal {
@@ -80,6 +86,7 @@ enum Screen {
     Connections,
     Search,
     Transfers,
+    History,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,6 +128,7 @@ pub struct App {
     connection_status: ConnectionStatus,
     search: Option<SearchSession>,
     transfers: TransferSnapshot,
+    history: HistoryView,
     conflict_prompts: VecDeque<ConflictPrompt>,
     key_bindings: input::KeyBindings,
     bookmarks: Vec<Bookmark>,
@@ -150,6 +158,7 @@ impl App {
             connection_status: ConnectionStatus::Disconnected,
             search: None,
             transfers: TransferSnapshot::default(),
+            history: HistoryView::new(),
             conflict_prompts: VecDeque::new(),
             key_bindings,
             bookmarks: Vec::new(),
@@ -276,6 +285,7 @@ impl App {
             Event::KeyringStatus { available } => self.keyring_available = available,
             Event::KeyringWaiting { waiting } => self.keyring_waiting = waiting,
             Event::SaveChoice { save } => self.save_choice = save,
+            Event::History(entries) => self.history.replace(entries),
         }
     }
 

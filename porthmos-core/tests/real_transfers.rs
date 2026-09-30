@@ -7,7 +7,9 @@ use std::{
 
 use porthmos_core::{
     Command, Event,
+    history::{History, HistoryResult},
     transfer::{
+        Direction,
         conflicts::{ConflictPolicy, Resolution},
         rows::RowState,
     },
@@ -214,4 +216,49 @@ async fn cancelling_everything_stops_the_copy_and_clearing_removes_partials() {
 #[tokio::test(flavor = "multi_thread")]
 async fn an_scp_session_runs_no_more_transfers_than_it_can_carry() {
     assert_eq!(upload_ten_files(16).await, 6);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_finished_upload_is_kept_in_the_history_file() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::write(rig.local("a.txt"), data(1000, 1)).unwrap();
+    rig.upload(&[("a.txt", false)]);
+    assert_eq!(rig.settle(no_conflicts).await, vec![RowState::Done]);
+
+    let listed = rig.history().await;
+
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].label, "a.txt");
+    assert_eq!(listed[0].connection, "box");
+    assert_eq!(listed[0].direction, Direction::Upload);
+    assert_eq!(listed[0].result, HistoryResult::Done);
+    assert_eq!((listed[0].files_done, listed[0].files_total, listed[0].bytes), (1, 1, 1000));
+    assert_eq!(listed[0].local_path, rig.local("a.txt").to_string_lossy());
+    assert!(listed[0].remote_path.ends_with("/a.txt"), "{}", listed[0].remote_path);
+    let stored = History::load(&rig.state_paths()).0;
+    assert_eq!(stored.entries(), listed.as_slice());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_that_cannot_be_read_is_kept_as_partly_failed() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::write(rig.local("ok.txt"), data(1000, 2)).unwrap();
+    std::fs::write(rig.local("secret.txt"), data(1000, 3)).unwrap();
+    std::fs::set_permissions(rig.local("secret.txt"), std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::File::open(rig.local("secret.txt")).is_ok() {
+        return;
+    }
+    rig.upload(&[("ok.txt", false), ("secret.txt", false)]);
+
+    assert_eq!(rig.settle(no_conflicts).await, vec![RowState::PartlyFailed(1)]);
+    let listed = rig.history().await;
+
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].result, HistoryResult::PartlyFailed { failed: 1 });
+    assert_eq!(listed[0].failed_files, ["secret.txt"]);
+    assert_eq!((listed[0].files_done, listed[0].files_total), (1, 2));
+    let text = std::fs::read_to_string(rig.state_paths().history_file()).unwrap();
+    assert!(!text.to_lowercase().contains("permission denied"), "{text}");
 }

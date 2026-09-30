@@ -20,6 +20,7 @@ impl App {
         match self.screen {
             Screen::Files => self.active_panel_view().map(|panel| panel as &dyn FilterLine),
             Screen::Connections => Some(&self.connections),
+            Screen::History => Some(&self.history),
             _ => None,
         }
     }
@@ -28,6 +29,7 @@ impl App {
         match self.screen {
             Screen::Files => self.active_panel_view_mut().map(|panel| panel as &mut dyn FilterLine),
             Screen::Connections => Some(&mut self.connections),
+            Screen::History => Some(&mut self.history),
             _ => None,
         }
     }

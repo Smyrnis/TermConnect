@@ -272,3 +272,11 @@ fn the_filter_action_is_named_filter() {
     assert_eq!(Action::Filter.name(), "filter");
     assert!(ALL_ACTIONS.contains(&Action::Filter));
 }
+
+#[test]
+fn ctrl_y_maps_to_open_history() {
+    assert_eq!(map_key_via_defaults_with_modifiers(KeyCode::Char('y'), KeyModifiers::CONTROL), Action::OpenHistory);
+    assert_eq!(Action::OpenHistory.name(), "open_history");
+    assert_eq!(Action::from_name("open_history"), Some(Action::OpenHistory));
+    assert!(ALL_ACTIONS.contains(&Action::OpenHistory));
+}

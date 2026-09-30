@@ -5,6 +5,7 @@ pub mod config;
 pub mod connections_tree;
 mod engine;
 pub mod error;
+pub mod history;
 pub mod listing;
 pub mod paths;
 pub mod profiles;
@@ -176,6 +177,7 @@ impl CoreBuilder {
 
     pub fn start(self) -> Result<(CoreHandle, UnboundedReceiver<Event>)> {
         let paths = self.paths.context("the core needs its configuration paths")?;
+        let (history, history_warning) = history::History::load(&paths);
         let (bookmarks, bookmark_warnings) = config::bookmarks::load(&paths)?;
         let local_home = self.local_home.or_else(|| self.env.home.clone()).unwrap_or_else(|| PathBuf::from("/"));
         let protocols = self.protocols.unwrap_or_else(|| builtin_protocols(&paths));
@@ -189,12 +191,16 @@ impl CoreBuilder {
             transfers: self.settings.transfers,
             bookmarks,
             secrets: self.secrets.unwrap_or_else(secrets::Secrets::native),
+            history,
         };
 
         let (events, event_receiver) = unbounded_channel();
         let (commands, command_receiver) = unbounded_channel();
         let (internal, internal_receiver) = unbounded_channel();
         let engine = Engine::new(parts, events.clone(), internal);
+        if let Some(warning) = history_warning {
+            let _ = events.send(Event::Notice { severity: Severity::Warning, message: warning });
+        }
         for warning in bookmark_warnings {
             let _ = events.send(Event::Notice { severity: Severity::Warning, message: warning.0 });
         }

@@ -18,6 +18,7 @@ keyring = ["dep:keyring-core", "dep:zbus-secret-service-keyring-store", "dep:app
 
 [dependencies]
 anyhow.workspace = true
+chrono.workspace = true
 futures-util.workspace = true
 serde.workspace = true
 porthmos-lfs.workspace = true
@@ -44,5 +45,6 @@ apple-native-keyring-store = { version = "1.0.2", optional = true, features = ["
 porthmos-scp.workspace = true
 porthmos-ssh = { workspace = true, features = ["testing"] }
 tempfile.workspace = true
+tracing-subscriber.workspace = true
 porthmos-vfs = { workspace = true, features = ["testing"] }
 tokio = { workspace = true, features = ["test-util"] }

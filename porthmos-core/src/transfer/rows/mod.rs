@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::{Direction, JobStatus, TransferJob, TransferQueue};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RowKind {
     Single(u64),
     Batch(u64),

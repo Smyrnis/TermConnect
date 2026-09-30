@@ -21,6 +21,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use crate::{
     Paths, Severity,
     config::{bookmarks::Bookmarks, settings::TransferSettings},
+    history::History,
     profiles::ConnectionEntry,
     secrets::Secrets,
     transfer::{
@@ -109,6 +110,7 @@ pub(crate) struct Engine {
     published: TransferSnapshot,
     last_progress_publish: Option<Instant>,
     secrets: Secrets,
+    history: handlers::HistoryLog,
     keyring_jobs: Option<UnboundedSender<handlers::KeyringJob>>,
     next_keyring_job: u64,
     latest_keyring_job: HashMap<String, u64>,
@@ -123,6 +125,7 @@ pub(crate) struct EngineParts {
     pub(crate) transfers: TransferSettings,
     pub(crate) bookmarks: Bookmarks,
     pub(crate) secrets: Secrets,
+    pub(crate) history: History,
 }
 
 impl Engine {
@@ -152,6 +155,7 @@ impl Engine {
             published: TransferSnapshot::default(),
             last_progress_publish: None,
             secrets: parts.secrets,
+            history: handlers::HistoryLog::new(parts.history),
             keyring_jobs: None,
             next_keyring_job: 0,
             latest_keyring_job: HashMap::new(),
@@ -201,6 +205,8 @@ impl Engine {
             Command::ForgetSshPassword { alias } => self.forget_ssh_password(&alias),
             Command::AddBookmark { label, location, path } => self.add_bookmark(label, location, path),
             Command::RemoveBookmark { index } => self.remove_bookmark(index),
+            Command::ListHistory => self.publish_history(),
+            Command::ClearHistory => self.clear_history(),
             Command::Shutdown => {}
         }
         self.publish_transfers();
@@ -271,6 +277,7 @@ impl Engine {
 
     fn publish_transfers(&mut self) {
         let snapshot = self.snapshot();
+        self.record_finished_rows(&snapshot.rows);
         if snapshot != self.published {
             self.published = snapshot.clone();
             self.last_progress_publish = Some(Instant::now());

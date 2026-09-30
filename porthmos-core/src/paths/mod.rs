@@ -68,6 +68,10 @@ impl Paths {
         self.state_dir.join("state.toml")
     }
 
+    pub fn history_file(&self) -> PathBuf {
+        self.state_dir.join("history.toml")
+    }
+
     pub fn log_file(&self) -> PathBuf {
         self.state_dir.join("porthmos.log")
     }

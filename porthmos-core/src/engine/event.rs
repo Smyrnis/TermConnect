@@ -6,6 +6,7 @@ use super::{Location, RequestId, SessionId};
 use crate::{
     Severity,
     config::bookmarks::Bookmark,
+    history::HistoryEntry,
     profiles::ConnectionEntry,
     transfer::{TransferSnapshot, conflicts::ConflictInfo},
 };
@@ -34,4 +35,5 @@ pub enum Event {
     KeyringStatus { available: bool },
     KeyringWaiting { waiting: bool },
     SaveChoice { save: bool },
+    History(Vec<HistoryEntry>),
 }

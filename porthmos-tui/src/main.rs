@@ -1,4 +1,5 @@
 use anyhow::Result;
+use tracing_subscriber::prelude::*;
 
 #[cfg(not(unix))]
 compile_error!("porthmos only supports Unix-like platforms (Linux/macOS)");
@@ -22,18 +23,22 @@ fn install_panic_hook() {
 }
 
 fn init_tracing(log_file: Option<&std::path::Path>) {
-    let filter = tracing_subscriber::EnvFilter::from_default_env();
+    let filter = logging::with_transfer_log(tracing_subscriber::EnvFilter::from_default_env());
     let writer = match log_file {
         Some(path) => logging::open_writer_at(path),
         None => Err(anyhow::anyhow!("HOME environment variable is not set")),
     };
     match writer {
         Ok(file) => {
-            tracing_subscriber::fmt().with_env_filter(filter).with_writer(std::sync::Mutex::new(file)).init();
+            tracing_subscriber::registry()
+                .with(tracing_subscriber::fmt::layer().with_writer(std::sync::Mutex::new(file)).with_filter(filter))
+                .init();
         }
         Err(err) => {
             eprintln!("porthmos: failed to open log file, logging disabled: {err}");
-            tracing_subscriber::fmt().with_env_filter(filter).with_writer(std::io::sink).init();
+            tracing_subscriber::registry()
+                .with(tracing_subscriber::fmt::layer().with_writer(std::io::sink).with_filter(filter))
+                .init();
         }
     }
 }

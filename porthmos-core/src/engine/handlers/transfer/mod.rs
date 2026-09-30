@@ -201,8 +201,16 @@ impl Engine {
                 self.review_or_apply_plan(batch_id, session_id, direction, plan);
             }
             TransferEvent::PlanFailed { batch_id, message } => {
+                let scan = self
+                    .planning
+                    .iter()
+                    .find(|scan| scan.batch_id == batch_id)
+                    .map(|scan| (scan.session_id, scan.direction, scan.display_name.clone()));
                 self.clear_planning(batch_id);
                 self.transfers.forget_batch_if_empty(batch_id);
+                if let Some((session_id, direction, label)) = scan {
+                    self.record_failed_scan(session_id, direction, label, &message);
+                }
                 self.notice(Severity::Error, message);
             }
             TransferEvent::PartialsRemoved { session_id } => self.refresh_destination(session_id, Direction::Upload),

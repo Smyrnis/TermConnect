@@ -52,10 +52,18 @@ fn wrapped_line_count(text: &str, width: usize) -> usize {
     lines
 }
 
+fn wrapped_total(text: &str, width: usize) -> usize {
+    text.lines().map(|line| wrapped_line_count(line, width)).sum::<usize>().max(1)
+}
+
 pub fn render_message(frame: &mut Frame, area: Rect, dialog: &MessageDialog) {
-    let width = super::content_width(&[dialog.title.as_str(), "[Enter] OK"]).max(50).min(area.width);
+    let longest_line = dialog.message.lines().map(|line| line.chars().count()).max().unwrap_or(0).min(200) as u16;
+    let width = super::content_width(&[dialog.title.as_str(), "[Enter] OK"])
+        .max(longest_line + 4)
+        .clamp(50, 76)
+        .min(area.width);
     let inner_width = usize::from(width.saturating_sub(2)).max(1);
-    let lines = wrapped_line_count(&dialog.message, inner_width) as u16;
+    let lines = wrapped_total(&dialog.message, inner_width) as u16;
     let height = (lines + 4).min(area.height);
     let popup = Rect {
         x: area.x + area.width.saturating_sub(width) / 2,
@@ -67,7 +75,9 @@ pub fn render_message(frame: &mut Frame, area: Rect, dialog: &MessageDialog) {
         .title(dialog.title.as_str())
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Yellow));
-    let text = vec![Line::from(dialog.message.as_str()), Line::from(""), Line::from("[Enter] OK")];
+    let mut text: Vec<Line> = dialog.message.lines().map(Line::from).collect();
+    text.push(Line::from(""));
+    text.push(Line::from("[Enter] OK"));
     frame.render_widget(Clear, popup);
     frame.render_widget(Paragraph::new(text).block(block).wrap(Wrap { trim: true }), popup);
 }
