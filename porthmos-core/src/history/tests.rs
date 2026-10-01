@@ -3,7 +3,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use super::{testing::sample, *};
+use super::{
+    testing::{SaveNow, sample},
+    *,
+};
 use crate::Paths;
 
 fn paths() -> (tempfile::TempDir, Paths) {
@@ -109,8 +112,8 @@ fn entries_with_the_same_time_keep_their_recording_order() {
 #[test]
 fn recording_past_the_cap_drops_the_oldest_entry() {
     let (_dir, paths) = paths();
-    let entries = (0..MAX_ENTRIES).map(|index| sample(&format!("e{index}"), HistoryResult::Done)).collect();
-    let mut history = History { path: paths.history_file(), entries, writable: true };
+    let entries: Vec<_> = (0..MAX_ENTRIES).map(|index| sample(&format!("e{index}"), HistoryResult::Done)).collect();
+    let mut history = History { path: paths.history_file(), entries: Arc::new(entries), writable: true };
 
     history.record(sample("new", HistoryResult::Done)).unwrap();
 
@@ -126,7 +129,7 @@ fn recording_past_the_cap_drops_the_oldest_entry() {
 fn loading_a_file_with_too_many_entries_keeps_the_newest() {
     let (_dir, paths) = paths();
     let entries = (0..MAX_ENTRIES + 5).map(|index| sample(&format!("e{index}"), HistoryResult::Done)).collect();
-    History { path: paths.history_file(), entries, writable: true }.write().unwrap();
+    History { path: paths.history_file(), entries: Arc::new(entries), writable: true }.save_now().unwrap();
 
     let (history, warning) = History::load(&paths);
 
@@ -216,7 +219,7 @@ fn a_file_that_is_not_utf8_is_set_aside_byte_for_byte() {
 }
 
 #[test]
-fn a_second_broken_file_replaces_the_first_set_aside() {
+fn a_second_broken_file_never_replaces_the_first_set_aside() {
     let (_dir, paths) = paths();
     write_history_file(&paths, "first [");
     History::load(&paths);
@@ -224,7 +227,10 @@ fn a_second_broken_file_replaces_the_first_set_aside() {
 
     History::load(&paths);
 
-    assert_eq!(read(&broken_file(&paths)), "second [");
+    assert_eq!(read(&broken_file(&paths)), "first [");
+    let mut second = broken_file(&paths).into_os_string();
+    second.push(".1");
+    assert_eq!(read(&PathBuf::from(second)), "second [");
 }
 
 #[test]
@@ -287,8 +293,11 @@ fn clear_empties_memory_and_the_file() {
 fn a_failed_clear_still_empties_memory_and_reports_the_error() {
     let (_dir, paths) = paths();
     std::fs::write(&paths.state_dir, b"a file where the directory should be").unwrap();
-    let mut history =
-        History { path: paths.history_file(), entries: vec![sample("a", HistoryResult::Done)], writable: true };
+    let mut history = History {
+        path: paths.history_file(),
+        entries: Arc::new(vec![sample("a", HistoryResult::Done)]),
+        writable: true,
+    };
 
     assert!(history.clear().is_err());
 
@@ -390,4 +399,67 @@ fn when_the_file_cannot_be_set_aside_nothing_is_ever_written_over_it() {
     assert!(result.is_err());
     assert_eq!(labels(&history), ["a"]);
     assert_eq!(read(&paths.history_file()), "not toml [");
+}
+
+#[test]
+fn push_and_render_do_not_touch_the_disk_and_render_matches_what_record_writes() {
+    let (_dir, paths) = paths();
+    let (mut history, _) = History::load(&paths);
+
+    history.push(sample("a", HistoryResult::Done));
+    let rendered = history.render().unwrap();
+
+    assert!(!paths.history_file().exists());
+    history.record(sample("b", HistoryResult::Done)).unwrap();
+    assert_ne!(rendered, read(&paths.history_file()));
+    assert!(read(&paths.history_file()).contains("label = \"a\""));
+}
+
+#[test]
+fn clear_memory_empties_the_entries_without_writing() {
+    let (_dir, paths) = paths();
+    let (mut history, _) = History::load(&paths);
+    history.record(sample("a", HistoryResult::Done)).unwrap();
+
+    history.clear_memory();
+
+    assert!(history.entries().is_empty());
+    assert!(read(&paths.history_file()).contains("label = \"a\""));
+}
+
+#[test]
+fn a_protected_history_reports_it_cannot_be_written() {
+    let (_dir, paths) = paths();
+    std::fs::write(&paths.state_dir, b"a file where the directory should be").unwrap();
+
+    let (history, _) = History::load(&paths);
+
+    assert!(!history.is_writable());
+    assert_eq!(history.path(), paths.history_file());
+}
+
+#[test]
+fn a_snapshot_renders_exactly_what_render_does() {
+    let (_dir, paths) = paths();
+    let (mut history, _) = History::load(&paths);
+    history.push(sample("a", HistoryResult::Done));
+    history.push(sample("b", HistoryResult::Failed));
+
+    let rendered = render_entries(&history.snapshot()).unwrap();
+
+    assert_eq!(rendered, history.render().unwrap());
+}
+
+#[test]
+fn a_snapshot_is_not_changed_by_later_entries() {
+    let (_dir, paths) = paths();
+    let (mut history, _) = History::load(&paths);
+    history.push(sample("a", HistoryResult::Done));
+    let snapshot = history.snapshot();
+
+    history.push(sample("b", HistoryResult::Done));
+    history.clear_memory();
+
+    assert_eq!(snapshot.len(), 1);
+    assert_eq!(snapshot[0].label, "a");
 }

@@ -19,3 +19,28 @@ pub(crate) fn sample(label: &str, result: HistoryResult) -> HistoryEntry {
         failed_files: Vec::new(),
     }
 }
+
+pub(crate) trait SaveNow {
+    fn record(&mut self, entry: HistoryEntry) -> anyhow::Result<()>;
+    fn clear(&mut self) -> anyhow::Result<()>;
+    fn save_now(&self) -> anyhow::Result<()>;
+}
+
+impl SaveNow for super::History {
+    fn record(&mut self, entry: HistoryEntry) -> anyhow::Result<()> {
+        self.push(entry);
+        self.save_now()
+    }
+
+    fn clear(&mut self) -> anyhow::Result<()> {
+        self.clear_memory();
+        self.save_now()
+    }
+
+    fn save_now(&self) -> anyhow::Result<()> {
+        if !self.is_writable() {
+            anyhow::bail!("the existing history file could not be read or set aside, so it was left alone");
+        }
+        crate::persist::write_atomic(self.path(), self.render()?.as_bytes(), 0o600)
+    }
+}

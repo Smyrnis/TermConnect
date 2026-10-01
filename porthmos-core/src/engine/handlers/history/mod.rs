@@ -8,7 +8,7 @@ use chrono::Utc;
 use super::super::{Engine, Event};
 use crate::{
     Severity,
-    history::{History, HistoryEntry, HistoryResult, MAX_FAILED_FILES},
+    history::{History, HistoryEntry, HistoryResult, MAX_FAILED_FILES, render_entries},
     transfer::{
         Direction, JobStatus, RowChange, TransferJob,
         rows::{QueueRow, RowKind, RowState},
@@ -20,6 +20,8 @@ pub(crate) struct HistoryLog {
     recorded: HashSet<RowKind>,
     counted: HashMap<RowKind, HashSet<u64>>,
     write_warned: bool,
+    write_seq: u64,
+    clear_tag: Option<u64>,
     session_names: HashMap<u64, String>,
 }
 
@@ -30,6 +32,8 @@ impl HistoryLog {
             recorded: HashSet::new(),
             counted: HashMap::new(),
             write_warned: false,
+            write_seq: 0,
+            clear_tag: None,
             session_names: HashMap::new(),
         }
     }
@@ -91,10 +95,8 @@ impl Engine {
     }
 
     pub(crate) fn clear_history(&mut self) {
-        if let Err(err) = self.history.store.clear() {
-            tracing::debug!("{err:?}");
-            self.notice(Severity::Warning, format!("Couldn't clear transfer history: {err:#}"));
-        }
+        self.history.store.clear_memory();
+        self.persist_history(true);
         self.publish_history();
     }
 
@@ -115,12 +117,43 @@ impl Engine {
     }
 
     pub(crate) fn store_entry(&mut self, entry: HistoryEntry) {
-        if let Err(err) = self.history.store.record(entry) {
-            tracing::debug!("{err:?}");
-            if !self.history.write_warned {
-                self.history.write_warned = true;
-                self.notice(Severity::Warning, format!("Couldn't save transfer history: {err:#}"));
-            }
+        self.history.store.push(entry);
+        self.persist_history(false);
+    }
+
+    fn persist_history(&mut self, clearing: bool) {
+        self.history.write_seq += 1;
+        let tag = self.history.write_seq;
+        if clearing {
+            self.history.clear_tag = Some(tag);
+        }
+        if !self.history.store.is_writable() {
+            self.report_history_failure(
+                "the existing history file could not be read or set aside, so it was left alone".to_string(),
+                clearing,
+            );
+            return;
+        }
+        let snapshot = self.history.store.snapshot();
+        let path = self.history.store.path().to_path_buf();
+        let render = move || render_entries(&snapshot).map(String::into_bytes).map_err(|err| format!("{err:#}"));
+        if let Err(message) = self.writer.write_lazy(path, 0o600, tag, render) {
+            self.report_history_failure(message, clearing);
+        }
+    }
+
+    pub(crate) fn persist_failed(&mut self, _path: PathBuf, message: String, tag: u64) {
+        let clearing = self.history.clear_tag == Some(tag);
+        self.report_history_failure(message, clearing);
+    }
+
+    fn report_history_failure(&mut self, message: String, clearing: bool) {
+        tracing::debug!("{message}");
+        if clearing {
+            self.notice(Severity::Warning, format!("Couldn't clear transfer history: {message}"));
+        } else if !self.history.write_warned {
+            self.history.write_warned = true;
+            self.notice(Severity::Warning, format!("Couldn't save transfer history: {message}"));
         }
     }
 
@@ -243,6 +276,7 @@ impl Engine {
 
 impl Drop for Engine {
     fn drop(&mut self) {
+        self.writer.close();
         self.record_interrupted();
         self.tasks.abort_all();
     }

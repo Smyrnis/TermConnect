@@ -50,6 +50,8 @@ async fn a_broken_history_file_is_set_aside_with_a_warning_at_start() {
 
 #[tokio::test]
 async fn saved_history_is_loaded_at_start_and_listed_on_request() {
+    use history::testing::SaveNow;
+
     let dir = tempfile::tempdir().unwrap();
     let paths = Paths::in_dir(dir.path());
     let mut saved = history::History::load(&paths).0;

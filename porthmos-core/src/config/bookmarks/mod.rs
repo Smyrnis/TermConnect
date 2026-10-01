@@ -1,10 +1,9 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
+
+use crate::persist::{Loaded, read_or_set_aside, write_atomic};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Bookmark {
@@ -15,33 +14,45 @@ pub struct Bookmark {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Bookmarks(Vec<Bookmark>);
+pub struct Bookmarks {
+    items: Vec<Bookmark>,
+    protected: bool,
+}
 
 impl Bookmarks {
     pub fn iter(&self) -> impl Iterator<Item = &Bookmark> {
-        self.0.iter()
+        self.items.iter()
     }
 
     #[allow(dead_code)]
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.items.len()
     }
 
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+        self.items.is_empty()
     }
 
     pub fn get(&self, index: usize) -> Option<&Bookmark> {
-        self.0.get(index)
+        self.items.get(index)
     }
 
     pub fn add(&mut self, bookmark: Bookmark) {
-        self.0.push(bookmark);
+        self.items.push(bookmark);
+    }
+
+    pub fn is_protected(&self) -> bool {
+        self.protected
+    }
+
+    #[cfg(test)]
+    pub(crate) fn protected_for_test(items: Vec<Bookmark>) -> Self {
+        Self { items, protected: true }
     }
 
     pub fn remove(&mut self, index: usize) -> Option<Bookmark> {
-        if index < self.0.len() { Some(self.0.remove(index)) } else { None }
+        if index < self.items.len() { Some(self.items.remove(index)) } else { None }
     }
 }
 
@@ -56,35 +67,21 @@ pub fn load(paths: &crate::Paths) -> Result<(Bookmarks, Vec<super::StartupWarnin
 }
 
 fn load_from(path: &Path) -> Result<(Bookmarks, Vec<super::StartupWarning>)> {
-    let contents = match fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            return Ok((Bookmarks::default(), Vec::new()));
+    Ok(match read_or_set_aside(path, "bookmarks", |text| toml::from_str::<BookmarksFile>(text)) {
+        Loaded::Missing => (Bookmarks::default(), Vec::new()),
+        Loaded::Ready(file) => (Bookmarks { items: file.bookmark, protected: false }, Vec::new()),
+        Loaded::SetAside { warning, protected } => {
+            (Bookmarks { items: Vec::new(), protected }, vec![super::StartupWarning(warning)])
         }
-        Err(err) => return Err(err.into()),
-    };
-
-    match toml::from_str::<BookmarksFile>(&contents) {
-        Ok(file) => Ok((Bookmarks(file.bookmark), Vec::new())),
-        Err(err) => {
-            Ok((Bookmarks::default(), vec![super::StartupWarning(format!("failed to parse bookmarks.toml: {err}"))]))
-        }
-    }
+    })
 }
 
 pub fn save_to(path: &Path, bookmarks: &Bookmarks) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+    if bookmarks.protected {
+        anyhow::bail!("bookmarks.toml could not be read or set aside, so it was left alone");
     }
-    let temp_path = {
-        let mut name = path.as_os_str().to_owned();
-        name.push(".tmp");
-        PathBuf::from(name)
-    };
-    let file = BookmarksFile { bookmark: bookmarks.0.clone() };
-    fs::write(&temp_path, toml::to_string_pretty(&file)?)?;
-    fs::rename(&temp_path, path)?;
-    Ok(())
+    let file = BookmarksFile { bookmark: bookmarks.items.clone() };
+    write_atomic(path, toml::to_string_pretty(&file)?.as_bytes(), 0o600)
 }
 
 #[cfg(test)]

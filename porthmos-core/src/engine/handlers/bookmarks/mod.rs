@@ -13,6 +13,17 @@ impl Engine {
         }
     }
 
+    fn refuse_protected_bookmarks(&self) -> bool {
+        let protected = self.bookmarks.is_protected();
+        if protected {
+            self.notice(
+                Severity::Error,
+                "Bookmarks can't be changed: bookmarks.toml could not be read or set aside, so it was left alone",
+            );
+        }
+        protected
+    }
+
     pub(crate) fn publish_bookmarks(&self) {
         self.emit(Event::Bookmarks(self.bookmarks.iter().cloned().collect()));
     }
@@ -29,12 +40,18 @@ impl Engine {
             },
         };
 
+        if self.refuse_protected_bookmarks() {
+            return;
+        }
         self.bookmarks.add(Bookmark { label, path, host });
         self.save_bookmarks();
         self.publish_bookmarks();
     }
 
     pub(crate) fn remove_bookmark(&mut self, index: usize) {
+        if self.refuse_protected_bookmarks() {
+            return;
+        }
         if let Some(removed) = self.bookmarks.remove(index) {
             self.save_bookmarks();
             self.notice(Severity::Info, format!("Removed bookmark \"{}\"", removed.label));

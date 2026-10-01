@@ -236,7 +236,14 @@ async fn a_finished_upload_is_kept_in_the_history_file() {
     assert_eq!((listed[0].files_done, listed[0].files_total, listed[0].bytes), (1, 1, 1000));
     assert_eq!(listed[0].local_path, rig.local("a.txt").to_string_lossy());
     assert!(listed[0].remote_path.ends_with("/a.txt"), "{}", listed[0].remote_path);
-    let stored = History::load(&rig.state_paths()).0;
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let stored = loop {
+        let stored = History::load(&rig.state_paths()).0;
+        if stored.entries() == listed.as_slice() || std::time::Instant::now() > deadline {
+            break stored;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
     assert_eq!(stored.entries(), listed.as_slice());
 }
 
@@ -260,7 +267,14 @@ async fn a_file_that_cannot_be_read_is_kept_as_partly_failed() {
     assert_eq!(listed[0].result, HistoryResult::PartlyFailed { failed: 1 });
     assert_eq!(listed[0].failed_files, ["secret.txt"]);
     assert_eq!((listed[0].files_done, listed[0].files_total), (1, 2));
-    let text = std::fs::read_to_string(rig.state_paths().history_file()).unwrap();
+    let file = rig.state_paths().history_file();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !std::fs::read_to_string(&file).is_ok_and(|text| text.contains("secret.txt"))
+        && std::time::Instant::now() < deadline
+    {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let text = std::fs::read_to_string(&file).unwrap();
     assert!(!text.to_lowercase().contains("permission denied"), "{text}");
 }
 

@@ -1,9 +1,10 @@
-use std::{fs, io::Write, os::unix::fs::OpenOptionsExt, path::PathBuf};
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::Paths;
+use crate::{
+    Paths,
+    persist::{Loaded, read_or_set_aside, write_atomic},
+};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -11,23 +12,24 @@ pub struct UiState {
     pub save_passwords_in_keyring: bool,
 }
 
-pub fn load(paths: &Paths) -> UiState {
-    fs::read_to_string(paths.state_file()).ok().and_then(|contents| toml::from_str(&contents).ok()).unwrap_or_default()
+pub struct StateLoad {
+    pub state: UiState,
+    pub warning: Option<String>,
+    pub protected: bool,
+}
+
+pub fn load(paths: &Paths) -> StateLoad {
+    match read_or_set_aside(&paths.state_file(), "interface state", |text| toml::from_str::<UiState>(text)) {
+        Loaded::Missing => StateLoad { state: UiState::default(), warning: None, protected: false },
+        Loaded::Ready(state) => StateLoad { state, warning: None, protected: false },
+        Loaded::SetAside { warning, protected } => {
+            StateLoad { state: UiState::default(), warning: Some(warning), protected }
+        }
+    }
 }
 
 pub fn save(paths: &Paths, state: &UiState) -> Result<()> {
-    let path = paths.state_file();
-    fs::create_dir_all(&paths.state_dir)?;
-    let temp_path = {
-        let mut name = path.as_os_str().to_owned();
-        name.push(".tmp");
-        PathBuf::from(name)
-    };
-    let mut handle = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&temp_path)?;
-    handle.write_all(toml::to_string(state)?.as_bytes())?;
-    drop(handle);
-    fs::rename(&temp_path, &path)?;
-    Ok(())
+    write_atomic(&paths.state_file(), toml::to_string(state)?.as_bytes(), 0o600)
 }
 
 #[cfg(test)]

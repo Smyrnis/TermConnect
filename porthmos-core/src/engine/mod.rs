@@ -5,6 +5,7 @@ mod prompter;
 
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
+    path::PathBuf,
     sync::{Arc, atomic::AtomicU64},
     time::{Duration, Instant},
 };
@@ -34,7 +35,9 @@ use crate::{
 };
 
 pub(crate) const PROGRESS_SNAPSHOT_INTERVAL: Duration = Duration::from_millis(100);
+pub(crate) const PERSIST_INTERVAL: Duration = Duration::from_millis(250);
 pub(crate) const SHUTDOWN_GRACE: Duration = Duration::from_millis(500);
+pub(crate) const PERSIST_FLUSH_GRACE: Duration = Duration::from_secs(5);
 pub(crate) const EDIT_UPLOAD_GRACE: Duration = Duration::from_secs(30);
 
 pub(crate) enum TransferEvent {
@@ -64,6 +67,11 @@ pub(crate) enum Internal {
         available: bool,
     },
     KeyringDone(handlers::KeyringDone),
+    PersistFailed {
+        path: PathBuf,
+        message: String,
+        tag: u64,
+    },
     TaskPanicked {
         name: &'static str,
         scope: Scope,
@@ -107,6 +115,9 @@ pub(crate) struct Engine {
     pub(crate) finished: Option<tokio::sync::watch::Sender<bool>>,
     pub(crate) shutdown_grace: Duration,
     pub(crate) upload_grace: Duration,
+    pub(crate) flush_grace: Duration,
+    state_protected: bool,
+    writer: crate::persist::writer::Writer,
     sessions: BTreeMap<SessionId, LiveSession>,
     next_session_id: SessionId,
     questions: PendingQuestions,
@@ -141,6 +152,7 @@ pub(crate) struct EngineParts {
     pub(crate) history: History,
     pub(crate) edit: EditSettings,
     pub(crate) publish_interval: Duration,
+    pub(crate) persist_interval: Duration,
 }
 
 impl Engine {
@@ -153,6 +165,14 @@ impl Engine {
         let tasks = Tasks::new(move |name, scope, message| {
             let _ = panics.send(Internal::TaskPanicked { name, scope, message });
         });
+        let failures = internal.clone();
+        let writer = crate::persist::writer::Writer::new(tasks.clone(), parts.persist_interval, move |failure| {
+            let _ = failures.send(Internal::PersistFailed {
+                path: failure.path,
+                message: failure.message,
+                tag: failure.tag,
+            });
+        });
         Self {
             paths: parts.paths,
             env: parts.env,
@@ -164,6 +184,9 @@ impl Engine {
             finished: None,
             shutdown_grace: SHUTDOWN_GRACE,
             upload_grace: EDIT_UPLOAD_GRACE,
+            flush_grace: PERSIST_FLUSH_GRACE,
+            state_protected: false,
+            writer,
             sessions: BTreeMap::new(),
             next_session_id: 0,
             questions: PendingQuestions::default(),
@@ -212,6 +235,7 @@ impl Engine {
         match done {
             Internal::KeyringDone(done) => self.finish_keyring_job(done),
             Internal::Edit(event @ handlers::EditEvent::Uploaded { .. }) => self.handle_edit_event(event),
+            Internal::PersistFailed { path, message, tag } => self.persist_failed(path, message, tag),
             _ => {}
         }
     }
@@ -232,6 +256,8 @@ impl Engine {
         self.cancel_all_work();
         self.tasks.cancel_all();
         self.record_interrupted();
+        let _ = tokio::time::timeout(self.flush_grace, self.writer.flush()).await;
+        self.writer.close();
         self.keyring_jobs = None;
         let tasks = self.tasks.clone();
         if tasks.live_names().contains(&"edit-upload") {
@@ -311,6 +337,7 @@ impl Engine {
             Internal::Edit(event) => self.handle_edit_event(event),
             Internal::KeyringProbed { available } => self.emit(Event::KeyringStatus { available }),
             Internal::KeyringDone(done) => self.finish_keyring_job(done),
+            Internal::PersistFailed { path, message, tag } => self.persist_failed(path, message, tag),
             Internal::TaskPanicked { name, scope, message } => self.recover_from_panic(name, scope, &message),
             Internal::Transfer(TransferEvent::Progress { id, transferred }) => {
                 if let Some(mut job) = self.transfers.get_mut(id) {

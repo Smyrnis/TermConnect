@@ -9,10 +9,13 @@ use std::{
 use super::*;
 use crate::{
     engine::{
-        Command, PlanningScan, TransferEvent,
+        Command, Internal, PlanningScan, TransferEvent,
         testing::{TestEngine, test_engine},
     },
-    history::{History, HistoryEntry, HistoryResult, testing::sample},
+    history::{
+        History, HistoryEntry, HistoryResult,
+        testing::{SaveNow, sample},
+    },
     transfer::{Direction, JobStatus},
 };
 
@@ -735,4 +738,191 @@ fn finishing_a_huge_batch_costs_the_same_per_event_as_a_small_one() {
     let large = (0..3).map(|_| total_time(50_000)).fold(f64::MAX, f64::min);
 
     assert!(large < small * 30.0, "per event: {small:.9}s for 1k jobs, {large:.9}s for 50k jobs");
+}
+
+#[tokio::test]
+async fn history_is_written_in_the_background_and_a_flush_puts_it_on_disk() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    job(&mut t, session, "a", None, JobStatus::Completed);
+
+    t.engine.publish_transfers();
+    t.engine.writer.flush().await;
+
+    assert_eq!(History::load(&t.engine.paths).0.entries().len(), 1);
+}
+
+#[tokio::test]
+async fn a_failed_background_write_is_reported_once_and_keeps_the_entries_in_memory() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    std::fs::write(&t.engine.paths.state_dir, b"a file where the directory should be").unwrap();
+    job(&mut t, session, "a", None, JobStatus::Completed);
+    t.engine.publish_transfers();
+    t.engine.writer.flush().await;
+    t.run_internal().await;
+    job(&mut t, session, "b", None, JobStatus::Completed);
+    t.engine.publish_transfers();
+    t.engine.writer.flush().await;
+    t.run_internal().await;
+
+    let warnings: Vec<String> = t
+        .notices()
+        .into_iter()
+        .filter(|(severity, message)| *severity == Severity::Warning && message.starts_with("Couldn't save transfer"))
+        .map(|(_, message)| message)
+        .collect();
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(recorded(&t).len(), 2);
+}
+
+#[tokio::test]
+async fn many_quick_entries_cost_far_fewer_writes_than_entries() {
+    let mut t = test_engine();
+    t.engine.writer = crate::persist::writer::Writer::new(t.engine.tasks.clone(), Duration::from_secs(30), |_| {});
+    let (session, _fs) = t.add_session("prod");
+    for index in 0..40 {
+        job(&mut t, session, &format!("f{index}"), None, JobStatus::Completed);
+        t.engine.publish_transfers();
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    t.engine.writer.flush().await;
+
+    assert_eq!(recorded(&t).len(), 40);
+    assert!(t.engine.writer.writes_done() <= 2, "{} writes", t.engine.writer.writes_done());
+    assert_eq!(History::load(&t.engine.paths).0.entries().len(), 40);
+}
+
+#[tokio::test]
+async fn a_protected_history_is_never_written() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    std::fs::create_dir_all(&t.engine.paths.state_dir).unwrap();
+    t.engine.history.store = History::load(&crate::Paths::in_dir(t.dir.path())).0;
+    t.engine.history.store.set_writable_for_test(false);
+    job(&mut t, session, "a", None, JobStatus::Completed);
+
+    t.engine.publish_transfers();
+    t.engine.writer.flush().await;
+
+    assert!(!t.engine.paths.history_file().exists());
+    assert_eq!(recorded(&t).len(), 1);
+}
+
+#[tokio::test]
+async fn an_engine_dropped_with_a_held_back_history_write_still_saves_it() {
+    let mut t = test_engine();
+    t.engine.writer = crate::persist::writer::Writer::new(t.engine.tasks.clone(), Duration::from_secs(30), |_| {});
+    let (session, _fs) = t.add_session("prod");
+    job(&mut t, session, "a", None, JobStatus::Completed);
+    t.engine.publish_transfers();
+    t.engine.writer.flush().await;
+    job(&mut t, session, "b", None, JobStatus::Completed);
+    t.engine.publish_transfers();
+    let TestEngine { engine, dir, .. } = t;
+    let paths = engine.paths.clone();
+
+    drop(engine);
+
+    assert_eq!(History::load(&paths).0.entries().len(), 2);
+    drop(dir);
+}
+
+#[tokio::test]
+async fn a_failed_clear_still_warns_after_an_earlier_write_warning() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    std::fs::write(&t.engine.paths.state_dir, b"a file where the directory should be").unwrap();
+    job(&mut t, session, "a", None, JobStatus::Completed);
+    t.engine.publish_transfers();
+    t.engine.writer.flush().await;
+    t.run_internal().await;
+    t.drain();
+
+    t.engine.handle_command(Command::ClearHistory);
+    t.engine.writer.flush().await;
+    t.run_internal().await;
+
+    let notices = t.notices();
+    assert!(
+        notices.iter().any(|(severity, message)| *severity == Severity::Warning
+            && message.starts_with("Couldn't clear transfer history")),
+        "{notices:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_background_write_failure_that_arrives_during_shutdown_is_still_reported() {
+    let mut t = test_engine();
+
+    t.engine.apply_late_result(Internal::PersistFailed {
+        path: PathBuf::from("/state/history.toml"),
+        message: "disk full".to_string(),
+        tag: 0,
+    });
+
+    let notice = t.first_notice().expect("a notice");
+    assert_eq!(notice.0, Severity::Warning);
+    assert!(notice.1.contains("disk full"), "{}", notice.1);
+}
+
+fn clear_tag(t: &TestEngine) -> u64 {
+    t.engine.history.clear_tag.expect("the clear was queued with a tag")
+}
+
+#[tokio::test]
+async fn the_write_of_the_clear_itself_is_reported_as_a_failed_clear_every_time() {
+    let mut t = test_engine();
+    t.engine.handle_command(Command::ClearHistory);
+    t.drain();
+    let tag = clear_tag(&t);
+
+    t.engine.persist_failed(PathBuf::from("history.toml"), "first".to_string(), tag);
+    t.engine.persist_failed(PathBuf::from("history.toml"), "second".to_string(), tag);
+
+    let messages: Vec<String> = t.notices().into_iter().map(|(_, message)| message).collect();
+    assert_eq!(messages.len(), 2, "{messages:?}");
+    assert!(messages.iter().all(|message| message.starts_with("Couldn't clear transfer history")), "{messages:?}");
+}
+
+#[tokio::test]
+async fn a_failure_of_a_write_after_the_clear_is_a_save_failure_and_warns_once() {
+    let mut t = test_engine();
+    t.engine.handle_command(Command::ClearHistory);
+    t.drain();
+    let tag = clear_tag(&t);
+
+    t.engine.persist_failed(PathBuf::from("history.toml"), "disk full".to_string(), tag + 1);
+    t.engine.persist_failed(PathBuf::from("history.toml"), "disk full".to_string(), tag + 2);
+
+    let messages: Vec<String> = t.notices().into_iter().map(|(_, message)| message).collect();
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert!(messages[0].starts_with("Couldn't save transfer history"), "{messages:?}");
+}
+
+#[tokio::test]
+async fn a_failure_of_a_write_queued_before_the_clear_is_not_blamed_on_the_clear() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    job(&mut t, session, "a", None, JobStatus::Completed);
+    t.engine.publish_transfers();
+    t.engine.handle_command(Command::ClearHistory);
+    t.drain();
+    let tag = clear_tag(&t);
+
+    t.engine.persist_failed(PathBuf::from("history.toml"), "late".to_string(), tag - 1);
+
+    let notice = t.first_notice().expect("a notice");
+    assert!(notice.1.starts_with("Couldn't save transfer history"), "{}", notice.1);
+}
+
+#[tokio::test]
+async fn each_history_write_gets_a_new_tag() {
+    let mut t = test_engine();
+    t.engine.handle_command(Command::ClearHistory);
+    let first = clear_tag(&t);
+
+    t.engine.handle_command(Command::ClearHistory);
+
+    assert!(clear_tag(&t) > first);
 }

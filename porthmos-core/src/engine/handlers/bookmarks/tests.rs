@@ -77,3 +77,41 @@ fn removing_a_bookmark_deletes_it_and_says_so() {
     );
     assert_eq!(bookmark_events(events), vec![Vec::<Bookmark>::new()]);
 }
+
+#[test]
+fn a_protected_bookmarks_file_reports_an_error_instead_of_overwriting() {
+    let mut t = test_engine();
+    std::fs::create_dir_all(&t.engine.paths.config_dir).unwrap();
+    std::fs::write(t.engine.paths.bookmarks_file(), "garbage [").unwrap();
+    t.engine.bookmarks = crate::config::bookmarks::Bookmarks::protected_for_test(Vec::new());
+
+    t.engine.add_bookmark("home".to_string(), Location::Local, std::path::PathBuf::from("/home/me"));
+
+    assert_eq!(std::fs::read_to_string(t.engine.paths.bookmarks_file()).unwrap(), "garbage [");
+    assert_eq!(t.first_notice().map(|notice| notice.0), Some(Severity::Error));
+}
+
+#[test]
+fn a_protected_bookmarks_file_does_not_change_or_publish_the_list_on_add() {
+    let mut t = test_engine();
+    t.engine.bookmarks = crate::config::bookmarks::Bookmarks::protected_for_test(Vec::new());
+
+    t.engine.add_bookmark("home".to_string(), Location::Local, std::path::PathBuf::from("/home/me"));
+
+    assert!(t.engine.bookmarks.is_empty());
+    assert!(bookmark_events(t.drain()).is_empty());
+}
+
+#[test]
+fn a_protected_bookmarks_file_does_not_change_or_publish_the_list_on_remove() {
+    let mut t = test_engine();
+    let existing = Bookmark { label: "kept".to_string(), path: PathBuf::from("/kept"), host: None };
+    t.engine.bookmarks = crate::config::bookmarks::Bookmarks::protected_for_test(vec![existing]);
+
+    t.engine.remove_bookmark(0);
+
+    assert_eq!(t.engine.bookmarks.len(), 1);
+    let events = t.drain();
+    assert!(bookmark_events(events.clone()).is_empty());
+    assert!(events.iter().any(|event| matches!(event, Event::Notice { severity: Severity::Error, .. })));
+}

@@ -83,4 +83,58 @@ fn load_from_recovers_to_empty_on_malformed_toml() {
 
     assert!(bookmarks.is_empty());
     assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].0.contains("bookmarks.toml.broken"), "{}", warnings[0].0);
+    assert!(warnings[0].0.contains("line 1"), "{}", warnings[0].0);
+    assert_eq!(fs::read_to_string(dir.path().join("bookmarks.toml.broken")).unwrap(), "not [ valid");
+}
+
+#[test]
+fn saving_after_a_broken_file_was_set_aside_writes_a_fresh_file_and_keeps_the_old_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = crate::Paths::in_dir(dir.path());
+    std::fs::create_dir_all(&paths.config_dir).unwrap();
+    std::fs::write(paths.bookmarks_file(), "garbage [").unwrap();
+
+    let (mut bookmarks, warnings) = load(&paths).unwrap();
+    bookmarks.add(Bookmark { label: "home".into(), path: "/home/me".into(), host: None });
+    save_to(&paths.bookmarks_file(), &bookmarks).unwrap();
+
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(std::fs::read_to_string(paths.bookmarks_file().with_extension("toml.broken")).unwrap(), "garbage [");
+    assert_eq!(load(&paths).unwrap().0.len(), 1);
+}
+
+#[test]
+fn a_protected_bookmarks_file_is_never_overwritten() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let paths = crate::Paths::in_dir(dir.path());
+    std::fs::create_dir_all(&paths.config_dir).unwrap();
+    std::fs::write(paths.bookmarks_file(), "garbage [").unwrap();
+    std::fs::set_permissions(&paths.config_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    if std::fs::File::create(paths.config_dir.join("probe")).is_ok() {
+        std::fs::set_permissions(&paths.config_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        return;
+    }
+
+    let (mut bookmarks, _) = load(&paths).unwrap();
+    std::fs::set_permissions(&paths.config_dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    bookmarks.add(Bookmark { label: "home".into(), path: "/home/me".into(), host: None });
+
+    assert!(bookmarks.is_protected());
+    assert!(save_to(&paths.bookmarks_file(), &bookmarks).is_err());
+    assert_eq!(std::fs::read_to_string(paths.bookmarks_file()).unwrap(), "garbage [");
+}
+
+#[test]
+fn the_bookmarks_file_is_private() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("bookmarks.toml");
+
+    save_to(&path, &Bookmarks::default()).unwrap();
+
+    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
 }

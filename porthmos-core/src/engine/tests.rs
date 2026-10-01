@@ -256,6 +256,7 @@ async fn run_until_shutdown_waiting_for_uploads(
     let TestEngine { mut engine, internal, dir, events } = t;
     engine.shutdown_grace = grace;
     engine.upload_grace = upload_grace;
+    engine.flush_grace = Duration::from_millis(200);
     let (finished_tx, finished) = watch::channel(false);
     engine.finished = Some(finished_tx);
     let paths = engine.paths.clone();
@@ -469,4 +470,25 @@ async fn shutdown_without_an_upload_does_not_wait_for_the_upload_grace() {
     engine.shut_down().await;
 
     assert!(start.elapsed() < Duration::from_millis(1500));
+}
+
+#[tokio::test]
+async fn a_history_write_that_never_finishes_does_not_block_the_shutdown() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    let id = queue_job(&mut t, session, "a");
+    t.engine.transfers.get_mut(id).unwrap().status = JobStatus::InProgress;
+    std::fs::create_dir_all(&t.engine.paths.state_dir).unwrap();
+    let fifo = t.engine.paths.history_file().with_extension("toml.tmp");
+    let c_path = std::ffi::CString::new(fifo.as_os_str().as_bytes()).unwrap();
+    assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+    let mut engine = run_until_shutdown(t, Duration::from_millis(50)).await;
+    let start = std::time::Instant::now();
+
+    engine.shut_down().await;
+
+    assert!(start.elapsed() < Duration::from_secs(5));
+    let _release = std::fs::File::open(&fifo).unwrap();
 }

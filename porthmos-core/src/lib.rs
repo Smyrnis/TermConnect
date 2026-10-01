@@ -9,6 +9,7 @@ pub mod error;
 pub mod history;
 pub mod listing;
 pub mod paths;
+pub mod persist;
 pub mod profiles;
 mod protocol_info;
 pub mod secrets;
@@ -204,6 +205,7 @@ impl CoreBuilder {
             history,
             edit: self.settings.edit,
             publish_interval: engine::PROGRESS_SNAPSHOT_INTERVAL,
+            persist_interval: engine::PERSIST_INTERVAL,
         };
 
         let (events, event_receiver) = unbounded_channel();

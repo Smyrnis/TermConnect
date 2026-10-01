@@ -1,10 +1,4 @@
-use std::{
-    collections::BTreeMap,
-    fs,
-    io::Write,
-    os::unix::fs::OpenOptionsExt,
-    path::{Path, PathBuf},
-};
+use std::{collections::BTreeMap, fs, path::Path};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -119,19 +113,7 @@ fn read_config_file(path: &Path) -> Result<ConfigFile> {
 }
 
 fn write_config_file(path: &Path, file: &ConfigFile) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let temp_path = {
-        let mut name = path.as_os_str().to_owned();
-        name.push(".tmp");
-        PathBuf::from(name)
-    };
-    let mut handle = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&temp_path)?;
-    handle.write_all(toml::to_string_pretty(file)?.as_bytes())?;
-    drop(handle);
-    fs::rename(&temp_path, path)?;
-    Ok(())
+    crate::persist::write_atomic(path, toml::to_string_pretty(file)?.as_bytes(), 0o600)
 }
 
 #[cfg(test)]
