@@ -162,3 +162,61 @@ async fn a_missing_directory_is_not_found() {
 async fn home_is_the_configured_directory() {
     assert_eq!(LocalFs::new("/srv".into()).home().await.unwrap(), std::path::PathBuf::from("/srv"));
 }
+
+#[tokio::test]
+async fn set_modified_changes_the_modification_time() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("f");
+    std::fs::write(&file, b"x").unwrap();
+    let fs = LocalFs::new(dir.path().into());
+
+    fs.set_modified(&file, 1_700_000_000).await.unwrap();
+
+    assert!(fs.can_set_modified());
+    assert_eq!(fs.stat(&file).await.unwrap().modified, Some(1_700_000_000));
+}
+
+#[tokio::test]
+async fn set_modified_works_on_a_read_only_file_the_user_owns() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("f");
+    std::fs::write(&file, b"x").unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o444)).unwrap();
+
+    LocalFs::new(dir.path().into()).set_modified(&file, 1_600_000_000).await.unwrap();
+
+    assert_eq!(
+        std::fs::metadata(&file).unwrap().modified().unwrap(),
+        std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_600_000_000)
+    );
+}
+
+#[tokio::test]
+async fn set_modified_on_a_missing_file_is_not_found() {
+    let dir = tempfile::tempdir().unwrap();
+
+    let error = LocalFs::new(dir.path().into()).set_modified(&dir.path().join("missing"), 5).await.unwrap_err();
+
+    assert_eq!(error.kind(), ErrorKind::NotFound);
+}
+
+#[tokio::test]
+async fn set_modified_with_an_absurd_time_is_refused_and_leaves_the_file_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("f");
+    std::fs::write(&file, b"x").unwrap();
+    let before = std::fs::metadata(&file).unwrap().modified().unwrap();
+
+    let error = LocalFs::new(dir.path().into()).set_modified(&file, u64::MAX).await.unwrap_err();
+
+    assert_eq!(error.kind(), ErrorKind::Other);
+    assert!(error.to_string().contains("modification time"), "{error}");
+    assert_eq!(std::fs::metadata(&file).unwrap().modified().unwrap(), before);
+}
+
+#[test]
+fn the_local_resolution_is_the_default() {
+    assert_eq!(LocalFs::new(PathBuf::from("/")).time_resolution(), 2);
+}

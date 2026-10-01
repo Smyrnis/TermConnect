@@ -190,3 +190,13 @@ async fn a_move_the_server_never_answers_times_out() {
 
     assert_eq!(error.to_string(), "the server did not respond in time");
 }
+
+#[tokio::test]
+async fn the_connection_cannot_keep_modification_times() {
+    let (_server, fs, _dir) = open(Options::default()).await;
+
+    assert!(!fs.can_set_modified());
+    assert_eq!(fs.time_resolution(), 2);
+    let error = fs.set_modified(Path::new("/anything"), 5).await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Unsupported);
+}

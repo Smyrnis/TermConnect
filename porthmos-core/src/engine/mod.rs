@@ -50,6 +50,7 @@ pub(crate) enum TransferEvent {
     PlanFailed { batch_id: u64, message: String },
     PlanCancelled { batch_id: u64, session_id: u64, direction: Direction },
     PartialsRemoved { session_id: u64 },
+    TimesNotKept { id: u64 },
 }
 
 pub(crate) enum Internal {

@@ -5,12 +5,13 @@ use std::{
 };
 
 use anyhow::anyhow;
+use chrono::Datelike;
 use futures_util::future::BoxFuture;
 use porthmos_vfs::{
     DirItem, Entry, ErrorKind, FileKind, FileSystem, Metadata, ProtocolError, Reader, Writer, async_trait, join_remote,
     path_to_remote_string,
 };
-use suppaftp::{FtpError, FtpResult, Status};
+use suppaftp::{FtpError, FtpResult, Status, types::Response};
 use tokio::io::AsyncBufReadExt;
 
 use crate::{
@@ -24,6 +25,52 @@ use crate::{
 pub(crate) struct FtpFs {
     pool: Arc<Pool>,
     home: PathBuf,
+    mfmt: bool,
+}
+
+const LAST_MFMT_YEAR: i32 = 9999;
+
+pub(crate) fn mfmt_stamp(seconds: u64) -> Result<String, ProtocolError> {
+    let moment = i64::try_from(seconds)
+        .ok()
+        .and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0))
+        .filter(|moment| moment.year() <= LAST_MFMT_YEAR)
+        .ok_or_else(|| {
+            ProtocolError::new(
+                ErrorKind::Other,
+                anyhow!(
+                    "a modification time of {seconds} seconds is beyond year {LAST_MFMT_YEAR}, which FTP can't express"
+                ),
+            )
+        })?;
+    Ok(moment.format("%Y%m%d%H%M%S").to_string())
+}
+
+fn lists_mfmt(feature_reply: &[u8]) -> bool {
+    String::from_utf8_lossy(feature_reply)
+        .lines()
+        .filter_map(|line| line.split_whitespace().next())
+        .any(|feature| feature.eq_ignore_ascii_case("MFMT"))
+}
+
+const NO_EXPECTED_STATUS_READS_THE_WHOLE_REPLY: &[Status] = &[];
+
+fn whole_reply(result: FtpResult<Response>) -> FtpResult<Response> {
+    match result {
+        Ok(response) | Err(FtpError::UnexpectedResponse(response)) => Ok(response),
+        Err(err) => Err(err),
+    }
+}
+
+async fn advertises_mfmt(pool: &Pool) -> bool {
+    let reply = pool
+        .ask_once(|connection| {
+            Box::pin(async move {
+                whole_reply(connection.custom_command("FEAT", NO_EXPECTED_STATUS_READS_THE_WHOLE_REPLY).await)
+            })
+        })
+        .await;
+    matches!(reply, Some(response) if response.status == Status::System && lists_mfmt(&response.body))
 }
 
 fn not_found(path: &str) -> ProtocolError {
@@ -77,7 +124,8 @@ fn already_done(command: SimpleCommand, exists_now: bool) -> bool {
 impl FtpFs {
     pub(crate) async fn new(pool: Pool) -> Result<Self, ProtocolError> {
         let home = PathBuf::from(pool.run(|connection| Box::pin(connection.pwd())).await?);
-        Ok(Self { pool: Arc::new(pool), home })
+        let mfmt = advertises_mfmt(&pool).await;
+        Ok(Self { pool: Arc::new(pool), home, mfmt })
     }
 
     async fn mlsd(&self, path: &str) -> Result<Option<Vec<ListedItem>>, ProtocolError> {
@@ -342,6 +390,30 @@ impl FileSystem for FtpFs {
 
     async fn delete(&self, path: &Path) -> Result<(), ProtocolError> {
         self.remove_path(path_to_remote_string(path)).await
+    }
+
+    async fn set_modified(&self, path: &Path, seconds: u64) -> Result<(), ProtocolError> {
+        if !self.mfmt {
+            return Err(ProtocolError::new(
+                ErrorKind::Unsupported,
+                anyhow!("this server doesn't support setting modification times (MFMT)"),
+            ));
+        }
+        let command = format!("MFMT {} {}", mfmt_stamp(seconds)?, path_to_remote_string(path));
+        self.pool
+            .run(|connection| {
+                let command = command.clone();
+                Box::pin(async move { connection.custom_command(command, &[Status::File]).await.map(|_| ()) })
+            })
+            .await
+    }
+
+    fn can_set_modified(&self) -> bool {
+        self.mfmt
+    }
+
+    fn time_resolution(&self) -> u64 {
+        60
     }
 
     async fn home(&self) -> Result<PathBuf, ProtocolError> {

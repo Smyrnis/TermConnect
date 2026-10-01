@@ -6,7 +6,7 @@ use std::{
 use async_trait::async_trait;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::{DirItem, Entry, Metadata, ProtocolError, SearchQuery, SearchSender, search::walk_search};
+use crate::{DirItem, Entry, ErrorKind, Metadata, ProtocolError, SearchQuery, SearchSender, search::walk_search};
 
 pub type Reader = Box<dyn AsyncRead + Send + Unpin>;
 
@@ -35,6 +35,17 @@ pub trait FileSystem: Send + Sync {
     }
     fn resume_backoff(&self) -> u64 {
         0
+    }
+    async fn set_modified(&self, _path: &Path, _seconds: u64) -> Result<(), ProtocolError> {
+        Err(ProtocolError::new(ErrorKind::Unsupported, anyhow::anyhow!("this connection can't set modification times")))
+    }
+
+    fn can_set_modified(&self) -> bool {
+        false
+    }
+
+    fn time_resolution(&self) -> u64 {
+        2
     }
     async fn search(&self, query: SearchQuery, tx: SearchSender, cancel: Arc<AtomicBool>) {
         walk_search(self, query, tx, cancel).await

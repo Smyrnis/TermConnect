@@ -314,6 +314,7 @@ impl App {
             Event::EditReady { .. } => {}
             Event::EditsBusy(busy) => self.edits_busy = busy,
             Event::EditQuestion { edit_id, name, kind } => self.ask_edit_question(edit_id, &name, kind),
+            Event::SessionCapabilities { .. } => {}
         }
     }
 

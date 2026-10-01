@@ -17,6 +17,7 @@ pub enum Event {
     Notice { severity: Severity, message: String },
     Connecting { name: String },
     Connected { session: SessionId, name: String, shell_available: bool },
+    SessionCapabilities { session: SessionId, preserves_times: bool },
     ConnectFailed { name: String, message: String },
     Question { request_id: RequestId, question: Question },
     Disconnected { session: SessionId, name: String },

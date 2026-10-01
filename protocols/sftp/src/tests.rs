@@ -220,3 +220,12 @@ fn the_sftp_form_offers_an_optional_identity_file() {
 fn the_sftp_form_uses_no_reserved_keys() {
     assert!(Sftp.connection_form().reserved_key_collisions().is_empty());
 }
+
+#[test]
+fn sftp_times_fit_the_wire_format() {
+    use crate::fs::sftp_time;
+
+    assert_eq!(sftp_time(0), 0);
+    assert_eq!(sftp_time(1_700_000_000), 1_700_000_000);
+    assert_eq!(sftp_time(u64::from(u32::MAX) + 5), u32::MAX);
+}

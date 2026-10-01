@@ -919,3 +919,39 @@ fn the_cost_of_a_snapshot_does_not_grow_with_the_number_of_jobs() {
 
     assert!(large < small * 30.0, "per event: {small:.9}s at 1k jobs, {large:.9}s at 100k jobs");
 }
+
+#[test]
+fn a_batch_is_flagged_for_unkept_times_only_the_first_time() {
+    let mut queue = TransferQueue::new();
+    let batch_id = queue.start_batch("sync".to_string());
+    let other = queue.start_batch("again".to_string());
+
+    assert!(queue.flag_unkept_times(batch_id));
+    assert!(!queue.flag_unkept_times(batch_id));
+    assert!(queue.flag_unkept_times(other));
+}
+
+#[test]
+fn removing_the_jobs_of_a_batch_forgets_its_unkept_times_flag() {
+    let mut queue = TransferQueue::new();
+    let batch_id = queue.start_batch("sync".to_string());
+    let a = queue_with_a_batch_job(&mut queue, batch_id, "a.txt", 10);
+    queue.flag_unkept_times(batch_id);
+
+    queue.remove_jobs(&[a]);
+
+    assert!(!queue.has_unkept_times_flag(batch_id));
+}
+
+#[test]
+fn a_batch_that_still_has_jobs_keeps_its_unkept_times_flag() {
+    let mut queue = TransferQueue::new();
+    let batch_id = queue.start_batch("sync".to_string());
+    let a = queue_with_a_batch_job(&mut queue, batch_id, "a.txt", 10);
+    queue_with_a_batch_job(&mut queue, batch_id, "b.txt", 10);
+    queue.flag_unkept_times(batch_id);
+
+    queue.remove_jobs(&[a]);
+
+    assert!(queue.has_unkept_times_flag(batch_id));
+}

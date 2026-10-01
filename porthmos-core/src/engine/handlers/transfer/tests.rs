@@ -1,5 +1,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
+use porthmos_vfs::testing::FakeFs;
+
 use super::*;
 use crate::{
     engine::testing::{TestEngine, test_engine},
@@ -158,7 +160,7 @@ fn plan_ready_enqueues_every_planned_file_under_the_batch_id() {
     let batch_id = t.engine.transfers.start_batch("batch".to_string());
     let plan = plan(vec![planned("/local/a.txt", "/remote/a.txt", 10), planned("/local/b.txt", "/remote/b.txt", 20)]);
 
-    t.engine.apply_plan_ready(batch_id, 1, Direction::Upload, plan, &[]);
+    t.engine.apply_plan_ready(batch_id, 1, Direction::Upload, plan, &[], false);
 
     let progress = t.engine.transfers.batch_progress(batch_id);
     assert_eq!(progress.total_files, 2);
@@ -171,7 +173,7 @@ fn plan_ready_warns_once_about_skipped_symlinks() {
     let batch_id = t.engine.transfers.start_batch("batch".to_string());
     let plan = DirectoryPlan { files: Vec::new(), skipped_symlinks: 3, taken_names: HashMap::new() };
 
-    t.engine.apply_plan_ready(batch_id, 1, Direction::Upload, plan, &[]);
+    t.engine.apply_plan_ready(batch_id, 1, Direction::Upload, plan, &[], false);
 
     let (severity, message) = t.first_notice().unwrap();
     assert_eq!(severity, Severity::Warning);
@@ -532,8 +534,9 @@ fn a_ready_plan_keeps_its_label_only_when_it_has_files() {
         Direction::Upload,
         plan(vec![planned("/local/a.txt", "/remote/a.txt", 10)]),
         &[],
+        false,
     );
-    t.engine.apply_plan_ready(empty, 1, Direction::Upload, plan(Vec::new()), &[]);
+    t.engine.apply_plan_ready(empty, 1, Direction::Upload, plan(Vec::new()), &[], false);
 
     assert_eq!(t.engine.transfers.batch_label(with_files), Some("photos"));
     assert_eq!(t.engine.transfers.batch_label(empty), None);
@@ -918,4 +921,164 @@ fn cancelling_a_copy_that_is_only_waiting_for_conflict_answers_leaves_no_cancel_
     t.engine.cancel_row(RowKind::Scan(batch_id));
 
     assert!(!t.engine.tasks.take_cancelled(Scope::Planning(batch_id)));
+}
+
+#[test]
+fn preserving_times_marks_every_job_with_its_source_time() {
+    let mut t = test_engine();
+    let batch_id = t.engine.transfers.start_batch("sync".to_string());
+    let mut file = planned("/local/a.txt", "/remote/a.txt", 5);
+    file.source_modified = Some(77);
+
+    t.engine.apply_plan_ready(batch_id, 1, Direction::Upload, plan(vec![file]), &[], true);
+
+    let jobs: Vec<_> =
+        t.engine.transfers.jobs_of(RowKind::Batch(batch_id)).into_iter().map(|job| job.modified).collect();
+    assert_eq!(jobs, vec![Some(77)]);
+}
+
+#[test]
+fn ordinary_copies_never_ask_for_times_to_be_kept() {
+    let mut t = test_engine();
+    let batch_id = t.engine.transfers.start_batch("copy".to_string());
+    let mut file = planned("/local/a.txt", "/remote/a.txt", 5);
+    file.source_modified = Some(77);
+
+    t.engine.apply_plan_ready(batch_id, 1, Direction::Upload, plan(vec![file]), &[], false);
+
+    let jobs: Vec<_> =
+        t.engine.transfers.jobs_of(RowKind::Batch(batch_id)).into_iter().map(|job| job.modified).collect();
+    assert_eq!(jobs, vec![None]);
+}
+
+#[test]
+fn times_that_could_not_be_kept_are_reported_once_per_batch() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    let batch = t.engine.transfers.start_batch("sync".to_string());
+    let first = enqueue_job(&mut t, session, "a.txt", Some(batch));
+    let second = enqueue_job(&mut t, session, "b.txt", Some(batch));
+    let other_batch = t.engine.transfers.start_batch("sync again".to_string());
+    let third = enqueue_job(&mut t, session, "c.txt", Some(other_batch));
+
+    t.engine.handle_transfer_event(TransferEvent::TimesNotKept { id: first });
+    t.engine.handle_transfer_event(TransferEvent::TimesNotKept { id: second });
+    t.engine.handle_transfer_event(TransferEvent::TimesNotKept { id: third });
+
+    let warnings: Vec<String> = t
+        .notices()
+        .into_iter()
+        .filter(|(severity, _)| *severity == Severity::Warning)
+        .map(|(_, message)| message)
+        .collect();
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(warnings[0].contains("on prod") && warnings[0].contains("modification times"), "{warnings:?}");
+}
+
+#[test]
+fn a_time_warning_for_a_job_without_a_batch_or_that_is_gone_is_ignored() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    let loose = enqueue_job(&mut t, session, "a.txt", None);
+
+    t.engine.handle_transfer_event(TransferEvent::TimesNotKept { id: loose });
+    t.engine.handle_transfer_event(TransferEvent::TimesNotKept { id: 9999 });
+
+    assert!(t.notices().is_empty());
+}
+
+#[test]
+fn a_time_warning_for_a_download_blames_this_computer_not_the_connection() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    let batch = t.engine.transfers.start_batch("sync".to_string());
+    let local = t.dir.path().join("a.txt");
+    let id = t.engine.transfers.enqueue(
+        session,
+        Direction::Download,
+        local,
+        "/remote/a.txt".to_string(),
+        "a.txt".to_string(),
+        10,
+        Some(batch),
+    );
+
+    t.engine.handle_transfer_event(TransferEvent::TimesNotKept { id });
+
+    let (severity, message) = t.first_notice().unwrap();
+    assert_eq!(severity, Severity::Warning);
+    assert!(message.contains("on this computer") && !message.contains("prod"), "{message}");
+}
+
+#[test]
+fn clearing_a_finished_batch_forgets_that_it_was_warned_about_times() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    let batch = t.engine.transfers.start_batch("sync".to_string());
+    let id = enqueue_job(&mut t, session, "a.txt", Some(batch));
+    t.engine.handle_transfer_event(TransferEvent::TimesNotKept { id });
+    assert!(t.engine.transfers.has_unkept_times_flag(batch));
+    t.engine.transfers.get_mut(id).unwrap().status = JobStatus::Completed;
+
+    t.engine.clear_finished_rows();
+
+    assert!(!t.engine.transfers.has_unkept_times_flag(batch));
+}
+
+fn upload_two_files_preserving_times(t: &mut TestEngine, remote: &FakeFs, session: u64) {
+    remote.dir("/upload");
+    std::fs::write(t.dir.path().join("a.txt"), b"alpha").unwrap();
+    std::fs::write(t.dir.path().join("b.txt"), b"bravo").unwrap();
+    let batch_id = t.engine.transfers.start_batch("sync".to_string());
+    let mut first = planned(t.dir.path().join("a.txt").to_str().unwrap(), "/upload/a.txt", 5);
+    first.source_modified = Some(1_000);
+    let mut second = planned(t.dir.path().join("b.txt").to_str().unwrap(), "/upload/b.txt", 5);
+    second.source_modified = Some(2_000);
+
+    t.engine.apply_plan_ready(batch_id, session, Direction::Upload, plan(vec![first, second]), &[], true);
+}
+
+async fn finish_every_job(t: &mut TestEngine) {
+    while t.engine.transfers.jobs().any(|job| job.status != JobStatus::Completed) {
+        assert!(t.engine.transfers.jobs().all(|job| !matches!(job.status, JobStatus::Failed(_))));
+        t.run_internal().await;
+    }
+}
+
+fn time_warnings(t: &mut TestEngine) -> Vec<String> {
+    t.notices()
+        .into_iter()
+        .filter(|(severity, message)| *severity == Severity::Warning && message.contains("modification times"))
+        .map(|(_, message)| message)
+        .collect()
+}
+
+#[tokio::test]
+async fn uploads_to_a_connection_that_cannot_keep_times_complete_with_one_warning() {
+    let mut t = test_engine();
+    let remote = FakeFs::new().with_time_support(false);
+    let session = t.add_session_with("flat", Arc::new(remote.clone()));
+
+    upload_two_files_preserving_times(&mut t, &remote, session);
+    finish_every_job(&mut t).await;
+
+    assert_eq!(remote.contents("/upload/a.txt").unwrap(), b"alpha");
+    assert_eq!(remote.contents("/upload/b.txt").unwrap(), b"bravo");
+    let warnings = time_warnings(&mut t);
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(warnings[0].contains("on flat"), "{warnings:?}");
+}
+
+#[tokio::test]
+async fn uploads_to_a_connection_that_keeps_times_stamp_every_file_without_a_warning() {
+    let mut t = test_engine();
+    let remote = FakeFs::new();
+    let session = t.add_session_with("prod", Arc::new(remote.clone()));
+
+    upload_two_files_preserving_times(&mut t, &remote, session);
+    finish_every_job(&mut t).await;
+
+    assert_eq!(remote.modified_of("/upload/a.txt"), Some(1_000));
+    assert_eq!(remote.modified_of("/upload/b.txt"), Some(2_000));
+    assert!(time_warnings(&mut t).is_empty());
 }

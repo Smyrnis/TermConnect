@@ -226,6 +226,25 @@ impl FileSystem for ScpFs {
             .ok_or_else(|| ProtocolError::new(ErrorKind::NotFound, anyhow::anyhow!("{} not found", path.display())))
     }
 
+    async fn set_modified(&self, path: &Path, seconds: u64) -> Result<(), ProtocolError> {
+        let output = self.run(&commands::touch(path, seconds)).await?;
+        match output.status {
+            Some(0) => Ok(()),
+            Some(1) if output.stderr.is_empty() => {
+                Err(ProtocolError::new(ErrorKind::NotFound, anyhow::anyhow!("{} not found", path.display())))
+            }
+            status => Err(failure(&output.stderr, status, path, "touch")),
+        }
+    }
+
+    fn can_set_modified(&self) -> bool {
+        true
+    }
+
+    fn time_resolution(&self) -> u64 {
+        60
+    }
+
     async fn create_dir(&self, path: &Path) -> Result<(), ProtocolError> {
         self.run_ok(&commands::mkdir(path), path).await.map(|_| ())
     }

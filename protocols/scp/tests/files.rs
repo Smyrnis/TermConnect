@@ -141,3 +141,74 @@ async fn a_rename_into_a_missing_folder_names_the_target() {
         (ErrorKind::NotFound, format!("{} not found", at(&server, "no/such/f").display()))
     );
 }
+
+#[tokio::test]
+async fn set_modified_changes_the_time_of_a_file_with_an_awkward_name() {
+    let (server, fs) = open().await;
+    let path = at(&server, "it's a $name \u{e9}.txt");
+    std::fs::write(&path, b"x").unwrap();
+
+    fs.set_modified(&path, 1_700_000_000).await.unwrap();
+
+    assert!(fs.can_set_modified());
+    assert_eq!(fs.time_resolution(), 60);
+    let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+    assert_eq!(modified, std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000));
+}
+
+#[tokio::test]
+async fn set_modified_on_a_missing_file_is_an_error() {
+    let (server, fs) = open().await;
+
+    let error = fs.set_modified(&at(&server, "missing"), 5).await.unwrap_err();
+
+    assert_eq!(error.kind(), ErrorKind::NotFound);
+}
+
+#[tokio::test]
+async fn set_modified_on_a_missing_file_does_not_create_it() {
+    let (server, fs) = open().await;
+    let path = at(&server, "missing");
+
+    let _ = fs.set_modified(&path, 5).await;
+
+    assert!(!path.exists());
+}
+
+#[tokio::test]
+async fn an_old_file_keeps_its_exact_time_through_set_modified_and_a_listing() {
+    let (server, fs) = open().await;
+    let path = at(&server, "old.txt");
+    std::fs::write(&path, b"x").unwrap();
+
+    fs.set_modified(&path, 1_400_000_123).await.unwrap();
+
+    assert_eq!(fs.stat(&path).await.unwrap().modified, Some(1_400_000_123));
+    let listed = fs.read_dir(server.root.path()).await.unwrap();
+    let item = listed.iter().find(|item| item.name == "old.txt").unwrap();
+    assert_eq!(item.metadata.modified, Some(1_400_000_123));
+}
+
+#[tokio::test]
+async fn set_modified_runs_a_single_command() {
+    let (server, fs) = open().await;
+    let path = at(&server, "one.txt");
+    std::fs::write(&path, b"x").unwrap();
+    let before = server.started_commands();
+
+    fs.set_modified(&path, 1_700_000_000).await.unwrap();
+
+    assert_eq!(server.started_commands() - before, 1);
+}
+
+#[tokio::test]
+async fn set_modified_on_a_dangling_link_is_not_found_and_creates_nothing() {
+    let (server, fs) = open().await;
+    let link = at(&server, "dangling");
+    std::os::unix::fs::symlink(at(&server, "target"), &link).unwrap();
+
+    let error = fs.set_modified(&link, 5).await.unwrap_err();
+
+    assert_eq!(error.kind(), ErrorKind::NotFound);
+    assert!(!at(&server, "target").exists());
+}

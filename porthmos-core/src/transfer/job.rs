@@ -39,6 +39,7 @@ pub struct TransferJob {
     pub attempts: u32,
     pub batch_id: Option<u64>,
     pub resume: bool,
+    pub modified: Option<u64>,
 }
 
 impl TransferJob {

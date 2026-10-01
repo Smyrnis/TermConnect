@@ -30,6 +30,7 @@ pub(crate) struct Pool {
     main: Mutex<Connection>,
     idle: std::sync::Mutex<Vec<Connection>>,
     mlst_missing: AtomicBool,
+    main_out_of_step: AtomicBool,
 }
 
 pub(crate) fn timed_out() -> FtpError {
@@ -64,6 +65,7 @@ impl Pool {
             main: Mutex::new(main),
             idle: std::sync::Mutex::default(),
             mlst_missing: AtomicBool::new(false),
+            main_out_of_step: AtomicBool::new(false),
         }
     }
 
@@ -83,6 +85,10 @@ impl Pool {
         &self, limit: Duration, op: impl for<'c> Fn(&'c mut Connection) -> ConnectionFuture<'c, T>,
     ) -> Result<Attempt<T>, ProtocolError> {
         let mut main = self.main.lock().await;
+        if self.main_out_of_step.load(Ordering::Relaxed) {
+            *main = open_logged_in(&self.context, &self.password).await?;
+            self.main_out_of_step.store(false, Ordering::Relaxed);
+        }
         match within(limit, op(&mut main)).await {
             Err(FtpError::BadResponse) if within(self.context.timeout, main.noop()).await.is_ok() => {
                 Ok(Attempt { result: Err(FtpError::BadResponse), replayed: false })
@@ -92,6 +98,21 @@ impl Pool {
                 Ok(Attempt { result: within(limit, op(&mut main)).await, replayed: true })
             }
             result => Ok(Attempt { result, replayed: false }),
+        }
+    }
+
+    pub(crate) async fn ask_once<T>(
+        &self, op: impl for<'c> Fn(&'c mut Connection) -> ConnectionFuture<'c, T>,
+    ) -> Option<T> {
+        let mut main = self.main.lock().await;
+        match within(self.context.timeout, op(&mut main)).await {
+            Ok(answer) => Some(answer),
+            Err(err) => {
+                if is_connection_lost(&err) {
+                    self.main_out_of_step.store(true, Ordering::Relaxed);
+                }
+                None
+            }
         }
     }
 

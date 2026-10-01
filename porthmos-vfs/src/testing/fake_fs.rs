@@ -85,6 +85,8 @@ pub struct FakeFs {
     tree: Arc<Mutex<Tree>>,
     resume_backoff: u64,
     home: PathBuf,
+    time_support: bool,
+    time_resolution: u64,
 }
 
 impl Default for FakeFs {
@@ -95,7 +97,13 @@ impl Default for FakeFs {
 
 impl FakeFs {
     pub fn new() -> Self {
-        let fs = Self { tree: Arc::default(), resume_backoff: 0, home: PathBuf::from("/home/user") };
+        let fs = Self {
+            tree: Arc::default(),
+            resume_backoff: 0,
+            home: PathBuf::from("/home/user"),
+            time_support: true,
+            time_resolution: 2,
+        };
         fs.dir("/home/user");
         fs
     }
@@ -148,6 +156,23 @@ impl FakeFs {
     pub fn with_resume_backoff(mut self, bytes: u64) -> Self {
         self.resume_backoff = bytes;
         self
+    }
+
+    pub fn with_time_support(mut self, supported: bool) -> Self {
+        self.time_support = supported;
+        self
+    }
+
+    pub fn with_time_resolution(mut self, seconds: u64) -> Self {
+        self.time_resolution = seconds;
+        self
+    }
+
+    pub fn modified_of(&self, path: impl AsRef<Path>) -> Option<u64> {
+        match self.tree.lock().unwrap().nodes.get(path.as_ref()) {
+            Some(Node::File { modified, .. }) => *modified,
+            _ => None,
+        }
     }
 
     pub fn with_home(mut self, home: impl AsRef<Path>) -> Self {
@@ -207,6 +232,31 @@ impl AsyncWrite for FakeWriter {
 
 #[async_trait]
 impl FileSystem for FakeFs {
+    async fn set_modified(&self, path: &Path, seconds: u64) -> Result<(), ProtocolError> {
+        if !self.time_support {
+            return Err(ProtocolError::new(
+                ErrorKind::Unsupported,
+                anyhow::anyhow!("this connection can't set modification times"),
+            ));
+        }
+        let mut tree = self.tree.lock().unwrap();
+        match tree.nodes.get_mut(path) {
+            Some(Node::File { modified, .. }) => {
+                *modified = Some(seconds);
+                Ok(())
+            }
+            _ => Err(not_found(path)),
+        }
+    }
+
+    fn can_set_modified(&self) -> bool {
+        self.time_support
+    }
+
+    fn time_resolution(&self) -> u64 {
+        self.time_resolution
+    }
+
     async fn list(&self, dir: &Path) -> Result<Vec<Entry>, ProtocolError> {
         let tree = self.tree.lock().unwrap();
         if !matches!(tree.resolve(dir), Some(Node::Dir)) {

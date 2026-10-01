@@ -282,3 +282,13 @@ async fn a_short_copy_keeps_the_source_and_removes_the_bad_copy() {
     assert_eq!(std::fs::read(server.bucket_dir().join("a.txt")).unwrap(), b"0123456789");
     assert!(!server.bucket_dir().join("b.txt").exists());
 }
+
+#[tokio::test]
+async fn the_connection_cannot_keep_modification_times() {
+    let (_server, fs, _dir) = open(Options::default()).await;
+
+    assert!(!fs.can_set_modified());
+    assert_eq!(fs.time_resolution(), 2);
+    let error = fs.set_modified(Path::new("/anything"), 5).await.unwrap_err();
+    assert_eq!(error.kind(), ErrorKind::Unsupported);
+}

@@ -1,6 +1,10 @@
 mod support;
 
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{
+    path::Path,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use porthmos_ftp::Ftp;
 use porthmos_vfs::{Answer, ErrorKind, FileKind, FileSystem, Protocol};
@@ -218,4 +222,84 @@ async fn a_server_that_never_answers_the_login_times_out() {
 
     let error = result.expect("connecting must give up by itself").err().unwrap();
     assert!(error.to_string().contains("timed out logging in"), "{error}");
+}
+
+#[tokio::test]
+async fn a_server_that_lists_mfmt_can_set_times() {
+    let server = scripted::start(Script { mfmt: true, ..Script::default() }).await;
+    server.file("/a.txt", b"12345");
+    let fs = connect(server.port).await;
+
+    fs.set_modified(Path::new("/a.txt"), 1_700_000_000).await.unwrap();
+
+    assert!(fs.can_set_modified());
+    assert_eq!(fs.time_resolution(), 60);
+    assert_eq!(server.mfmt_calls.lock().unwrap().as_slice(), [("20231114221320".to_string(), "/a.txt".to_string())]);
+}
+
+#[tokio::test]
+async fn a_server_without_mfmt_cannot_set_times_and_is_never_asked() {
+    let server = scripted::start(Script::default()).await;
+    server.file("/a.txt", b"12345");
+    let fs = connect(server.port).await;
+
+    let error = fs.set_modified(Path::new("/a.txt"), 5).await.unwrap_err();
+
+    assert!(!fs.can_set_modified());
+    assert_eq!(error.kind(), ErrorKind::Unsupported);
+    assert!(server.mfmt_calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mfmt_on_a_missing_file_is_not_found() {
+    let server = scripted::start(Script { mfmt: true, ..Script::default() }).await;
+    let fs = connect(server.port).await;
+
+    let error = fs.set_modified(Path::new("/missing"), 5).await.unwrap_err();
+
+    assert_eq!(error.kind(), ErrorKind::NotFound);
+}
+
+#[tokio::test]
+async fn a_server_that_never_answers_feat_costs_one_timeout_and_one_connection() {
+    let server = scripted::start(Script { silent_on_feat: true, ..Script::default() }).await;
+
+    let started = Instant::now();
+    let fs = connect(server.port).await;
+    let elapsed = started.elapsed();
+
+    assert!(elapsed >= TEST_TIMEOUT, "{elapsed:?}");
+    assert!(elapsed < TEST_TIMEOUT * 3 / 2, "{elapsed:?}");
+    assert_eq!(server.connection_count(), 1);
+    assert_eq!(server.passwords.lock().unwrap().len(), 1);
+    assert!(!fs.can_set_modified());
+}
+
+#[tokio::test]
+async fn a_late_feat_reply_never_answers_a_later_command() {
+    let server = scripted::start(Script { feat_delay: Some(TEST_TIMEOUT * 3 / 2), ..Script::default() }).await;
+    server.file("/a.txt", b"12345");
+    let fs = connect(server.port).await;
+    assert_eq!(server.connection_count(), 1);
+
+    let metadata = fs.stat(Path::new("/a.txt")).await.unwrap();
+
+    assert_eq!(metadata.size, 5);
+    assert_eq!(server.connection_count(), 2);
+    assert!(!fs.can_set_modified());
+}
+
+#[tokio::test]
+async fn a_time_beyond_year_9999_is_refused_without_asking_the_server() {
+    let server = scripted::start(Script { mfmt: true, ..Script::default() }).await;
+    server.file("/a.txt", b"12345");
+    let fs = connect(server.port).await;
+
+    for seconds in [253_402_300_800, u64::MAX] {
+        let error = fs.set_modified(Path::new("/a.txt"), seconds).await.unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::Other, "{seconds}");
+    }
+    fs.set_modified(Path::new("/a.txt"), 253_402_300_799).await.unwrap();
+
+    assert_eq!(server.mfmt_calls.lock().unwrap().as_slice(), [("99991231235959".to_string(), "/a.txt".to_string())]);
 }

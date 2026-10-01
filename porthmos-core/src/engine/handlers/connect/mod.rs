@@ -57,13 +57,19 @@ async fn secured_target(entry: &ConnectionEntry, secret_keys: &[&'static str], s
 }
 
 impl Engine {
+    fn emit_connected(&self, session: u64, name: String, shell_available: bool) {
+        let preserves_times = self.sessions.get(&session).is_some_and(|live| live.fs.can_set_modified());
+        self.emit(Event::Connected { session, name, shell_available });
+        self.emit(Event::SessionCapabilities { session, preserves_times });
+    }
+
     pub(crate) fn connect(&mut self, profile: &str) {
         if let Some((&session, live)) = self.sessions.iter().find(|(_, live)| live.name == profile) {
             let name = live.name.clone();
             let shell_available = self
                 .shell_target(session)
                 .is_some_and(|target| self.sessions[&session].protocol.shell_command(&target, &self.env).is_some());
-            self.emit(Event::Connected { session, name, shell_available });
+            self.emit_connected(session, name, shell_available);
             return;
         }
         if self.connecting.contains(profile) {
@@ -131,7 +137,7 @@ impl Engine {
         let shell_available = self
             .shell_target(session)
             .is_some_and(|target| self.sessions[&session].protocol.shell_command(&target, &self.env).is_some());
-        self.emit(Event::Connected { session, name, shell_available });
+        self.emit_connected(session, name, shell_available);
         self.open_start_directory(session);
     }
 

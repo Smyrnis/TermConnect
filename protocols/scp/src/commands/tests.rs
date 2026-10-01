@@ -6,7 +6,7 @@ use super::*;
 
 #[test]
 fn listing_commands_use_utc_and_the_c_locale() {
-    let env = "TZ=UTC0 LC_ALL=C QUOTING_STYLE=literal TIME_STYLE=locale";
+    let env = "TZ=UTC0 LC_ALL=C QUOTING_STYLE=literal TIME_STYLE=+%s";
     assert_eq!(list(Path::new("/srv/a b")), format!("{env} ls -lanL -- '/srv/a b/'"));
     assert_eq!(list(Path::new("/")), format!("{env} ls -lanL -- '/'"));
     assert_eq!(stat(Path::new("/it's")), format!(r"{env} ls -ldnL -- '/it'\''s'"));
@@ -57,4 +57,13 @@ fn stderr_maps_to_error_kinds() {
 #[test]
 fn the_probe_marks_a_working_shell() {
     assert!(PROBE.starts_with("printf 'porthmos"));
+}
+
+#[test]
+fn touch_tests_for_the_file_then_stamps_it_without_creating_one() {
+    let quoted = shell_quote("/srv/it's a $dir/file name");
+
+    let command = touch(Path::new("/srv/it's a $dir/file name"), 1_700_000_000);
+
+    assert_eq!(command, format!("test -e {quoted} && touch -c -d @1700000000 -- {quoted}"));
 }

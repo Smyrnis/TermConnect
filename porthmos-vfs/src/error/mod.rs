@@ -9,6 +9,7 @@ pub enum ErrorKind {
     Cancelled,
     NotFound,
     PermissionDenied,
+    Unsupported,
     Other,
 }
 

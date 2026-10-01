@@ -28,6 +28,9 @@ pub struct Script {
     pub silent_from_start: bool,
     pub mdtm_reply: Option<&'static str>,
     pub listing_delay: Option<Duration>,
+    pub mfmt: bool,
+    pub silent_on_feat: bool,
+    pub feat_delay: Option<Duration>,
 }
 
 #[derive(Clone)]
@@ -36,6 +39,7 @@ pub struct Scripted {
     pub tree: Arc<Mutex<BTreeMap<String, Node>>>,
     pub connections: Arc<AtomicUsize>,
     pub passwords: Arc<Mutex<Vec<String>>>,
+    pub mfmt_calls: Arc<Mutex<Vec<(String, String)>>>,
 }
 
 impl Scripted {
@@ -107,15 +111,21 @@ pub async fn start(script: Script) -> Scripted {
     let tree: Arc<Mutex<BTreeMap<String, Node>>> = Arc::default();
     let connections: Arc<AtomicUsize> = Arc::default();
     let passwords: Arc<Mutex<Vec<String>>> = Arc::default();
-    let scripted =
-        Scripted { port, tree: tree.clone(), connections: connections.clone(), passwords: passwords.clone() };
+    let mfmt_calls: Arc<Mutex<Vec<(String, String)>>> = Arc::default();
+    let scripted = Scripted {
+        port,
+        tree: tree.clone(),
+        connections: connections.clone(),
+        passwords: passwords.clone(),
+        mfmt_calls: mfmt_calls.clone(),
+    };
     tokio::spawn(async move {
         loop {
             let Ok((stream, _)) = listener.accept().await else {
                 return;
             };
             connections.fetch_add(1, Ordering::SeqCst);
-            tokio::spawn(serve(stream, tree.clone(), script.clone(), passwords.clone()));
+            tokio::spawn(serve(stream, tree.clone(), script.clone(), passwords.clone(), mfmt_calls.clone()));
         }
     });
     scripted
@@ -130,6 +140,7 @@ fn record_password(
 
 async fn serve(
     stream: TcpStream, tree: Arc<Mutex<BTreeMap<String, Node>>>, script: Script, passwords: Arc<Mutex<Vec<String>>>,
+    mfmt_calls: Arc<Mutex<Vec<(String, String)>>>,
 ) {
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
@@ -158,7 +169,13 @@ async fn serve(
                 }
             },
             "TYPE" | "OPTS" => "200 ok".to_string(),
-            "FEAT" => "211 no features".to_string(),
+            "FEAT" if script.silent_on_feat => continue,
+            "FEAT" => {
+                if let Some(delay) = script.feat_delay {
+                    tokio::time::sleep(delay).await;
+                }
+                if script.mfmt { "211-Features:\r\n MFMT\r\n211 End" } else { "211 no features" }.to_string()
+            }
             "PWD" => format!("257 \"{cwd}\""),
             "NOOP" => "200 ok".to_string(),
             "CWD" => {
@@ -189,6 +206,16 @@ async fn serve(
                 Some(Node::File(_)) => script.mdtm_reply.unwrap_or("213 20260301123400").to_string(),
                 _ => "550 No such file or directory".to_string(),
             },
+            "MFMT" if script.mfmt => {
+                let (stamp, path) = argument.split_once(' ').unwrap_or((argument, ""));
+                match tree.lock().unwrap().get(&absolute(&cwd, path)) {
+                    Some(Node::File(_)) => {
+                        mfmt_calls.lock().unwrap().push((stamp.to_string(), absolute(&cwd, path)));
+                        format!("213 Modify={stamp}; {path}")
+                    }
+                    _ => "550 No such file or directory".to_string(),
+                }
+            }
             "MKD" => {
                 tree.lock().unwrap().insert(absolute(&cwd, argument), Node::Dir);
                 "257 created".to_string()

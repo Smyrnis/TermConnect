@@ -16,10 +16,25 @@ pub enum TransferOutcome {
     Cancelled,
 }
 
+pub struct Executed {
+    pub outcome: TransferOutcome,
+    pub times_kept: bool,
+}
+
 pub async fn execute(
     source: &dyn FileSystem, source_path: &Path, destination: &dyn FileSystem, destination_path: &Path,
     cancel: &AtomicBool, resume: bool, on_progress: impl FnMut(u64) + Send,
 ) -> Result<TransferOutcome, ProtocolError> {
+    execute_preserving(source, source_path, destination, destination_path, cancel, resume, None, on_progress)
+        .await
+        .map(|executed| executed.outcome)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn execute_preserving(
+    source: &dyn FileSystem, source_path: &Path, destination: &dyn FileSystem, destination_path: &Path,
+    cancel: &AtomicBool, resume: bool, keep_modified: Option<u64>, on_progress: impl FnMut(u64) + Send,
+) -> Result<Executed, ProtocolError> {
     let source_metadata = source.stat(source_path).await?;
     let part = part_path(destination_path);
     let offset = if resume {
@@ -45,10 +60,14 @@ pub async fn execute(
         (Ok(TransferOutcome::Completed), Err(err)) => Err(ProtocolError::from(err)),
         (result, _) => result,
     };
+    let mut times_kept = true;
     if let Ok(TransferOutcome::Completed) = result {
         destination.rename(&part, destination_path).await?;
+        if let Some(seconds) = keep_modified {
+            times_kept = destination.set_modified(destination_path, seconds).await.is_ok();
+        }
     }
-    result
+    result.map(|outcome| Executed { outcome, times_kept })
 }
 
 pub(crate) fn resume_offset(

@@ -7,7 +7,7 @@ use porthmos_vfs::{ErrorKind, ProtocolError, path_to_remote_string};
 pub(crate) const PROBE: &str =
     "printf 'porthmos\\n%s\\n' \"$HOME\"; if command -v scp >/dev/null 2>&1; then echo scp; fi";
 pub(crate) const PROBE_MARKER: &str = "porthmos";
-const LISTING_ENVIRONMENT: &str = "TZ=UTC0 LC_ALL=C QUOTING_STYLE=literal TIME_STYLE=locale";
+const LISTING_ENVIRONMENT: &str = "TZ=UTC0 LC_ALL=C QUOTING_STYLE=literal TIME_STYLE=+%s";
 
 fn quoted(path: &Path) -> String {
     shell_quote(&path_to_remote_string(path))
@@ -27,6 +27,10 @@ pub(crate) fn stat(path: &Path) -> String {
 
 pub(crate) fn mkdir(path: &Path) -> String {
     format!("mkdir -- {}", quoted(path))
+}
+
+pub(crate) fn touch(path: &Path, seconds: u64) -> String {
+    format!("test -e {path} && touch -c -d @{seconds} -- {path}", path = quoted(path))
 }
 
 pub(crate) fn remove(path: &Path) -> String {

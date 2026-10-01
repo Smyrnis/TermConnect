@@ -120,18 +120,20 @@ impl Engine {
             Direction::Download => (remote_path, local_path),
         };
         let resume = job.resume;
+        let keep_modified = job.modified;
         drop(job);
 
         let internal = self.internal.clone();
         self.tasks.spawn("transfer", Scope::Transfer(id), move |cancel| async move {
             let progress = internal.clone();
-            let result = transfer::run(
+            let result = transfer::execute_preserving(
                 source.as_ref(),
                 &source_path,
                 destination.as_ref(),
                 &destination_path,
                 &cancel,
                 resume,
+                keep_modified,
                 move |transferred| {
                     let _ = progress.send(Internal::Transfer(TransferEvent::Progress { id, transferred }));
                 },
@@ -139,7 +141,12 @@ impl Engine {
             .await;
 
             let event = match result {
-                Ok(outcome) => TransferEvent::Finished { id, outcome },
+                Ok(executed) => {
+                    if !executed.times_kept {
+                        let _ = internal.send(Internal::Transfer(TransferEvent::TimesNotKept { id }));
+                    }
+                    TransferEvent::Finished { id, outcome: executed.outcome }
+                }
                 Err(err) => {
                     tracing::debug!("{err:?}");
                     TransferEvent::Failed {
@@ -214,6 +221,27 @@ impl Engine {
                     None => self.report(Severity::Error, message),
                 }
             }
+            TransferEvent::TimesNotKept { id } => {
+                let Some((batch_id, session_id, direction)) = self
+                    .transfers
+                    .get(id)
+                    .and_then(|job| job.batch_id.map(|batch| (batch, job.session_id, job.direction)))
+                else {
+                    return;
+                };
+                if self.transfers.flag_unkept_times(batch_id) {
+                    let connection = match direction {
+                        Direction::Upload => self.session_name(session_id),
+                        Direction::Download => "this computer".to_string(),
+                    };
+                    self.report(
+                        Severity::Warning,
+                        format!(
+                            "Couldn't keep the modification times on {connection}; the next sync will list these files again"
+                        ),
+                    );
+                }
+            }
             TransferEvent::PartialsRemoved { session_id } => self.refresh_destination(session_id, Direction::Upload),
             TransferEvent::PlanCancelled { batch_id, session_id, direction } => {
                 self.clear_planning(batch_id);
@@ -231,13 +259,13 @@ impl Engine {
     ) {
         let conflicts = transfer::conflicts::conflict_indices(&plan);
         if conflicts.is_empty() {
-            self.apply_plan_ready(batch_id, session_id, direction, plan, &[]);
+            self.apply_plan_ready(batch_id, session_id, direction, plan, &[], false);
             return;
         }
         let automatic: Option<Vec<Resolution>> =
             conflicts.iter().map(|index| self.on_conflict.resolution_for(&plan.files[*index])).collect();
         if let Some(answers) = automatic {
-            self.apply_plan_ready(batch_id, session_id, direction, plan, &answers);
+            self.apply_plan_ready(batch_id, session_id, direction, plan, &answers, false);
             return;
         }
         let files: Vec<ConflictInfo> = conflicts.iter().map(|index| ConflictInfo::from(&plan.files[*index])).collect();
@@ -253,9 +281,14 @@ impl Engine {
             return;
         };
         match answers {
-            Some(answers) => {
-                self.apply_plan_ready(review.batch_id, review.session_id, review.direction, review.plan, &answers)
-            }
+            Some(answers) => self.apply_plan_ready(
+                review.batch_id,
+                review.session_id,
+                review.direction,
+                review.plan,
+                &answers,
+                false,
+            ),
             None => {
                 self.transfers.forget_batch_if_empty(review.batch_id);
                 self.info("Copy cancelled");
@@ -279,6 +312,7 @@ impl Engine {
 
     pub(crate) fn apply_plan_ready(
         &mut self, batch_id: u64, session_id: u64, direction: Direction, plan: DirectoryPlan, answers: &[Resolution],
+        preserve_times: bool,
     ) {
         let skipped_symlinks = plan.skipped_symlinks;
         let resolved = transfer::conflicts::resolve(plan, answers);
@@ -289,6 +323,7 @@ impl Engine {
 
         for file in files {
             let resume = file.resume;
+            let keep_modified = if preserve_times { file.source_modified } else { None };
             let (local_path, remote_path) = match direction {
                 Direction::Upload => (file.source, file.destination),
                 Direction::Download => (file.destination, file.source),
@@ -304,6 +339,11 @@ impl Engine {
             );
             if resume && let Some(mut job) = self.transfers.get_mut(id) {
                 job.resume = true;
+            }
+            if keep_modified.is_some()
+                && let Some(mut job) = self.transfers.get_mut(id)
+            {
+                job.modified = keep_modified;
             }
         }
         if skipped_symlinks > 0 {

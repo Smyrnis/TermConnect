@@ -43,6 +43,7 @@ struct Handler {
     open: Arc<Mutex<HashSet<ChannelId>>>,
     running: Arc<AtomicUsize>,
     peak: Arc<AtomicUsize>,
+    started: Arc<AtomicUsize>,
 }
 
 impl server::Server for Handler {
@@ -164,6 +165,7 @@ impl server::Handler for Handler {
             .spawn()
             .map_err(russh::Error::IO)?;
         let (running, peak, open) = (self.running.clone(), self.peak.clone(), self.open.clone());
+        self.started.fetch_add(1, Ordering::SeqCst);
         let now = running.fetch_add(1, Ordering::SeqCst) + 1;
         peak.fetch_max(now, Ordering::SeqCst);
         tokio::spawn(async move {
@@ -195,6 +197,7 @@ pub struct SshServer {
     pub root: tempfile::TempDir,
     known_hosts: tempfile::TempDir,
     peak: Arc<AtomicUsize>,
+    started: Arc<AtomicUsize>,
 }
 
 impl SshServer {
@@ -209,6 +212,7 @@ impl SshServer {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("a free port");
         let port = listener.local_addr().expect("a bound address").port();
         let peak = Arc::new(AtomicUsize::new(0));
+        let started = Arc::new(AtomicUsize::new(0));
         let mut handler = Handler {
             root: root.path().to_path_buf(),
             path: search_path(options.hide_scp),
@@ -217,11 +221,12 @@ impl SshServer {
             open: Arc::default(),
             running: Arc::default(),
             peak: peak.clone(),
+            started: started.clone(),
         };
         tokio::spawn(async move {
             let _ = handler.run_on_socket(config, &listener).await;
         });
-        Self { port, root, known_hosts: tempfile::tempdir().expect("a temporary directory"), peak }
+        Self { port, root, known_hosts: tempfile::tempdir().expect("a temporary directory"), peak, started }
     }
 
     pub fn known_hosts(&self) -> PathBuf {
@@ -251,6 +256,10 @@ impl SshServer {
 
     pub fn peak_commands(&self) -> usize {
         self.peak.load(Ordering::SeqCst)
+    }
+
+    pub fn started_commands(&self) -> usize {
+        self.started.load(Ordering::SeqCst)
     }
 }
 

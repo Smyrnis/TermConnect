@@ -51,6 +51,10 @@ pub fn metadata_from_sftp(metadata: &SftpMetadata) -> Metadata {
     Metadata { size: metadata.len(), modified: metadata.mtime.map(u64::from), kind, permissions: metadata.permissions }
 }
 
+pub(crate) fn sftp_time(seconds: u64) -> u32 {
+    u32::try_from(seconds).unwrap_or(u32::MAX)
+}
+
 fn remote(path: &Path) -> String {
     path_to_remote_string(path)
 }
@@ -164,6 +168,18 @@ impl FileSystem for SftpFs {
         } else {
             self.sftp.remove_file(&path).await.map_err(sftp_error)
         }
+    }
+
+    async fn set_modified(&self, path: &Path, seconds: u64) -> Result<(), ProtocolError> {
+        let stamp = sftp_time(seconds);
+        let mut attributes = FileAttributes::empty();
+        attributes.atime = Some(stamp);
+        attributes.mtime = Some(stamp);
+        self.sftp.set_metadata(remote(path), attributes).await.map_err(sftp_error)
+    }
+
+    fn can_set_modified(&self) -> bool {
+        true
     }
 
     async fn home(&self) -> Result<PathBuf, ProtocolError> {

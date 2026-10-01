@@ -236,7 +236,11 @@ async fn connecting_to_an_already_connected_profile_reuses_the_session() {
 
     t.engine.handle_command(Command::Connect { profile: "srv".into() });
 
-    assert!(matches!(t.drain().as_slice(), [Event::Connected { session: id, .. }] if *id == session));
+    assert!(matches!(
+        t.drain().as_slice(),
+        [Event::Connected { session: id, .. }, Event::SessionCapabilities { session: capable, .. }]
+            if *id == session && *capable == session
+    ));
     assert_eq!(t.engine.sessions.len(), 1);
 }
 
@@ -944,4 +948,37 @@ async fn an_old_plaintext_secret_option_is_never_given_to_the_protocol() {
     let target = seen_targets.lock().unwrap().clone().unwrap();
     assert!(!target.options.contains_key("token"));
     assert!(!format!("{seen:?}").contains("plain-old"));
+}
+
+#[test]
+fn connecting_announces_whether_the_session_can_keep_times() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    t.drain();
+
+    t.engine.connect("prod");
+
+    let capabilities: Vec<(u64, bool)> = t
+        .drain()
+        .into_iter()
+        .filter_map(|event| match event {
+            Event::SessionCapabilities { session, preserves_times } => Some((session, preserves_times)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(capabilities, vec![(session, true)]);
+}
+
+#[test]
+fn a_session_on_a_filesystem_without_time_support_says_so() {
+    let mut t = test_engine();
+    let session =
+        t.add_session_with("flat", std::sync::Arc::new(porthmos_vfs::testing::FakeFs::new().with_time_support(false)));
+    t.drain();
+
+    t.engine.connect("flat");
+
+    assert!(t.drain().into_iter().any(
+        |event| matches!(event, Event::SessionCapabilities { session: id, preserves_times: false } if id == session)
+    ));
 }

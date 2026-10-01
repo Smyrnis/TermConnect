@@ -140,6 +140,7 @@ fn decrement<K: Hash + Eq>(map: &mut HashMap<K, usize>, key: K) {
 pub struct TransferQueue {
     jobs: BTreeMap<u64, TransferJob>,
     batch_labels: HashMap<u64, String>,
+    unkept_times_flagged: HashSet<u64>,
     next_id: u64,
     next_batch_id: u64,
     rows: BTreeMap<u64, RowCounters>,
@@ -207,6 +208,7 @@ impl TransferQueue {
             attempts: 0,
             batch_id,
             resume: false,
+            modified: None,
         };
         let shape = Shape::of(&job);
         let key = match batch_id {
@@ -244,7 +246,16 @@ impl TransferQueue {
     pub fn forget_batch_if_empty(&mut self, batch_id: u64) {
         if !self.batch_row.contains_key(&batch_id) {
             self.batch_labels.remove(&batch_id);
+            self.unkept_times_flagged.remove(&batch_id);
         }
+    }
+
+    pub fn flag_unkept_times(&mut self, batch_id: u64) -> bool {
+        self.unkept_times_flagged.insert(batch_id)
+    }
+
+    pub fn has_unkept_times_flag(&self, batch_id: u64) -> bool {
+        self.unkept_times_flagged.contains(&batch_id)
     }
 
     pub fn jobs(&self) -> impl Iterator<Item = &TransferJob> {

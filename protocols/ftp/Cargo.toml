@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+chrono.workspace = true
 futures-util.workspace = true
 porthmos-tls.workspace = true
 porthmos-vfs.workspace = true

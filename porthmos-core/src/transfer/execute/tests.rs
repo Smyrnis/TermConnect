@@ -256,3 +256,103 @@ async fn the_destination_learns_the_size_of_the_transfer() {
 
     assert_eq!(destination.written_sizes(), vec![(PathBuf::from("/dst/f.part"), 7)]);
 }
+
+#[tokio::test]
+async fn the_source_time_is_set_on_the_destination_after_the_rename() {
+    let source = FakeFs::new();
+    source.file("/src/f", b"hello", Some(100));
+    let destination = FakeFs::new();
+    destination.dir("/dst");
+
+    let executed = execute_preserving(
+        &source,
+        Path::new("/src/f"),
+        &destination,
+        Path::new("/dst/f"),
+        &AtomicBool::new(false),
+        false,
+        Some(100),
+        |_| {},
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(executed.outcome, TransferOutcome::Completed);
+    assert!(executed.times_kept);
+    assert_eq!(destination.modified_of("/dst/f"), Some(100));
+    assert_eq!(destination.contents("/dst/f").unwrap(), b"hello");
+}
+
+#[tokio::test]
+async fn a_destination_that_cannot_keep_times_still_completes_and_says_so() {
+    let source = FakeFs::new();
+    source.file("/src/f", b"hello", Some(100));
+    let destination = FakeFs::new().with_time_support(false);
+    destination.dir("/dst");
+
+    let executed = execute_preserving(
+        &source,
+        Path::new("/src/f"),
+        &destination,
+        Path::new("/dst/f"),
+        &AtomicBool::new(false),
+        false,
+        Some(100),
+        |_| {},
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(executed.outcome, TransferOutcome::Completed);
+    assert!(!executed.times_kept);
+    assert_eq!(destination.contents("/dst/f").unwrap(), b"hello");
+}
+
+#[tokio::test]
+async fn no_time_is_touched_when_none_was_requested() {
+    let source = FakeFs::new();
+    source.file("/src/f", b"hello", Some(100));
+    let destination = FakeFs::new();
+    destination.dir("/dst");
+
+    let executed = execute_preserving(
+        &source,
+        Path::new("/src/f"),
+        &destination,
+        Path::new("/dst/f"),
+        &AtomicBool::new(false),
+        false,
+        None,
+        |_| {},
+    )
+    .await
+    .unwrap();
+
+    assert!(executed.times_kept);
+    assert_eq!(destination.modified_of("/dst/f"), None);
+}
+
+#[tokio::test]
+async fn a_cancelled_transfer_sets_no_time_and_leaves_no_destination() {
+    let source = FakeFs::new();
+    source.file("/src/f", b"hello", Some(100));
+    let destination = FakeFs::new();
+    destination.dir("/dst");
+
+    let executed = execute_preserving(
+        &source,
+        Path::new("/src/f"),
+        &destination,
+        Path::new("/dst/f"),
+        &AtomicBool::new(true),
+        false,
+        Some(100),
+        |_| {},
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(executed.outcome, TransferOutcome::Cancelled);
+    assert!(!destination.exists("/dst/f"));
+    assert_eq!(destination.modified_of("/dst/f.part"), None);
+}

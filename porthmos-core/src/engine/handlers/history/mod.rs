@@ -102,7 +102,7 @@ impl Engine {
         self.publish_history();
     }
 
-    fn session_name(&self, session_id: u64) -> String {
+    pub(crate) fn session_name(&self, session_id: u64) -> String {
         self.sessions
             .get(&session_id)
             .map(|session| session.name.clone())

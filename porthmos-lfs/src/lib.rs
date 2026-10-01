@@ -6,7 +6,7 @@ use std::{
     io::SeekFrom,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    time::UNIX_EPOCH,
+    time::{Duration, UNIX_EPOCH},
 };
 
 use porthmos_vfs::{DirItem, Entry, FileKind, FileSystem, Metadata, ProtocolError, Reader, Writer, async_trait};
@@ -53,6 +53,21 @@ async fn blocking<T: Send + 'static>(
 
 #[async_trait]
 impl FileSystem for LocalFs {
+    async fn set_modified(&self, path: &Path, seconds: u64) -> Result<(), ProtocolError> {
+        let path = path.to_path_buf();
+        blocking(move || {
+            let moment = UNIX_EPOCH.checked_add(Duration::from_secs(seconds)).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, format!("the modification time {seconds} is out of range"))
+            })?;
+            fs::File::open(&path)?.set_modified(moment)
+        })
+        .await
+    }
+
+    fn can_set_modified(&self) -> bool {
+        true
+    }
+
     async fn list(&self, dir: &Path) -> Result<Vec<Entry>, ProtocolError> {
         let dir = dir.to_path_buf();
         blocking(move || list(&dir)).await

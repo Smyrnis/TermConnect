@@ -49,6 +49,17 @@ fn modified(month: &str, day: &str, time_or_year: &str, now: u64) -> Option<u64>
     seconds(time_or_year.parse().ok()?, month, day, 0)
 }
 
+fn epoch(token: &str) -> Option<u64> {
+    let digits = token.strip_prefix('-').unwrap_or(token);
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    if digits.len() != token.len() {
+        return Some(0);
+    }
+    token.parse().ok()
+}
+
 fn permissions(mode: &str) -> Option<u32> {
     let bits: Vec<char> = mode.chars().skip(1).collect();
     if bits.len() < 9 {
@@ -97,13 +108,17 @@ pub(crate) fn parse_line(line: &str, now: u64) -> Option<Line> {
     let device = words.get(4)?.1.ends_with(',');
     let date_start = if device { 6 } else { 5 };
     let size = if device { 0 } else { words.get(4)?.1.parse().ok()? };
-    let (month, day, time_or_year) =
-        (words.get(date_start)?.1, words.get(date_start + 1)?.1, words.get(date_start + 2)?);
-    let name_start = time_or_year.0 + time_or_year.1.len() + 1;
+    let first = words.get(date_start)?;
+    let (mtime, name_start) = match epoch(first.1) {
+        Some(seconds) => (seconds, first.0 + first.1.len() + 1),
+        None => {
+            let (month, day, time_or_year) = (first.1, words.get(date_start + 1)?.1, words.get(date_start + 2)?);
+            (modified(month, day, time_or_year.1, now)?, time_or_year.0 + time_or_year.1.len() + 1)
+        }
+    };
     let name = line.get(name_start..).filter(|name| !name.is_empty())?.to_string();
     let kind = if kind_letter == 'd' { FileKind::Dir } else { FileKind::File };
-    let modified = modified(month, day, time_or_year.1, now)?;
-    let metadata = Metadata { size, modified: Some(modified), kind, permissions: permissions(mode) };
+    let metadata = Metadata { size, modified: Some(mtime), kind, permissions: permissions(mode) };
     Some(Line { name, metadata })
 }
 

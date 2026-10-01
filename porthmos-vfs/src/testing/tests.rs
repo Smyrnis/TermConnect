@@ -268,3 +268,44 @@ fn with_discovered_targets_are_returned_by_discover() {
 
     assert_eq!(names, vec![target(None).name]);
 }
+
+#[tokio::test]
+async fn set_modified_changes_the_time_stat_reports() {
+    let fs = FakeFs::new();
+    fs.file("/home/user/a", b"x", Some(10));
+
+    fs.set_modified(Path::new("/home/user/a"), 99).await.unwrap();
+
+    assert_eq!(fs.stat(Path::new("/home/user/a")).await.unwrap().modified, Some(99));
+    assert_eq!(fs.modified_of("/home/user/a"), Some(99));
+}
+
+#[tokio::test]
+async fn set_modified_on_a_missing_file_is_not_found() {
+    let fs = FakeFs::new();
+
+    let error = fs.set_modified(Path::new("/home/user/missing"), 5).await.unwrap_err();
+
+    assert_eq!(error.kind(), ErrorKind::NotFound);
+}
+
+#[tokio::test]
+async fn a_fake_without_time_support_refuses_and_says_so() {
+    let fs = FakeFs::new().with_time_support(false);
+    fs.file("/home/user/a", b"x", Some(10));
+
+    let error = fs.set_modified(Path::new("/home/user/a"), 5).await.unwrap_err();
+
+    assert!(!fs.can_set_modified());
+    assert_eq!(error.kind(), ErrorKind::Unsupported);
+    assert_eq!(fs.modified_of("/home/user/a"), Some(10));
+}
+
+#[test]
+fn a_fake_supports_times_by_default_with_a_two_second_resolution() {
+    let fs = FakeFs::new();
+
+    assert!(fs.can_set_modified());
+    assert_eq!(fs.time_resolution(), 2);
+    assert_eq!(FakeFs::new().with_time_resolution(60).time_resolution(), 60);
+}
