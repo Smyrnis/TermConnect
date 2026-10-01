@@ -710,3 +710,29 @@ fn an_info_message_is_shown_without_a_problem_in_the_log() {
 fn error_lines(logs: &str) -> usize {
     logs.lines().filter(|line| line.contains("ERROR")).count()
 }
+
+#[test]
+fn time_is_read_from_the_engine_clock_only() {
+    fn visit(dir: &std::path::Path, offenders: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                visit(&path, offenders);
+                continue;
+            }
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            if !name.ends_with(".rs") || name == "tests.rs" || name == "testing.rs" || path.ends_with("engine/mod.rs") {
+                continue;
+            }
+            if std::fs::read_to_string(&path).unwrap().contains("Utc::now") {
+                offenders.push(path.display().to_string());
+            }
+        }
+    }
+
+    let engine = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/engine");
+    let mut offenders = Vec::new();
+    visit(&engine, &mut offenders);
+
+    assert!(offenders.is_empty(), "read the clock directly: {offenders:?}");
+}

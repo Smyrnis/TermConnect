@@ -71,13 +71,12 @@ pub(crate) struct EditState {
     sessions: HashMap<u64, EditSession>,
     next_id: u64,
     settings: EditSettings,
-    clock: fn() -> DateTime<Utc>,
     busy: bool,
 }
 
 impl EditState {
     pub(crate) fn new(settings: EditSettings) -> Self {
-        Self { sessions: HashMap::new(), next_id: 0, settings, clock: Utc::now, busy: false }
+        Self { sessions: HashMap::new(), next_id: 0, settings, busy: false }
     }
 }
 
@@ -257,7 +256,7 @@ impl Engine {
         };
         let edit_id = self.new_edit_session(Location::Session(session_id), path.clone(), editor);
         let name = self.edit.sessions[&edit_id].name.clone();
-        let dir = self.paths.edit_dir().join(format!("{}-{edit_id}", (self.edit.clock)().timestamp_millis()));
+        let dir = self.paths.edit_dir().join(format!("{}-{edit_id}", (self.clock)().timestamp_millis()));
         let local = self.local_fs.clone();
         let internal = self.internal.clone();
         self.info(format!("Downloading {} to edit\u{2026}", printable(&name)));
@@ -479,7 +478,7 @@ impl Engine {
         };
         let local = self.local_fs.clone();
         let internal = self.internal.clone();
-        let job = UploadJob { edit_id, remote, file: temp.file, baseline, name, mode, at: (self.edit.clock)() };
+        let job = UploadJob { edit_id, remote, file: temp.file, baseline, name, mode, at: (self.clock)() };
         self.tasks.spawn("edit-upload", Scope::Edit(edit_id), move |_| async move {
             let event = upload(job, fs, local).await;
             let _ = internal.send(Internal::Edit(event));

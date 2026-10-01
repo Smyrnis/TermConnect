@@ -911,3 +911,35 @@ fn later_history_write_failures_stay_out_of_the_notices_but_remain_in_the_debug_
     assert!(t.notices().is_empty());
     assert!(logs.contains("second") && logs.contains("DEBUG"), "{logs}");
 }
+
+fn fixed_clock() -> chrono::DateTime<chrono::Utc> {
+    chrono::TimeZone::with_ymd_and_hms(&chrono::Utc, 2026, 1, 2, 3, 4, 5).unwrap()
+}
+
+#[test]
+fn recorded_entries_carry_the_engine_clock() {
+    let mut t = test_engine();
+    t.engine.clock = fixed_clock;
+    let (session, _fs) = t.add_session("prod");
+    job(&mut t, session, "a", None, JobStatus::Completed);
+
+    t.engine.publish_transfers();
+
+    assert_eq!(recorded(&t)[0].finished_at, fixed_clock());
+}
+
+#[test]
+fn failed_scans_and_interrupted_rows_use_the_engine_clock_too() {
+    let mut t = test_engine();
+    t.engine.clock = fixed_clock;
+    let (session, _fs) = t.add_session("prod");
+    let batch = t.engine.transfers.start_batch("photos".to_string());
+    t.engine.planning.push(scan(batch, session, "photos"));
+    t.engine.handle_transfer_event(TransferEvent::PlanFailed { batch_id: batch, message: "no".to_string() });
+    job(&mut t, session, "running.txt", None, JobStatus::InProgress);
+
+    t.engine.record_interrupted();
+
+    assert!(recorded(&t).iter().all(|entry| entry.finished_at == fixed_clock()));
+    assert_eq!(recorded(&t).len(), 2);
+}
