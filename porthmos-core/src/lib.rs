@@ -14,6 +14,7 @@ pub mod profiles;
 mod protocol_info;
 pub mod secrets;
 pub mod state;
+pub mod sync;
 pub mod tasks;
 pub mod transfer;
 

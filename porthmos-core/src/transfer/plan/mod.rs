@@ -55,24 +55,31 @@ enum Walk {
     Cancelled,
 }
 
-struct DiscoveredTree {
-    directories: Vec<PathBuf>,
-    files: Vec<(PathBuf, u64, Option<u64>)>,
-    skipped_symlinks: usize,
+pub(crate) struct DiscoveredTree {
+    pub(crate) directories: Vec<PathBuf>,
+    pub(crate) files: Vec<(PathBuf, u64, Option<u64>)>,
+    pub(crate) skipped_symlinks: usize,
 }
 
 async fn discover_tree(
     fs: &dyn FileSystem, root: &Path, cancel: &AtomicBool,
 ) -> Result<Option<DiscoveredTree>, ProtocolError> {
+    discover(fs, root, true, cancel).await
+}
+
+pub(crate) async fn discover(
+    fs: &dyn FileSystem, root: &Path, recursive: bool, cancel: &AtomicBool,
+) -> Result<Option<DiscoveredTree>, ProtocolError> {
     let mut tree = DiscoveredTree { directories: Vec::new(), files: Vec::new(), skipped_symlinks: 0 };
-    match discover_tree_into(fs, root, Path::new(""), &mut tree, cancel).await? {
+    match discover_tree_into(fs, root, Path::new(""), recursive, &mut tree, cancel).await? {
         Walk::Completed => Ok(Some(tree)),
         Walk::Cancelled => Ok(None),
     }
 }
 
 fn discover_tree_into<'a>(
-    fs: &'a dyn FileSystem, root: &'a Path, relative: &'a Path, tree: &'a mut DiscoveredTree, cancel: &'a AtomicBool,
+    fs: &'a dyn FileSystem, root: &'a Path, relative: &'a Path, recursive: bool, tree: &'a mut DiscoveredTree,
+    cancel: &'a AtomicBool,
 ) -> BoxFuture<'a, Result<Walk, ProtocolError>> {
     Box::pin(async move {
         for item in fs.read_dir(&root.join(relative)).await? {
@@ -85,7 +92,10 @@ fn discover_tree_into<'a>(
                 FileKind::Symlink => tree.skipped_symlinks += 1,
                 FileKind::Dir => {
                     tree.directories.push(entry_relative.clone());
-                    if let Walk::Cancelled = discover_tree_into(fs, root, &entry_relative, tree, cancel).await? {
+                    if recursive
+                        && let Walk::Cancelled =
+                            discover_tree_into(fs, root, &entry_relative, recursive, tree, cancel).await?
+                    {
                         return Ok(Walk::Cancelled);
                     }
                 }
