@@ -60,6 +60,23 @@ async fn discover_local_tree_skips_symlinks_and_counts_them() {
 }
 
 #[tokio::test]
+async fn discover_reports_the_relative_path_of_every_symlink() {
+    let fs = FakeFs::new();
+    fs.file("/root/real.txt", b"a", Some(1));
+    fs.file("/root/sub/inner.txt", b"b", Some(1));
+    fs.symlink("/root/top_link", "/root/real.txt");
+    fs.symlink("/root/sub/deep_link", "/root/sub");
+
+    let tree = discover(&fs, Path::new("/root"), true, &AtomicBool::new(false)).await.unwrap().unwrap();
+
+    let mut symlinks = tree.symlinks;
+    symlinks.sort();
+    assert_eq!(symlinks, vec![PathBuf::from("sub/deep_link"), PathBuf::from("top_link")]);
+    assert_eq!(tree.skipped_symlinks, 2);
+    assert_eq!(tree.files.len(), 2);
+}
+
+#[tokio::test]
 async fn ensure_local_directory_creates_a_missing_directory() {
     let dir = tempfile::tempdir().unwrap();
     let target = dir.path().join("new");
@@ -118,6 +135,7 @@ fn planned_files_for_tree_maps_paths_for_an_upload_including_a_nested_file() {
         directories: vec![PathBuf::from("sub")],
         files: vec![(PathBuf::from("top.txt"), 5, Some(50)), (PathBuf::from("sub/nested.txt"), 7, None)],
         skipped_symlinks: 0,
+        symlinks: Vec::new(),
     };
 
     let mut planned = planned_files_for_tree(&entry, &dest_root, &tree);
@@ -144,6 +162,7 @@ fn planned_files_for_tree_maps_paths_for_a_download_including_a_nested_file() {
         directories: vec![PathBuf::from("sub")],
         files: vec![(PathBuf::from("top.txt"), 5, Some(50)), (PathBuf::from("sub/nested.txt"), 7, None)],
         skipped_symlinks: 0,
+        symlinks: Vec::new(),
     };
 
     let mut planned = planned_files_for_tree(&entry, &dest_root, &tree);
@@ -292,6 +311,7 @@ fn planned_files_for_tree_carries_the_source_modification_time() {
         directories: Vec::new(),
         files: vec![(PathBuf::from("top.txt"), 5, Some(50))],
         skipped_symlinks: 0,
+        symlinks: Vec::new(),
     };
 
     let planned = planned_files_for_tree(&entry, &PathBuf::from("/remote/dest/myfolder"), &tree);

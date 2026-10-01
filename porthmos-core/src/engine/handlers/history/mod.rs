@@ -16,7 +16,7 @@ use crate::{
 };
 
 pub(crate) struct HistoryLog {
-    store: History,
+    pub(super) store: History,
     recorded: HashSet<RowKind>,
     counted: HashMap<RowKind, HashSet<u64>>,
     write_warned: bool,
@@ -258,8 +258,9 @@ impl Engine {
 
     pub(crate) fn record_interrupted(&mut self) {
         self.process_row_changes();
-        let rows = self.snapshot().rows;
-        for row in rows.iter().filter(|row| !row.is_finished()) {
+        let rows: Vec<QueueRow> =
+            self.snapshot().rows.into_iter().filter(|row| !row.is_finished() && !self.is_sync_scan(row.kind)).collect();
+        for row in &rows {
             if self.history.recorded.insert(row.kind) {
                 let entry = self.entry_for_row(row);
                 self.log_failed_jobs(row, &entry.connection);

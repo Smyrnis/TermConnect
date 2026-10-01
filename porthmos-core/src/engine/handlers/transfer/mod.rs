@@ -221,6 +221,12 @@ impl Engine {
                     None => self.report(Severity::Error, message),
                 }
             }
+            TransferEvent::SyncPlanReady { batch_id, plan } => self.sync_plan_ready(batch_id, plan),
+            TransferEvent::SyncCancelled { batch_id } => self.sync_cancelled(batch_id),
+            TransferEvent::SyncFailed { batch_id, message } => self.sync_failed(batch_id, message),
+            TransferEvent::SyncFoldersReady { batch_id, session_id, direction, plan } => {
+                self.sync_folders_ready(batch_id, session_id, direction, plan)
+            }
             TransferEvent::TimesNotKept { id } => {
                 let Some((batch_id, session_id, direction)) = self
                     .transfers
@@ -370,7 +376,7 @@ impl Engine {
         self.fill_transfer_slots();
     }
 
-    fn clear_planning(&mut self, batch_id: u64) {
+    pub(crate) fn clear_planning(&mut self, batch_id: u64) {
         self.planning.retain(|scan| scan.batch_id != batch_id);
         self.tasks.forget(Scope::Planning(batch_id));
     }
@@ -402,6 +408,7 @@ impl Engine {
 
     pub(crate) fn cancel_all_copies(&mut self) {
         self.drop_conflict_reviews(|_| true);
+        self.drop_sync_plans(|_| true);
         self.cancel_all_work();
         let mut cancelled_destinations: Vec<(u64, Direction)> = Vec::new();
         for job in self.transfers.queued_jobs() {

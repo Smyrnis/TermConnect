@@ -57,7 +57,7 @@ async fn without_subfolders_only_the_top_level_is_read() {
 }
 
 #[tokio::test]
-async fn symlinks_are_skipped_and_counted_at_every_depth_and_whatever_they_point_to() {
+async fn symlinks_are_counted_and_recorded_as_symlinks_at_every_depth_and_whatever_they_point_to() {
     let fs = fs_with_tree();
     fs.symlink("/root/link", "/root/a.txt");
     fs.symlink("/root/sub/nested_link", "/root/sub/b.txt");
@@ -66,10 +66,38 @@ async fn symlinks_are_skipped_and_counted_at_every_depth_and_whatever_they_point
     let scanned = scan_tree(&fs, Path::new("/root"), true, &AtomicBool::new(false)).await.unwrap().unwrap();
 
     assert_eq!(scanned.skipped_symlinks, 3);
-    for skipped in ["link", "sub/nested_link", "folder_link"] {
-        assert!(!scanned.tree.contains_key(&PathBuf::from(skipped)), "{skipped} must not be in the tree");
+    for linked in ["link", "sub/nested_link", "folder_link"] {
+        let entry = scanned.tree[&PathBuf::from(linked)];
+        assert_eq!((entry.kind, entry.size, entry.modified), (TreeKind::Symlink, 0, None), "{linked}");
     }
-    assert_eq!(scanned.tree.len(), 6);
+    assert_eq!(scanned.tree.values().filter(|entry| entry.kind != TreeKind::Symlink).count(), 6);
+    assert_eq!(scanned.tree.len(), 9);
+}
+
+#[tokio::test]
+async fn a_symlink_without_subfolders_is_recorded_too() {
+    let fs = fs_with_tree();
+    fs.symlink("/root/link", "/root/a.txt");
+
+    let scanned = scan_tree(&fs, Path::new("/root"), false, &AtomicBool::new(false)).await.unwrap().unwrap();
+
+    assert_eq!(scanned.tree[&PathBuf::from("link")].kind, TreeKind::Symlink);
+    assert_eq!(scanned.skipped_symlinks, 1);
+}
+
+#[test]
+fn a_relative_path_of_plain_names_is_accepted() {
+    assert!(check_relative(Path::new("a/b/c.txt")).is_ok());
+    assert!(check_relative(Path::new("single")).is_ok());
+}
+
+#[test]
+fn paths_that_could_leave_the_root_are_refused() {
+    for hostile in ["..", "../x", "a/../../x", "/etc/passwd", "./a", ""] {
+        let error = check_relative(Path::new(hostile)).err().unwrap_or_else(|| panic!("{hostile:?} was accepted"));
+        assert_eq!(error.kind(), ErrorKind::Other, "{hostile:?}");
+        assert!(error.to_string().contains("outside"), "{error}");
+    }
 }
 
 #[tokio::test]
@@ -190,4 +218,127 @@ async fn if_only_the_remote_side_is_cancelled_the_pair_is_cancelled() {
         .unwrap();
 
     assert!(result.is_none());
+}
+
+fn found_with(directories: &[&str], files: &[&str], symlinks: &[&str]) -> crate::transfer::plan::DiscoveredTree {
+    crate::transfer::plan::DiscoveredTree {
+        directories: directories.iter().map(PathBuf::from).collect(),
+        files: files.iter().map(|path| (PathBuf::from(path), 1, Some(1))).collect(),
+        skipped_symlinks: symlinks.len(),
+        symlinks: symlinks.iter().map(PathBuf::from).collect(),
+    }
+}
+
+#[test]
+fn building_a_tree_refuses_a_hostile_file_folder_or_symlink_name() {
+    for found in [
+        found_with(&[], &["ok.txt", "../escape.txt"], &[]),
+        found_with(&["sub", "/abs"], &["ok.txt"], &[]),
+        found_with(&[], &["ok.txt"], &["a/../../link"]),
+    ] {
+        let error = build_tree(found, true).err().expect("a hostile name must fail the scan");
+        assert_eq!(error.kind(), ErrorKind::Other);
+    }
+}
+
+#[test]
+fn building_a_tree_from_ordinary_names_succeeds() {
+    let scanned = build_tree(found_with(&["sub"], &["sub/a.txt"], &["sub/link"]), true).unwrap();
+
+    assert_eq!(scanned.tree.len(), 3);
+    assert_eq!(scanned.skipped_symlinks, 1);
+}
+
+fn refusal_of(found: crate::transfer::plan::DiscoveredTree) -> ProtocolError {
+    build_tree(found, true).err().expect("a path without its parent folder must fail the scan")
+}
+
+#[test]
+fn a_file_whose_parent_folder_is_not_in_the_tree_is_refused_and_named() {
+    let error = refusal_of(found_with(&[], &["a/b"], &[]));
+
+    assert_eq!(error.kind(), ErrorKind::Other);
+    assert!(error.to_string().contains("a/b"), "{error}");
+}
+
+#[test]
+fn a_folder_whose_parent_folder_is_not_in_the_tree_is_refused() {
+    assert_eq!(refusal_of(found_with(&["a/b"], &[], &[])).kind(), ErrorKind::Other);
+}
+
+#[test]
+fn a_symlink_whose_parent_folder_is_not_in_the_tree_is_refused() {
+    assert_eq!(refusal_of(found_with(&[], &[], &["a/link"])).kind(), ErrorKind::Other);
+}
+
+#[test]
+fn a_missing_folder_in_the_middle_of_a_deep_path_is_refused() {
+    assert_eq!(refusal_of(found_with(&["a", "a/b/c"], &[], &[])).kind(), ErrorKind::Other);
+}
+
+#[test]
+fn a_parent_that_is_a_symlink_or_a_file_is_not_a_folder() {
+    assert_eq!(refusal_of(found_with(&[], &["a/b"], &["a"])).kind(), ErrorKind::Other);
+    assert_eq!(refusal_of(found_with(&[], &["a", "a/b"], &[])).kind(), ErrorKind::Other);
+}
+
+#[test]
+fn paths_whose_parents_are_folders_in_the_tree_are_accepted() {
+    let scanned =
+        build_tree(found_with(&["a", "a/b"], &["a/b/c.txt", "top.txt"], &["a/link", "toplink"]), true).unwrap();
+
+    assert_eq!(scanned.tree.len(), 6);
+}
+
+#[test]
+fn without_subfolders_a_nested_path_of_any_kind_fails_the_scan() {
+    for found in [
+        found_with(&["a", "a/s"], &["a/s/x"], &[]),
+        found_with(&["a", "a/s"], &[], &[]),
+        found_with(&["a"], &["a/x"], &[]),
+        found_with(&["a"], &[], &["a/link"]),
+    ] {
+        let error = build_tree(found, false).err().expect("a nested path must fail a scan without subfolders");
+        assert_eq!(error.kind(), ErrorKind::Other);
+        assert!(error.to_string().contains("a/"), "{error}");
+    }
+}
+
+#[test]
+fn without_subfolders_depth_one_paths_of_every_kind_are_accepted() {
+    let scanned = build_tree(found_with(&["a"], &["top.txt"], &["link"]), false).unwrap();
+
+    assert_eq!(scanned.tree.len(), 3);
+}
+
+#[test]
+fn with_subfolders_the_same_nested_paths_are_accepted_when_the_parents_exist() {
+    let scanned = build_tree(found_with(&["a", "a/s"], &["a/s/x"], &[]), true).unwrap();
+
+    assert_eq!(scanned.tree.len(), 3);
+}
+
+#[test]
+fn two_listed_names_that_make_the_same_path_fail_the_scan() {
+    for found in [
+        found_with(&["a"], &["a/"], &[]),
+        found_with(&[], &["a", "a/"], &[]),
+        found_with(&["a"], &[], &["a/."]),
+        found_with(&[], &["a"], &["a/"]),
+        found_with(&["a", "a/"], &[], &[]),
+    ] {
+        let error = build_tree(found, true).err().expect("a duplicated path must fail the scan");
+        assert_eq!(error.kind(), ErrorKind::Other);
+    }
+}
+
+#[tokio::test]
+async fn a_real_nested_folder_is_not_entered_when_subfolders_is_off() {
+    let fs = FakeFs::new();
+    fs.file("/root/top.txt", b"1", Some(1));
+    fs.file("/root/a/s/x.txt", b"2", Some(1));
+
+    let scanned = scan_tree(&fs, Path::new("/root"), false, &AtomicBool::new(false)).await.unwrap().unwrap();
+
+    assert_eq!(keys(&scanned), vec![("a".to_string(), TreeKind::Dir), ("top.txt".to_string(), TreeKind::File)]);
 }

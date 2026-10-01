@@ -5,6 +5,7 @@ use porthmos_vfs::{Answer, Entry};
 use crate::{
     edit::{EditChoice, EditorExit},
     profiles::ProfileDraft,
+    sync::{SyncAction, SyncOptions},
     transfer::{conflicts::Resolution, rows::RowKind},
 };
 
@@ -50,5 +51,8 @@ pub enum Command {
     EditFile { location: Location, path: PathBuf },
     FinishEdit { edit_id: u64, exit: EditorExit },
     ResolveEdit { edit_id: u64, choice: EditChoice },
+    StartSync { session: SessionId, local_dir: PathBuf, remote_dir: PathBuf, options: SyncOptions },
+    RunSync { sync_id: u64, choices: Vec<(u32, SyncAction)> },
+    CancelSync { sync_id: u64 },
     Shutdown,
 }

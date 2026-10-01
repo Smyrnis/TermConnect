@@ -51,6 +51,10 @@ pub(crate) enum TransferEvent {
     PlanCancelled { batch_id: u64, session_id: u64, direction: Direction },
     PartialsRemoved { session_id: u64 },
     TimesNotKept { id: u64 },
+    SyncPlanReady { batch_id: u64, plan: crate::sync::SyncPlan },
+    SyncCancelled { batch_id: u64 },
+    SyncFailed { batch_id: u64, message: String },
+    SyncFoldersReady { batch_id: u64, session_id: u64, direction: Direction, plan: DirectoryPlan },
 }
 
 pub(crate) enum Internal {
@@ -144,6 +148,7 @@ pub(crate) struct Engine {
     next_keyring_job: u64,
     latest_keyring_job: HashMap<String, u64>,
     connecting: std::collections::HashSet<String>,
+    sync: handlers::SyncState,
 }
 
 pub(crate) struct EngineParts {
@@ -216,6 +221,7 @@ impl Engine {
             next_keyring_job: 0,
             latest_keyring_job: HashMap::new(),
             connecting: std::collections::HashSet::new(),
+            sync: handlers::SyncState::default(),
         }
     }
 
@@ -313,6 +319,11 @@ impl Engine {
             Command::EditFile { location, path } => self.edit_file(location, path),
             Command::FinishEdit { edit_id, exit } => self.finish_edit(edit_id, exit),
             Command::ResolveEdit { edit_id, choice } => self.resolve_edit(edit_id, choice),
+            Command::StartSync { session, local_dir, remote_dir, options } => {
+                self.start_sync(session, local_dir, remote_dir, options)
+            }
+            Command::RunSync { sync_id, choices } => self.run_sync(sync_id, choices),
+            Command::CancelSync { sync_id } => self.cancel_sync(sync_id),
             Command::Shutdown => {}
         }
         self.process_row_changes();
@@ -327,6 +338,7 @@ impl Engine {
             Scope::Transfer(id) if self.transfers.get(id).is_some_and(|job| job.status == JobStatus::InProgress) => {
                 self.handle_transfer_event(TransferEvent::Failed { id, message: failed });
             }
+            Scope::Planning(batch_id) if self.sync.is_scanning(batch_id) => self.sync_failed(batch_id, failed),
             Scope::Planning(batch_id) if self.planning.iter().any(|scan| scan.batch_id == batch_id) => {
                 self.handle_transfer_event(TransferEvent::PlanFailed { batch_id, message: failed });
             }

@@ -6,6 +6,7 @@ mod history;
 mod profiles;
 mod search;
 mod secrets;
+mod sync;
 mod transfer;
 
 use std::fmt::Display;
@@ -15,6 +16,7 @@ pub(crate) use history::HistoryLog;
 #[cfg(test)]
 pub(crate) use profiles::SecretOwner;
 pub(crate) use profiles::{KeyringDone, KeyringJob};
+pub(crate) use sync::SyncState;
 
 use super::Location;
 use crate::user_message;

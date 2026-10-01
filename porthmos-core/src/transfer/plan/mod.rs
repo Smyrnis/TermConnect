@@ -59,6 +59,7 @@ pub(crate) struct DiscoveredTree {
     pub(crate) directories: Vec<PathBuf>,
     pub(crate) files: Vec<(PathBuf, u64, Option<u64>)>,
     pub(crate) skipped_symlinks: usize,
+    pub(crate) symlinks: Vec<PathBuf>,
 }
 
 async fn discover_tree(
@@ -70,7 +71,8 @@ async fn discover_tree(
 pub(crate) async fn discover(
     fs: &dyn FileSystem, root: &Path, recursive: bool, cancel: &AtomicBool,
 ) -> Result<Option<DiscoveredTree>, ProtocolError> {
-    let mut tree = DiscoveredTree { directories: Vec::new(), files: Vec::new(), skipped_symlinks: 0 };
+    let mut tree =
+        DiscoveredTree { directories: Vec::new(), files: Vec::new(), skipped_symlinks: 0, symlinks: Vec::new() };
     match discover_tree_into(fs, root, Path::new(""), recursive, &mut tree, cancel).await? {
         Walk::Completed => Ok(Some(tree)),
         Walk::Cancelled => Ok(None),
@@ -89,7 +91,10 @@ fn discover_tree_into<'a>(
             let entry_relative = relative.join(&item.name);
 
             match item.metadata.kind {
-                FileKind::Symlink => tree.skipped_symlinks += 1,
+                FileKind::Symlink => {
+                    tree.skipped_symlinks += 1;
+                    tree.symlinks.push(entry_relative);
+                }
                 FileKind::Dir => {
                     tree.directories.push(entry_relative.clone());
                     if recursive
@@ -106,7 +111,7 @@ fn discover_tree_into<'a>(
     })
 }
 
-async fn ensure_directory(fs: &dyn FileSystem, path: &Path) -> Result<bool, ProtocolError> {
+pub(crate) async fn ensure_directory(fs: &dyn FileSystem, path: &Path) -> Result<bool, ProtocolError> {
     if fs.stat(path).await.is_ok_and(|metadata| metadata.is_dir()) {
         return Ok(false);
     }

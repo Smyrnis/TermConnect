@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use porthmos_vfs::{Entry, Question, ShellInvocation};
 
@@ -9,6 +9,7 @@ use crate::{
     edit::{EditQuestionKind, EditorCommand},
     history::HistoryEntry,
     profiles::ConnectionEntry,
+    sync::SyncPlan,
     transfer::{TransferSnapshot, conflicts::ConflictInfo},
 };
 
@@ -41,4 +42,6 @@ pub enum Event {
     EditReady { edit_id: u64, file: PathBuf, editor: EditorCommand },
     EditQuestion { edit_id: u64, name: String, kind: EditQuestionKind },
     EditsBusy(bool),
+    SyncPlanReady(Arc<SyncPlan>),
+    SyncWithdrawn { sync_ids: Vec<u64> },
 }

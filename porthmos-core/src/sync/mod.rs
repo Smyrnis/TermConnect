@@ -121,6 +121,7 @@ pub struct SyncPlan {
 pub enum TreeKind {
     File,
     Dir,
+    Symlink,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

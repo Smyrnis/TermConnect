@@ -10,6 +10,10 @@ fn dir() -> TreeEntry {
     TreeEntry { kind: TreeKind::Dir, size: 0, modified: None }
 }
 
+fn symlink() -> TreeEntry {
+    TreeEntry { kind: TreeKind::Symlink, size: 0, modified: None }
+}
+
 fn tree(entries: &[(&str, TreeEntry)]) -> Tree {
     entries.iter().map(|(path, entry)| (PathBuf::from(path), *entry)).collect()
 }
@@ -429,4 +433,45 @@ fn comparing_by_size_in_both_directions_lists_nothing() {
     );
 
     assert!(items.is_empty());
+}
+
+#[test]
+fn a_symlink_on_the_target_against_a_source_file_is_a_mismatch_in_every_direction() {
+    for direction in [LocalToRemote, RemoteToLocal, Both] {
+        let local_link = run(&[("f", symlink())], &[("f", file(5, Some(1)))], options(direction, Time));
+        let remote_link = run(&[("f", file(5, Some(1)))], &[("f", symlink())], options(direction, Time));
+
+        assert_eq!(local_link, vec![("f".into(), Skip, KindMismatch, false)]);
+        assert_eq!(remote_link, vec![("f".into(), Skip, KindMismatch, false)]);
+    }
+}
+
+#[test]
+fn a_symlink_against_a_folder_is_a_mismatch_that_hides_the_files_below() {
+    let items = run(
+        &[("d", dir()), ("d/a.txt", file(1, Some(1))), ("d/sub", dir()), ("d/sub/b.txt", file(1, Some(1)))],
+        &[("d", symlink())],
+        options(Both, Time),
+    );
+
+    assert_eq!(items, vec![("d".into(), Skip, KindMismatch, false)]);
+}
+
+#[test]
+fn a_mismatched_symlink_is_never_flippable() {
+    let items = diff(&tree(&[("f", file(5, Some(1)))]), &tree(&[("f", symlink())]), options(Both, Time), 2);
+
+    assert!(!items[0].flippable);
+    assert_eq!(items[0].allowed_actions(Both), vec![Skip]);
+}
+
+#[test]
+fn a_symlink_on_one_side_only_produces_no_item() {
+    assert!(run(&[("l", symlink())], &[], options(Both, Time)).is_empty());
+    assert!(run(&[], &[("l", symlink())], options(Both, Time)).is_empty());
+}
+
+#[test]
+fn symlinks_on_both_sides_produce_no_item() {
+    assert!(run(&[("l", symlink())], &[("l", symlink())], options(Both, Time)).is_empty());
 }
