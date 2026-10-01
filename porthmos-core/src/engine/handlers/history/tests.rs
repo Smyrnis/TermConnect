@@ -1,16 +1,10 @@
-use std::{
-    ffi::OsStr,
-    os::unix::ffi::OsStrExt,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{ffi::OsStr, os::unix::ffi::OsStrExt, path::PathBuf, time::Duration};
 
 use super::*;
 use crate::{
     engine::{
         Command, Internal, PlanningScan, TransferEvent,
-        testing::{TestEngine, test_engine},
+        testing::{TestEngine, capture_logs, test_engine},
     },
     history::{
         History, HistoryEntry, HistoryResult,
@@ -92,40 +86,6 @@ fn job(t: &mut TestEngine, session_id: u64, name: &str, batch_id: Option<u64>, s
 
 fn recorded(t: &TestEngine) -> Vec<HistoryEntry> {
     t.engine.history.store.entries().to_vec()
-}
-
-#[derive(Clone, Default)]
-struct LogBuffer(Arc<Mutex<Vec<u8>>>);
-
-impl std::io::Write for LogBuffer {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuffer {
-    type Writer = LogBuffer;
-
-    fn make_writer(&'a self) -> LogBuffer {
-        self.clone()
-    }
-}
-
-fn capture(run: impl FnOnce()) -> String {
-    let buffer = LogBuffer::default();
-    let subscriber = tracing_subscriber::fmt()
-        .with_writer(buffer.clone())
-        .with_ansi(false)
-        .with_max_level(tracing::Level::TRACE)
-        .finish();
-    tracing::subscriber::with_default(subscriber, run);
-    let bytes = buffer.0.lock().unwrap().clone();
-    String::from_utf8(bytes).unwrap()
 }
 
 #[test]
@@ -349,7 +309,7 @@ fn each_failed_job_logs_one_error_line_with_its_reason() {
     job(&mut t, session, "b", Some(batch), JobStatus::Failed("Transfer failed: b \u{2014} disk full".to_string()));
     job(&mut t, session, "c", Some(batch), JobStatus::Failed("Transfer failed: c \u{2014} timed out".to_string()));
 
-    let logs = capture(|| t.engine.publish_transfers());
+    let logs = capture_logs(|| t.engine.publish_transfers());
 
     assert_eq!(logs.matches("ERROR").count(), 2, "{logs}");
     assert!(logs.contains("porthmos::transfers"), "{logs}");
@@ -366,7 +326,7 @@ fn finished_rows_without_failures_log_nothing() {
     job(&mut t, session, "a", None, JobStatus::Completed);
     job(&mut t, session, "b", None, JobStatus::Cancelled);
 
-    let logs = capture(|| t.engine.publish_transfers());
+    let logs = capture_logs(|| t.engine.publish_transfers());
 
     assert!(!logs.contains("ERROR"), "{logs}");
 }
@@ -395,7 +355,7 @@ fn a_copy_whose_scan_failed_is_recorded_as_failed_and_logged() {
     let batch = t.engine.transfers.start_batch("photos".to_string());
     t.engine.planning.push(scan(batch, session, "photos"));
 
-    let logs = capture(|| {
+    let logs = capture_logs(|| {
         t.engine.handle_transfer_event(TransferEvent::PlanFailed {
             batch_id: batch,
             message: "Copy failed: permission denied".to_string(),
@@ -565,7 +525,7 @@ fn interrupted_rows_log_the_reasons_of_files_that_had_already_failed() {
     job(&mut t, session, "a", Some(batch), JobStatus::Failed("Transfer failed: a \u{2014} disk full".to_string()));
     job(&mut t, session, "b", Some(batch), JobStatus::InProgress);
 
-    let logs = capture(|| t.engine.record_interrupted());
+    let logs = capture_logs(|| t.engine.record_interrupted());
 
     assert!(logs.contains("disk full"), "{logs}");
     assert!(logs.contains("connection=prod"), "{logs}");
@@ -925,4 +885,29 @@ async fn each_history_write_gets_a_new_tag() {
     t.engine.handle_command(Command::ClearHistory);
 
     assert!(clear_tag(&t) > first);
+}
+
+#[test]
+fn the_first_history_write_failure_is_in_the_log_once() {
+    let mut t = test_engine();
+
+    let logs = crate::engine::testing::capture_logs(|| {
+        t.engine.persist_failed(PathBuf::from("history.toml"), "disk full".to_string(), 0);
+    });
+
+    assert_eq!(logs.matches("disk full").count(), 1, "{logs}");
+}
+
+#[test]
+fn later_history_write_failures_stay_out_of_the_notices_but_remain_in_the_debug_log() {
+    let mut t = test_engine();
+    t.engine.persist_failed(PathBuf::from("history.toml"), "first".to_string(), 0);
+    t.drain();
+
+    let logs = crate::engine::testing::capture_logs(|| {
+        t.engine.persist_failed(PathBuf::from("history.toml"), "second".to_string(), 0);
+    });
+
+    assert!(t.notices().is_empty());
+    assert!(logs.contains("second") && logs.contains("DEBUG"), "{logs}");
 }

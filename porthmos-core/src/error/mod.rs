@@ -13,6 +13,8 @@ pub fn user_message(context: impl AsRef<str>, err: &dyn Display) -> String {
     format!("{}:\n{err}", context.as_ref())
 }
 
+pub const CONNECTION_CANCELLED: &str = "Connection cancelled";
+
 pub fn connect_failure_message(error: &ProtocolError, name: &str, protocol_display: &str) -> String {
     match error.kind() {
         ErrorKind::Auth => user_message(format!("Authentication error for {name}"), error),
@@ -20,7 +22,7 @@ pub fn connect_failure_message(error: &ProtocolError, name: &str, protocol_displ
         ErrorKind::SessionStart => {
             user_message(format!("Connected to {name} but failed to start {protocol_display}"), error)
         }
-        ErrorKind::Cancelled => "Connection cancelled".to_string(),
+        ErrorKind::Cancelled => CONNECTION_CANCELLED.to_string(),
         _ => user_message(format!("Unable to connect to {name}"), error),
     }
 }

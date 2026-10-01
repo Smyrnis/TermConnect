@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Paths,
-    persist::{Loaded, read_or_set_aside, write_atomic},
+    persist::{Loaded, read_or_set_aside, toml_problem, write_atomic},
 };
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,7 +19,9 @@ pub struct StateLoad {
 }
 
 pub fn load(paths: &Paths) -> StateLoad {
-    match read_or_set_aside(&paths.state_file(), "interface state", |text| toml::from_str::<UiState>(text)) {
+    match read_or_set_aside(&paths.state_file(), "interface state", |text| {
+        toml::from_str::<UiState>(text).map_err(|err| toml_problem(text, &err))
+    }) {
         Loaded::Missing => StateLoad { state: UiState::default(), warning: None, protected: false },
         Loaded::Ready(state) => StateLoad { state, warning: None, protected: false },
         Loaded::SetAside { warning, protected } => {

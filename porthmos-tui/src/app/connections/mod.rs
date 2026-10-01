@@ -32,14 +32,14 @@ impl App {
 
         match ssh_result {
             Ok(Ok(status)) if !status.success() => {
-                self.notifications.push(Severity::Error, format!("ssh exited with status {status}"));
+                self.error(format!("ssh exited with status {status}"));
             }
             Ok(Ok(_)) => {}
             Ok(Err(io_err)) => {
-                self.notifications.push(Severity::Error, format!("Failed to launch ssh: {io_err}"));
+                self.error(format!("Failed to launch ssh: {io_err}"));
             }
             Err(join_err) => {
-                self.notifications.push(Severity::Error, format!("ssh task failed: {join_err}"));
+                self.error(format!("ssh task failed: {join_err}"));
             }
         }
 

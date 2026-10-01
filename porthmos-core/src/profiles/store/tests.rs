@@ -437,3 +437,20 @@ fn an_old_plaintext_password_never_survives_a_write() {
     assert!(!text.contains("hunter2") && !text.contains("password"), "{text}");
     assert_eq!(load(&paths).unwrap().len(), 2);
 }
+
+#[test]
+fn a_malformed_connections_file_reports_the_line_but_not_its_contents() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = Paths::in_dir(dir.path());
+    std::fs::create_dir_all(&paths.config_dir).unwrap();
+    std::fs::write(
+        paths.connections_file(),
+        "[connections.s3]\nhost = \"h\"\nusername = \"u\"\nsecret_access_key = \"AKIAEXAMPLE\n",
+    )
+    .unwrap();
+
+    let error = format!("{:#}", load(&paths).unwrap_err());
+
+    assert!(error.contains("line 4"), "{error}");
+    assert!(!error.contains("AKIAEXAMPLE"), "{error}");
+}

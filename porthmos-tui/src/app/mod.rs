@@ -181,7 +181,15 @@ impl App {
         app
     }
 
+    pub fn error(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        tracing::error!("{message}");
+        self.notifications.push(Severity::Error, message);
+    }
+
     pub fn warn(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        tracing::warn!("{message}");
         self.notifications.push(Severity::Warning, message);
     }
 

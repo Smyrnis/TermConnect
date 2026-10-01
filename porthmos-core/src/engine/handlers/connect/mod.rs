@@ -73,7 +73,7 @@ impl Engine {
         let entries = match self.all_profiles() {
             Ok(entries) => entries,
             Err(err) => {
-                self.notice(Severity::Error, err.to_string());
+                self.report(Severity::Error, err.to_string());
                 return;
             }
         };
@@ -81,23 +81,17 @@ impl Engine {
         let entry = entries.iter().filter(named).find(|entry| !entry.source.is_orphan_labels()).cloned();
         let Some(entry) = entry else {
             if entries.iter().filter(named).any(|entry| entry.source == ConnectionSource::MissingSshHost) {
-                self.emit(Event::ConnectFailed {
-                    name: profile.to_string(),
-                    message: format!("{profile} is no longer in ~/.ssh/config"),
-                });
+                self.connect_failed(profile.to_string(), format!("{profile} is no longer in ~/.ssh/config"));
                 return;
             }
-            self.emit(Event::ConnectFailed {
-                name: profile.to_string(),
-                message: format!("No saved connection named \"{profile}\""),
-            });
+            self.connect_failed(profile.to_string(), format!("No saved connection named \"{profile}\""));
             return;
         };
         let Some(protocol) = self.protocols.iter().find(|protocol| protocol.id() == entry.protocol).cloned() else {
-            self.emit(Event::ConnectFailed {
-                name: entry.name.clone(),
-                message: format!("No \"{}\" protocol is available for {}", entry.protocol, entry.name),
-            });
+            self.connect_failed(
+                entry.name.clone(),
+                format!("No \"{}\" protocol is available for {}", entry.protocol, entry.name),
+            );
             return;
         };
 
@@ -179,16 +173,16 @@ impl Engine {
             + self.drop_conflict_reviews(|review| review.session_id == session);
         if affected > 0 {
             let plural = if affected == 1 { "" } else { "s" };
-            self.notice(Severity::Info, format!("{affected} transfer{plural} cancelled \u{2014} session disconnected"));
+            self.info(format!("{affected} transfer{plural} cancelled \u{2014} session disconnected"));
         }
 
-        self.notice(Severity::Info, format!("Disconnected from {}", live.name));
+        self.info(format!("Disconnected from {}", live.name));
         self.emit(Event::Disconnected { session, name: live.name });
     }
 
     pub(crate) fn prepare_shell(&mut self, session: SessionId) {
         let Some(live) = self.sessions.get(&session) else {
-            self.notice(Severity::Warning, "Connect to a server first");
+            self.report(Severity::Warning, "Connect to a server first");
             return;
         };
         let Some(target) = self.shell_target(session) else {
@@ -196,7 +190,7 @@ impl Engine {
         };
         match live.protocol.shell_command(&target, &self.env) {
             Some(invocation) => self.emit(Event::ShellReady { session, invocation }),
-            None => self.notice(Severity::Warning, "This connection doesn't support a terminal session"),
+            None => self.report(Severity::Warning, "This connection doesn't support a terminal session"),
         }
     }
 }

@@ -149,7 +149,7 @@ impl Engine {
             SecretOwner::SshHost(alias) => store::set_ssh_markers(&self.paths, alias, markers),
         };
         if let Err(err) = written {
-            self.notice(Severity::Error, err.to_string());
+            self.report(Severity::Error, err.to_string());
         }
     }
 
@@ -319,7 +319,7 @@ impl Engine {
             self.latest_keyring_job.remove(&owner.key());
         }
         for error in errors {
-            self.notice(Severity::Error, error);
+            self.report(Severity::Error, error);
         }
         if latest && (!rollback.is_empty() || !restore.is_empty()) {
             let current = match &owner {

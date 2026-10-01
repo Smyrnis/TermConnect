@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use porthmos_vfs::{Environment, FileSystem, testing::FakeFs};
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
@@ -149,4 +149,38 @@ impl TestEngine {
             .expect("the internal channel is open");
         self.engine.handle_internal(done);
     }
+}
+
+#[derive(Clone, Default)]
+struct LogBuffer(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for LogBuffer {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogBuffer {
+    type Writer = LogBuffer;
+
+    fn make_writer(&'a self) -> LogBuffer {
+        self.clone()
+    }
+}
+
+pub(crate) fn capture_logs(run: impl FnOnce()) -> String {
+    let buffer = LogBuffer::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_writer(buffer.clone())
+        .with_ansi(false)
+        .with_max_level(tracing::Level::TRACE)
+        .finish();
+    tracing::subscriber::with_default(subscriber, run);
+    let bytes = buffer.0.lock().unwrap().clone();
+    String::from_utf8(bytes).unwrap()
 }

@@ -89,3 +89,23 @@ fn a_location_change_relists_what_the_panel_shows() {
         ]
     );
 }
+
+#[test]
+fn a_startup_warning_is_in_the_log_as_well_as_on_screen() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut test = test_app(dir.path());
+
+    let logs = crate::logging::testing::capture_logs(|| test.app.warn("config.toml: unknown key"));
+
+    assert!(logs.contains("WARN") && logs.contains("config.toml: unknown key"), "{logs}");
+}
+
+#[test]
+fn an_error_is_in_the_log_as_well_as_on_screen() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut test = test_app(dir.path());
+
+    let logs = crate::logging::testing::capture_logs(|| test.app.error("Failed to launch ssh: not found"));
+
+    assert!(logs.contains("ERROR") && logs.contains("Failed to launch ssh: not found"), "{logs}");
+}

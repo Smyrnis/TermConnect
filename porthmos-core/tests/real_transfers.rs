@@ -126,7 +126,11 @@ async fn conflict_policies_answer_without_asking() {
         std::fs::write(rig.local("a.txt"), b"new").unwrap();
         std::fs::write(rig.remote("a.txt"), b"old").unwrap();
         rig.upload(&[("a.txt", false)]);
-        rig.settle(no_conflicts).await;
+        if policy == ConflictPolicy::Skip {
+            rig.wait_for_notice("Skipped 1 existing file").await;
+        } else {
+            rig.settle(no_conflicts).await;
+        }
 
         assert_eq!(std::fs::read(rig.remote("a.txt")).unwrap(), expected, "{policy:?}");
         assert_eq!(rig.remote("a (1).txt").exists(), renamed, "{policy:?}");

@@ -181,3 +181,20 @@ fn a_tilde_slash_start_directory_is_under_home() {
 fn a_tilde_followed_by_a_name_is_a_relative_directory_not_another_users_home() {
     assert_eq!(start_directory(Path::new("/home/user"), "~backup"), PathBuf::from("/home/user/~backup"));
 }
+
+#[test]
+fn each_failure_is_logged_at_the_line_that_reported_it() {
+    let (events, _received) = tokio::sync::mpsc::unbounded_channel();
+    let reporter = Reporter::new(events);
+
+    let logs = crate::engine::testing::capture_logs(|| {
+        send_failure(&reporter, "first".to_string(), &"cause");
+        send_failure(&reporter, "second".to_string(), &"cause");
+    });
+
+    let places: Vec<&str> =
+        logs.lines().filter(|line| line.contains("ERROR")).filter_map(|line| line.split("at=").nth(1)).collect();
+    assert_eq!(places.len(), 2, "{logs}");
+    assert_ne!(places[0], places[1], "{logs}");
+    assert!(places[0].contains("fs/tests.rs"), "{logs}");
+}

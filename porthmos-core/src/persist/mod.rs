@@ -107,6 +107,38 @@ fn write_temp_and_replace(path: &Path, temp_path: &Path, contents: &[u8], mode: 
     fs::rename(temp_path, path).with_context(|| format!("couldn't replace {}", path.display()))
 }
 
+fn position_of(text: &str, offset: usize) -> Option<(usize, usize)> {
+    let before = text.get(..offset)?;
+    let line = before.matches('\n').count() + 1;
+    let column = before.rsplit('\n').next().map_or(0, |last| last.chars().count()) + 1;
+    Some((line, column))
+}
+
+fn without_quoted_values(message: &str) -> String {
+    let mut redacted = String::with_capacity(message.len());
+    let mut inside = false;
+    for character in message.chars() {
+        match (character, inside) {
+            ('"', false) => {
+                inside = true;
+                redacted.push_str("\"\u{2026}\"");
+            }
+            ('"', true) => inside = false,
+            (_, true) => {}
+            (other, false) => redacted.push(other),
+        }
+    }
+    redacted
+}
+
+pub fn toml_problem(text: &str, error: &toml::de::Error) -> String {
+    let message = without_quoted_values(&one_line(error.message()));
+    match error.span().and_then(|span| position_of(text, span.start)) {
+        Some((line, column)) => format!("line {line}, column {column}: {message}"),
+        None => message,
+    }
+}
+
 pub fn read_or_set_aside<T, E: Display>(
     path: &Path, noun: &str, parse: impl FnOnce(&str) -> Result<T, E>,
 ) -> Loaded<T> {

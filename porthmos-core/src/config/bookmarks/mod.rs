@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::persist::{Loaded, read_or_set_aside, write_atomic};
+use crate::persist::{Loaded, read_or_set_aside, toml_problem, write_atomic};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Bookmark {
@@ -67,13 +67,17 @@ pub fn load(paths: &crate::Paths) -> Result<(Bookmarks, Vec<super::StartupWarnin
 }
 
 fn load_from(path: &Path) -> Result<(Bookmarks, Vec<super::StartupWarning>)> {
-    Ok(match read_or_set_aside(path, "bookmarks", |text| toml::from_str::<BookmarksFile>(text)) {
-        Loaded::Missing => (Bookmarks::default(), Vec::new()),
-        Loaded::Ready(file) => (Bookmarks { items: file.bookmark, protected: false }, Vec::new()),
-        Loaded::SetAside { warning, protected } => {
-            (Bookmarks { items: Vec::new(), protected }, vec![super::StartupWarning(warning)])
-        }
-    })
+    Ok(
+        match read_or_set_aside(path, "bookmarks", |text| {
+            toml::from_str::<BookmarksFile>(text).map_err(|err| toml_problem(text, &err))
+        }) {
+            Loaded::Missing => (Bookmarks::default(), Vec::new()),
+            Loaded::Ready(file) => (Bookmarks { items: file.bookmark, protected: false }, Vec::new()),
+            Loaded::SetAside { warning, protected } => {
+                (Bookmarks { items: Vec::new(), protected }, vec![super::StartupWarning(warning)])
+            }
+        },
+    )
 }
 
 pub fn save_to(path: &Path, bookmarks: &Bookmarks) -> Result<()> {

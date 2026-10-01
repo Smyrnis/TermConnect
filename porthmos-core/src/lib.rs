@@ -21,7 +21,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use anyhow::{Context, Result};
 pub use engine::{Command, Event, Location, RequestId, SessionId};
-pub use error::{Severity, connect_failure_message, user_message};
+pub use error::{CONNECTION_CANCELLED, Severity, connect_failure_message, user_message};
 pub use paths::{ConfigMigration, Paths};
 pub use porthmos_vfs::{
     Answer, Choice, CommonField, ConnectionForm, DirItem, Entry, Environment, ErrorKind, FileKind, FileSystem,
@@ -215,10 +215,10 @@ impl CoreBuilder {
         let mut engine = Engine::new(parts, events.clone(), internal);
         engine.finished = Some(finished_sender);
         if let Some(warning) = history_warning {
-            let _ = events.send(Event::Notice { severity: Severity::Warning, message: warning });
+            engine.report(Severity::Warning, warning);
         }
         for warning in bookmark_warnings {
-            let _ = events.send(Event::Notice { severity: Severity::Warning, message: warning.0 });
+            engine.report(Severity::Warning, warning.0);
         }
         engine.publish_bookmarks();
         engine.publish_save_choice();

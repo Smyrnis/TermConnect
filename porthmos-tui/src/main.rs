@@ -27,7 +27,7 @@ fn install_panic_hook() {
 }
 
 fn init_tracing(log_file: Option<&std::path::Path>) {
-    let filter = logging::with_transfer_log(tracing_subscriber::EnvFilter::from_default_env());
+    let filter = logging::log_filter(std::env::var("RUST_LOG").ok().as_deref());
     let writer = match log_file {
         Some(path) => logging::open_writer_at(path),
         None => Err(anyhow::anyhow!("HOME environment variable is not set")),

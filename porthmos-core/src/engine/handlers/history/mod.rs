@@ -148,12 +148,13 @@ impl Engine {
     }
 
     fn report_history_failure(&mut self, message: String, clearing: bool) {
-        tracing::debug!("{message}");
         if clearing {
-            self.notice(Severity::Warning, format!("Couldn't clear transfer history: {message}"));
+            self.report(Severity::Warning, format!("Couldn't clear transfer history: {message}"));
         } else if !self.history.write_warned {
             self.history.write_warned = true;
-            self.notice(Severity::Warning, format!("Couldn't save transfer history: {message}"));
+            self.report(Severity::Warning, format!("Couldn't save transfer history: {message}"));
+        } else {
+            tracing::debug!("{message}");
         }
     }
 

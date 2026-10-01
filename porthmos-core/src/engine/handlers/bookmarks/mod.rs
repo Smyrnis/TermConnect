@@ -9,14 +9,14 @@ use crate::{
 impl Engine {
     fn save_bookmarks(&self) {
         if let Err(err) = bookmarks::save_to(&self.paths.bookmarks_file(), &self.bookmarks) {
-            self.notice(Severity::Error, err.to_string());
+            self.report(Severity::Error, err.to_string());
         }
     }
 
     fn refuse_protected_bookmarks(&self) -> bool {
         let protected = self.bookmarks.is_protected();
         if protected {
-            self.notice(
+            self.report(
                 Severity::Error,
                 "Bookmarks can't be changed: bookmarks.toml could not be read or set aside, so it was left alone",
             );
@@ -34,7 +34,7 @@ impl Engine {
             Location::Session(id) => match self.sessions.get(&id) {
                 Some(session) => Some(session.name.clone()),
                 None => {
-                    self.notice(Severity::Warning, "Connect to a remote server first");
+                    self.report(Severity::Warning, "Connect to a remote server first");
                     return;
                 }
             },
@@ -54,7 +54,7 @@ impl Engine {
         }
         if let Some(removed) = self.bookmarks.remove(index) {
             self.save_bookmarks();
-            self.notice(Severity::Info, format!("Removed bookmark \"{}\"", removed.label));
+            self.info(format!("Removed bookmark \"{}\"", removed.label));
             self.publish_bookmarks();
         }
     }

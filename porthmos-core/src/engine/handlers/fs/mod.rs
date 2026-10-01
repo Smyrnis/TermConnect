@@ -7,23 +7,26 @@ use porthmos_vfs::{FileSystem, ProtocolError};
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::{
-    super::{Engine, Event, Location, SessionId},
+    super::{Engine, Event, Location, Reporter, SessionId},
     failure_message,
 };
 use crate::{Severity, tasks::Scope, user_message};
 
-fn send_failure(events: &UnboundedSender<Event>, message: String) {
-    let _ = events.send(Event::Notice { severity: Severity::Error, message });
+#[track_caller]
+fn send_failure(reporter: &Reporter, message: String, cause: &dyn std::fmt::Debug) {
+    reporter.report_cause(Severity::Error, message, cause);
 }
 
-async fn list_into(fs: Arc<dyn FileSystem>, location: Location, path: Option<PathBuf>, events: UnboundedSender<Event>) {
+async fn list_into(
+    fs: Arc<dyn FileSystem>, location: Location, path: Option<PathBuf>, events: UnboundedSender<Event>,
+    reporter: Reporter,
+) {
     let path = match path {
         Some(path) => path,
         None => match fs.home().await {
             Ok(home) => home,
             Err(err) => {
-                tracing::debug!("{err:?}");
-                send_failure(&events, failure_message(location, "Unable to list home directory", &err));
+                send_failure(&reporter, failure_message(location, "Unable to list home directory", &err), &err);
                 return;
             }
         },
@@ -33,8 +36,11 @@ async fn list_into(fs: Arc<dyn FileSystem>, location: Location, path: Option<Pat
             let _ = events.send(Event::Listed { location, path, entries });
         }
         Err(err) => {
-            tracing::debug!("{err:?}");
-            send_failure(&events, failure_message(location, format!("Unable to list {}", path.display()), &err));
+            send_failure(
+                &reporter,
+                failure_message(location, format!("Unable to list {}", path.display()), &err),
+                &err,
+            );
         }
     }
 }
@@ -56,13 +62,13 @@ async fn resolve_start_directory(fs: &dyn FileSystem, requested: &str) -> Result
 
 async fn list_start_into(
     fs: Arc<dyn FileSystem>, session: SessionId, name: String, requested: String, events: UnboundedSender<Event>,
+    reporter: Reporter,
 ) {
     let location = Location::Session(session);
     let path = match resolve_start_directory(fs.as_ref(), &requested).await {
         Ok(path) => path,
         Err(err) => {
-            tracing::debug!("{err:?}");
-            send_failure(&events, failure_message(location, "Unable to list home directory", &err));
+            send_failure(&reporter, failure_message(location, "Unable to list home directory", &err), &err);
             return;
         }
     };
@@ -71,10 +77,9 @@ async fn list_start_into(
             let _ = events.send(Event::Listed { location, path, entries });
         }
         Err(err) => {
-            tracing::debug!("{err:?}");
             let context = format!("Unable to open {} on {name}, showing the home directory instead", path.display());
-            let _ = events.send(Event::Notice { severity: Severity::Warning, message: user_message(context, &err) });
-            list_into(fs, location, None, events).await;
+            reporter.report_cause(Severity::Warning, user_message(context, &err), &err);
+            list_into(fs, location, None, events, reporter).await;
         }
     }
 }
@@ -99,6 +104,7 @@ impl Engine {
                     live.name.clone(),
                     requested.to_string(),
                     self.events.clone(),
+                    self.reporter.clone(),
                 );
                 self.tasks.spawn("list-start", Scope::Session(session), move |_| work);
             }
@@ -118,7 +124,7 @@ impl Engine {
         let Some(fs) = self.filesystem_or_drop(location) else {
             return;
         };
-        let work = list_into(fs, location, path, self.events.clone());
+        let work = list_into(fs, location, path, self.events.clone(), self.reporter.clone());
         self.tasks.spawn("list", scope_for(location), move |_| work);
     }
 
@@ -127,14 +133,14 @@ impl Engine {
             return;
         };
         let events = self.events.clone();
+        let reporter = self.reporter.clone();
         self.tasks.spawn("create-dir", scope_for(location), move |_| async move {
             match fs.create_dir(&path).await {
                 Ok(()) => {
                     let _ = events.send(Event::LocationChanged { location });
                 }
                 Err(err) => {
-                    tracing::debug!("{err:?}");
-                    send_failure(&events, failure_message(location, "Unable to create directory", &err));
+                    send_failure(&reporter, failure_message(location, "Unable to create directory", &err), &err);
                 }
             }
         });
@@ -145,14 +151,14 @@ impl Engine {
             return;
         };
         let events = self.events.clone();
+        let reporter = self.reporter.clone();
         self.tasks.spawn("rename", scope_for(location), move |_| async move {
             match fs.rename(&from, &to).await {
                 Ok(()) => {
                     let _ = events.send(Event::LocationChanged { location });
                 }
                 Err(err) => {
-                    tracing::debug!("{err:?}");
-                    send_failure(&events, failure_message(location, "Unable to rename", &err));
+                    send_failure(&reporter, failure_message(location, "Unable to rename", &err), &err);
                 }
             }
         });
@@ -163,11 +169,11 @@ impl Engine {
             return;
         };
         let events = self.events.clone();
+        let reporter = self.reporter.clone();
         self.tasks.spawn("delete", scope_for(location), move |_| async move {
             for path in paths {
                 if let Err(err) = fs.delete(&path).await {
-                    tracing::debug!("{err:?}");
-                    send_failure(&events, failure_message(location, "Unable to delete", &err));
+                    send_failure(&reporter, failure_message(location, "Unable to delete", &err), &err);
                     return;
                 }
             }

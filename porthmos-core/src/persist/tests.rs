@@ -308,3 +308,68 @@ fn reserving_a_broken_name_never_hands_out_the_same_name_twice() {
     assert_ne!(first, second);
     assert!(first.exists() && second.exists());
 }
+
+#[test]
+fn a_toml_problem_names_the_line_and_never_quotes_the_file() {
+    let text = "name = \"fine\"\nsecret_access_key = \"AKIAEXAMPLE\nother = 1\n";
+    let error = toml::from_str::<toml::Table>(text).unwrap_err();
+
+    let problem = toml_problem(text, &error);
+
+    assert!(problem.starts_with("line 2, column "), "{problem}");
+    assert!(!problem.contains("AKIAEXAMPLE"), "{problem}");
+    assert!(!problem.contains('\n'), "{problem}");
+}
+
+#[test]
+fn a_toml_problem_without_a_position_is_just_the_message() {
+    let text = "a = 1";
+    let error = toml::from_str::<std::collections::BTreeMap<String, String>>(text).unwrap_err();
+
+    let problem = toml_problem(text, &error);
+
+    assert!(!problem.is_empty());
+    assert!(!problem.contains('\n'), "{problem}");
+}
+
+#[test]
+fn the_set_aside_warning_for_a_broken_toml_file_has_no_source_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("file.toml");
+    std::fs::write(&path, "key = \"hunter2-password\nnext = 1\n").unwrap();
+
+    let loaded = read_or_set_aside(&path, "settings", |text| {
+        toml::from_str::<toml::Table>(text).map_err(|err| toml_problem(text, &err))
+    });
+
+    let Loaded::SetAside { warning, .. } = loaded else {
+        panic!("expected the file to be set aside");
+    };
+    assert!(!warning.contains("hunter2-password"), "{warning}");
+    assert!(warning.contains("line 1"), "{warning}");
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[allow(dead_code)]
+struct Flag {
+    enabled: bool,
+}
+
+#[test]
+fn a_toml_problem_never_repeats_a_quoted_value() {
+    let text = "enabled = \"hunter2\"\n";
+    let error = toml::from_str::<Flag>(text).unwrap_err();
+
+    let problem = toml_problem(text, &error);
+
+    assert!(!problem.contains("hunter2"), "{problem}");
+    assert!(problem.contains("line 1"), "{problem}");
+}
+
+#[test]
+fn a_position_inside_a_multibyte_character_is_not_a_position() {
+    assert_eq!(position_of("h\u{e9}llo", 2), None);
+    assert_eq!(position_of("h\u{e9}llo", 3), Some((1, 3)));
+    assert_eq!(position_of("a\nb\u{e9}c", 3), Some((2, 2)));
+    assert_eq!(position_of("abc", 99), None);
+}

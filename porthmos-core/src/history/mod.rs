@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Paths,
-    persist::{Loaded, read_or_set_aside},
+    persist::{Loaded, read_or_set_aside, toml_problem},
     transfer::Direction,
 };
 
@@ -77,7 +77,9 @@ impl History {
     pub fn load(paths: &Paths) -> (Self, Option<String>) {
         let path = paths.history_file();
         let mut history = Self { path: path.clone(), entries: Arc::new(Vec::new()), writable: true };
-        match read_or_set_aside(&path, "transfer history", |text| toml::from_str::<HistoryFile>(text)) {
+        match read_or_set_aside(&path, "transfer history", |text| {
+            toml::from_str::<HistoryFile>(text).map_err(|err| toml_problem(text, &err))
+        }) {
             Loaded::Missing => (history, None),
             Loaded::Ready(file) => {
                 history.entries = Arc::new(file.entries);

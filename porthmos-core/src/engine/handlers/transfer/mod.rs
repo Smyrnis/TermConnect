@@ -36,7 +36,7 @@ impl Engine {
             (Location::Local, Location::Session(session_id)) => (session_id, Direction::Upload),
             (Location::Session(session_id), Location::Local) => (session_id, Direction::Download),
             _ => {
-                self.notice(Severity::Warning, "Copying between two remote sessions isn't supported yet");
+                self.report(Severity::Warning, "Copying between two remote sessions isn't supported yet");
                 return;
             }
         };
@@ -50,7 +50,7 @@ impl Engine {
 
     fn start_copy_plan(&mut self, session_id: u64, direction: Direction, entries: Vec<Entry>, dest_dir: PathBuf) {
         let Some((source, destination)) = self.filesystems_for(session_id, direction) else {
-            self.notice(Severity::Error, "Copy failed: session disconnected");
+            self.report(Severity::Error, "Copy failed: session disconnected");
             return;
         };
 
@@ -103,7 +103,7 @@ impl Engine {
             if let Some(mut job) = self.transfers.get_mut(id) {
                 job.status = JobStatus::Failed("session disconnected".to_string());
             }
-            self.notice(Severity::Error, format!("Transfer failed: {display_name} \u{2014} session disconnected"));
+            self.report(Severity::Error, format!("Transfer failed: {display_name} \u{2014} session disconnected"));
             self.refresh_transfer_destination(id);
             return;
         };
@@ -172,13 +172,16 @@ impl Engine {
             }
             TransferEvent::Failed { id, message } => {
                 let cancelled = self.tasks.take_cancelled(Scope::Transfer(id));
+                let known = self.transfers.get(id).is_some();
                 if let Some(mut job) = self.transfers.get_mut(id) {
                     job.status = if cancelled { JobStatus::Cancelled } else { JobStatus::Failed(message.clone()) };
                 }
                 let retried = !cancelled && self.transfers.retry_or_give_up(id);
                 if !retried {
-                    if !cancelled {
-                        self.notice(Severity::Error, message);
+                    if !cancelled && known {
+                        self.announce(Severity::Error, message);
+                    } else if !cancelled {
+                        self.report(Severity::Error, message);
                     }
                     self.refresh_transfer_destination(id);
                 }
@@ -188,7 +191,7 @@ impl Engine {
                 self.clear_planning(batch_id);
 
                 if !self.sessions.contains_key(&session_id) {
-                    self.notice(Severity::Error, "Copy failed: session disconnected");
+                    self.report(Severity::Error, "Copy failed: session disconnected");
                     self.transfers.forget_batch_if_empty(batch_id);
                     return;
                 }
@@ -203,17 +206,20 @@ impl Engine {
                     .map(|scan| (scan.session_id, scan.direction, scan.display_name.clone()));
                 self.clear_planning(batch_id);
                 self.transfers.forget_batch_if_empty(batch_id);
-                if let Some((session_id, direction, label)) = scan {
-                    self.record_failed_scan(session_id, direction, label, &message);
+                match scan {
+                    Some((session_id, direction, label)) => {
+                        self.record_failed_scan(session_id, direction, label, &message);
+                        self.announce(Severity::Error, message);
+                    }
+                    None => self.report(Severity::Error, message),
                 }
-                self.notice(Severity::Error, message);
             }
             TransferEvent::PartialsRemoved { session_id } => self.refresh_destination(session_id, Direction::Upload),
             TransferEvent::PlanCancelled { batch_id, session_id, direction } => {
                 self.clear_planning(batch_id);
                 self.transfers.forget_batch_if_empty(batch_id);
                 if self.sessions.contains_key(&session_id) {
-                    self.notice(Severity::Info, "Copy cancelled");
+                    self.info("Copy cancelled");
                 }
                 self.refresh_destination(session_id, direction);
             }
@@ -252,7 +258,7 @@ impl Engine {
             }
             None => {
                 self.transfers.forget_batch_if_empty(review.batch_id);
-                self.notice(Severity::Info, "Copy cancelled");
+                self.info("Copy cancelled");
                 self.refresh_destination(review.session_id, review.direction);
             }
         }
@@ -302,15 +308,15 @@ impl Engine {
         }
         if skipped_symlinks > 0 {
             let plural = if skipped_symlinks == 1 { "" } else { "s" };
-            self.notice(Severity::Warning, format!("Skipped {skipped_symlinks} symlink{plural}"));
+            self.report(Severity::Warning, format!("Skipped {skipped_symlinks} symlink{plural}"));
         }
         if resolved.skipped > 0 {
             let plural = if resolved.skipped == 1 { "" } else { "s" };
-            self.notice(Severity::Info, format!("Skipped {} existing file{plural}", resolved.skipped));
+            self.info(format!("Skipped {} existing file{plural}", resolved.skipped));
         }
         if resolved.skipped_partials > 0 {
             let plural = if resolved.skipped_partials == 1 { "" } else { "s" };
-            self.notice(Severity::Info, format!("Skipped {} partly copied file{plural}", resolved.skipped_partials));
+            self.info(format!("Skipped {} partly copied file{plural}", resolved.skipped_partials));
         }
         if resolved.blocked_by_folder > 0 {
             let reason = if resolved.blocked_by_folder == 1 {
@@ -318,7 +324,7 @@ impl Engine {
             } else {
                 "files because folders with the same names exist"
             };
-            self.notice(Severity::Warning, format!("Skipped {} {reason}", resolved.blocked_by_folder));
+            self.report(Severity::Warning, format!("Skipped {} {reason}", resolved.blocked_by_folder));
         }
         self.transfers.forget_batch_if_empty(batch_id);
         self.fill_transfer_slots();
@@ -445,7 +451,7 @@ impl Engine {
             return;
         };
         if !self.sessions.contains_key(&session_id) {
-            self.notice(Severity::Warning, "Can't retry: session disconnected");
+            self.report(Severity::Warning, "Can't retry: session disconnected");
             return;
         }
         if self.transfers.retry_jobs(&retryable) > 0 {

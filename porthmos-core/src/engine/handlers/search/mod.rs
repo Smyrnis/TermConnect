@@ -2,8 +2,8 @@ use std::{path::PathBuf, sync::atomic::Ordering, time::Duration};
 
 use porthmos_vfs::{SearchEvent, SearchQuery};
 
-use super::super::{Engine, Event, Location};
-use crate::tasks::Scope;
+use super::super::{Engine, Event, Location, Reporter};
+use crate::{Severity, tasks::Scope};
 
 pub(crate) const SEARCH_DEBOUNCE: Duration = Duration::from_millis(250);
 
@@ -25,6 +25,7 @@ impl Engine {
             return;
         };
         let events = self.events.clone();
+        let reporter = Reporter::new(events.clone());
         self.tasks.spawn("search", Scope::Search, move |cancel| async move {
             tokio::time::sleep(SEARCH_DEBOUNCE).await;
             if cancel.load(Ordering::Relaxed) || current_generation.load(Ordering::Relaxed) != generation {
@@ -33,6 +34,9 @@ impl Engine {
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
             let forward = async {
                 while let Some(search_event) = rx.recv().await {
+                    if let SearchEvent::Failed(message) = &search_event {
+                        reporter.log(Severity::Error, message);
+                    }
                     let _ = events.send(event_for(search_event));
                 }
             };

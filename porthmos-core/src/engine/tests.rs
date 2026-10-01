@@ -492,3 +492,221 @@ async fn a_history_write_that_never_finishes_does_not_block_the_shutdown() {
     assert!(start.elapsed() < Duration::from_secs(5));
     let _release = std::fs::File::open(&fifo).unwrap();
 }
+
+#[test]
+fn a_failed_connect_is_in_the_log_as_well_as_shown() {
+    let mut t = test_engine();
+
+    let logs = crate::engine::testing::capture_logs(|| {
+        t.engine.handle_internal(Internal::ConnectFailed { name: "prod".to_string(), message: "refused".to_string() });
+    });
+
+    assert!(logs.contains("ERROR") && logs.contains("refused"), "{logs}");
+    assert!(t.drain().iter().any(|event| matches!(event, Event::ConnectFailed { .. })));
+}
+
+#[test]
+fn a_warning_from_a_handler_is_in_the_log_too_and_shown_once() {
+    let mut t = test_engine();
+    t.engine.state_protected = true;
+
+    let logs = crate::engine::testing::capture_logs(|| t.engine.remember_save_choice(true));
+
+    assert!(logs.contains("WARN") && logs.contains("Couldn't remember the keyring choice"), "{logs}");
+    let notices = t.notices();
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert_eq!(notices[0].0, Severity::Warning);
+}
+
+#[test]
+fn a_failed_transfer_is_in_the_log_once() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    let id = queue_job(&mut t, session, "a");
+    t.engine.transfers.get_mut(id).unwrap().status = JobStatus::InProgress;
+    t.engine.transfers.get_mut(id).unwrap().attempts = 3;
+
+    let logs = crate::engine::testing::capture_logs(|| {
+        t.engine.handle_transfer_event(TransferEvent::Failed {
+            id,
+            message: "Transfer failed: a \u{2014} disk full".to_string(),
+        });
+        t.engine.process_row_changes();
+    });
+
+    assert_eq!(error_lines(&logs), 1, "{logs}");
+    assert!(
+        t.notices().iter().any(|(severity, message)| *severity == Severity::Error && message.contains("disk full"))
+    );
+}
+
+#[test]
+fn a_failed_scan_is_in_the_log_once() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    let batch_id = t.engine.transfers.start_batch("scan".to_string());
+    t.engine.planning.push(PlanningScan {
+        batch_id,
+        session_id: session,
+        direction: Direction::Upload,
+        display_name: "scan".to_string(),
+    });
+
+    let logs = crate::engine::testing::capture_logs(|| {
+        t.engine.handle_transfer_event(TransferEvent::PlanFailed {
+            batch_id,
+            message: "Copy failed: no access".to_string(),
+        });
+    });
+
+    assert_eq!(error_lines(&logs), 1, "{logs}");
+    assert!(t.notices().iter().any(|(_, message)| message.contains("no access")));
+}
+
+#[test]
+fn a_panicking_transfer_leaves_the_panic_and_the_failed_job_in_the_log_and_nothing_else() {
+    let mut t = test_engine();
+    let (session, _fs) = t.add_session("prod");
+    let id = queue_job(&mut t, session, "a");
+    t.engine.transfers.get_mut(id).unwrap().status = JobStatus::InProgress;
+    t.engine.transfers.get_mut(id).unwrap().attempts = 3;
+
+    let logs = crate::engine::testing::capture_logs(|| {
+        t.engine.recover_from_panic("transfer", Scope::Transfer(id), "it exploded");
+        t.engine.process_row_changes();
+    });
+
+    assert_eq!(error_lines(&logs), 2, "{logs}");
+    assert!(logs.contains("it exploded"), "{logs}");
+}
+
+#[test]
+fn a_panicking_background_task_is_in_the_log_once() {
+    let mut t = test_engine();
+
+    let logs = crate::engine::testing::capture_logs(|| {
+        t.engine.recover_from_panic("persist-writer", Scope::Background, "it exploded");
+    });
+
+    assert_eq!(error_lines(&logs), 1, "{logs}");
+    assert!(t.notices().iter().any(|(_, message)| message == "A background task failed: persist-writer"));
+}
+
+#[test]
+fn a_cancelled_connection_is_not_logged_as_an_error() {
+    let mut t = test_engine();
+
+    let logs = crate::engine::testing::capture_logs(|| {
+        t.engine.handle_internal(Internal::ConnectFailed {
+            name: "prod".to_string(),
+            message: crate::CONNECTION_CANCELLED.to_string(),
+        });
+    });
+
+    assert_eq!(error_lines(&logs), 0, "{logs}");
+    assert!(logs.contains("INFO") && logs.contains("Connection cancelled"), "{logs}");
+    assert!(t.drain().iter().any(|event| matches!(event, Event::ConnectFailed { .. })));
+}
+
+#[test]
+fn a_rejected_profile_is_logged_as_a_warning_not_an_error() {
+    let t = test_engine();
+
+    let logs = crate::engine::testing::capture_logs(|| {
+        t.engine.profile_rejected("Name can't be empty");
+    });
+
+    assert_eq!(error_lines(&logs), 0, "{logs}");
+    assert!(logs.contains("WARN") && logs.contains("Name can't be empty"), "{logs}");
+}
+
+#[test]
+fn a_reported_problem_says_which_line_of_code_raised_it() {
+    let t = test_engine();
+
+    let logs = crate::engine::testing::capture_logs(|| t.engine.report(Severity::Warning, "look here"));
+
+    assert!(logs.contains("engine/tests.rs"), "{logs}");
+}
+
+#[test]
+fn the_announce_helper_shows_a_notice_without_logging() {
+    let mut t = test_engine();
+
+    let logs = crate::engine::testing::capture_logs(|| t.engine.announce(Severity::Error, "logged elsewhere"));
+
+    assert!(logs.is_empty(), "{logs}");
+    assert_eq!(t.notices(), vec![(Severity::Error, "logged elsewhere".to_string())]);
+}
+
+#[test]
+fn a_failure_for_a_scan_that_is_no_longer_tracked_is_still_logged() {
+    let mut t = test_engine();
+
+    let logs = crate::engine::testing::capture_logs(|| {
+        t.engine.handle_transfer_event(TransferEvent::PlanFailed {
+            batch_id: 99,
+            message: "Copy failed: gone".to_string(),
+        });
+    });
+
+    assert_eq!(error_lines(&logs), 1, "{logs}");
+    assert!(t.notices().iter().any(|(_, message)| message.contains("gone")));
+}
+
+#[test]
+fn a_failure_for_a_job_that_no_longer_exists_is_still_logged() {
+    let mut t = test_engine();
+
+    let logs = crate::engine::testing::capture_logs(|| {
+        t.engine.handle_transfer_event(TransferEvent::Failed {
+            id: 4242,
+            message: "Transfer failed: vanished".to_string(),
+        });
+    });
+
+    assert_eq!(error_lines(&logs), 1, "{logs}");
+    assert!(t.notices().iter().any(|(_, message)| message.contains("vanished")));
+}
+
+#[test]
+fn a_rejected_profile_is_logged_where_it_was_rejected() {
+    let mut t = test_engine();
+
+    let logs = crate::engine::testing::capture_logs(|| {
+        t.engine.handle_command(Command::SaveProfile {
+            original: None,
+            draft: Box::new(crate::profiles::ProfileDraft { protocol: "nothing".to_string(), ..Default::default() }),
+        });
+    });
+
+    assert!(logs.contains("WARN") && logs.contains("protocol is available"), "{logs}");
+    assert!(logs.contains("handlers/profiles"), "{logs}");
+    assert!(!logs.contains("engine/mod.rs"), "{logs}");
+}
+
+#[test]
+fn a_connection_failure_is_logged_where_it_was_raised() {
+    let mut t = test_engine();
+
+    let logs = crate::engine::testing::capture_logs(|| {
+        t.engine.handle_command(Command::Connect { profile: "nobody".to_string() });
+    });
+
+    assert!(logs.contains("ERROR") && logs.contains("No saved connection named"), "{logs}");
+    assert!(logs.contains("handlers/connect"), "{logs}");
+}
+
+#[test]
+fn an_info_message_is_shown_without_a_problem_in_the_log() {
+    let mut t = test_engine();
+
+    let logs = crate::engine::testing::capture_logs(|| t.engine.info("all good"));
+
+    assert!(!logs.contains("ERROR") && !logs.contains("WARN"), "{logs}");
+    assert_eq!(t.notices(), vec![(Severity::Info, "all good".to_string())]);
+}
+
+fn error_lines(logs: &str) -> usize {
+    logs.lines().filter(|line| line.contains("ERROR")).count()
+}

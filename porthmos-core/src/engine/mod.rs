@@ -2,6 +2,7 @@ mod command;
 mod event;
 mod handlers;
 mod prompter;
+mod report;
 
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
@@ -14,6 +15,7 @@ pub use command::{Command, Location, RequestId, SessionId};
 pub use event::Event;
 use porthmos_vfs::{Environment, FileSystem, Protocol};
 use prompter::PendingQuestions;
+pub(crate) use report::Reporter;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::{
@@ -112,6 +114,7 @@ pub(crate) struct Engine {
     events: UnboundedSender<Event>,
     internal: UnboundedSender<Internal>,
     tasks: Tasks,
+    reporter: Reporter,
     pub(crate) finished: Option<tokio::sync::watch::Sender<bool>>,
     pub(crate) shutdown_grace: Duration,
     pub(crate) upload_grace: Duration,
@@ -173,6 +176,7 @@ impl Engine {
                 tag: failure.tag,
             });
         });
+        let reporter = Reporter::new(events.clone());
         Self {
             paths: parts.paths,
             env: parts.env,
@@ -181,6 +185,7 @@ impl Engine {
             events,
             internal,
             tasks,
+            reporter,
             finished: None,
             shutdown_grace: SHUTDOWN_GRACE,
             upload_grace: EDIT_UPLOAD_GRACE,
@@ -323,7 +328,7 @@ impl Engine {
                 self.handle_transfer_event(TransferEvent::PlanFailed { batch_id, message: failed });
             }
             Scope::Edit(edit_id) if self.edit_in_progress(edit_id) => self.fail_edit(edit_id, &failed),
-            _ => self.notice(Severity::Error, failed),
+            _ => self.announce(Severity::Error, failed),
         }
     }
 
@@ -332,7 +337,7 @@ impl Engine {
             Internal::Connected { entry, protocol, fs, typed } => self.finish_connect(entry, protocol, fs, typed),
             Internal::ConnectFailed { name, message } => {
                 self.connecting.remove(&name);
-                self.emit(Event::ConnectFailed { name, message })
+                self.connect_failed(name, message)
             }
             Internal::Edit(event) => self.handle_edit_event(event),
             Internal::KeyringProbed { available } => self.emit(Event::KeyringStatus { available }),
@@ -357,8 +362,31 @@ impl Engine {
         let _ = self.events.send(event);
     }
 
-    fn notice(&self, severity: Severity, message: impl Into<String>) {
-        self.emit(Event::Notice { severity, message: message.into() });
+    #[track_caller]
+    pub(crate) fn connect_failed(&self, name: String, message: String) {
+        let severity = if message == crate::CONNECTION_CANCELLED { Severity::Info } else { Severity::Error };
+        self.reporter.log(severity, &message);
+        self.emit(Event::ConnectFailed { name, message });
+    }
+
+    #[track_caller]
+    pub(crate) fn profile_rejected(&self, message: impl Into<String>) {
+        let message = message.into();
+        self.reporter.log(Severity::Warning, &message);
+        self.emit(Event::ProfileRejected { message });
+    }
+
+    #[track_caller]
+    pub(crate) fn report(&self, severity: Severity, message: impl Into<String>) {
+        self.reporter.report(severity, message);
+    }
+
+    pub(crate) fn announce(&self, severity: Severity, message: impl Into<String>) {
+        self.reporter.show(severity, message);
+    }
+
+    pub(crate) fn info(&self, message: impl Into<String>) {
+        self.emit(Event::Notice { severity: Severity::Info, message: message.into() });
     }
 
     fn fs_for(&self, location: Location) -> Option<Arc<dyn FileSystem>> {

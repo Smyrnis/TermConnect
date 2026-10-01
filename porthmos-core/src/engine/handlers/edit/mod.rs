@@ -207,7 +207,7 @@ impl Engine {
         let editor = match resolve_editor(self.edit.settings.editor.as_deref(), &self.env) {
             Ok(editor) => editor,
             Err(message) => {
-                self.notice(Severity::Error, editor_failure(&message));
+                self.report(Severity::Error, editor_failure(&message));
                 return;
             }
         };
@@ -240,7 +240,7 @@ impl Engine {
 
     fn edit_local_file(&mut self, path: PathBuf, editor: EditorCommand) {
         if path.is_dir() {
-            self.notice(Severity::Warning, "Can't edit a folder");
+            self.report(Severity::Warning, "Can't edit a folder");
             return;
         }
         let edit_id = self.new_edit_session(Location::Local, path.clone(), editor.clone());
@@ -252,7 +252,7 @@ impl Engine {
 
     fn edit_remote_file(&mut self, session_id: u64, path: PathBuf, editor: EditorCommand) {
         let Some(fs) = self.fs_for(Location::Session(session_id)) else {
-            self.notice(Severity::Error, "Edit failed: session disconnected");
+            self.report(Severity::Error, "Edit failed: session disconnected");
             return;
         };
         let edit_id = self.new_edit_session(Location::Session(session_id), path.clone(), editor);
@@ -260,7 +260,7 @@ impl Engine {
         let dir = self.paths.edit_dir().join(format!("{}-{edit_id}", (self.edit.clock)().timestamp_millis()));
         let local = self.local_fs.clone();
         let internal = self.internal.clone();
-        self.notice(Severity::Info, format!("Downloading {} to edit\u{2026}", printable(&name)));
+        self.info(format!("Downloading {} to edit\u{2026}", printable(&name)));
         self.tasks.spawn("edit-download", Scope::Edit(edit_id), move |cancel| async move {
             let result = prepare(fs, local, path, dir, name, cancel).await;
             let _ = internal.send(Internal::Edit(EditEvent::Prepared { edit_id, result }));
@@ -302,7 +302,7 @@ impl Engine {
                 if self.tasks.take_cancelled(Scope::Edit(edit_id)) {
                     self.edit.sessions.remove(&edit_id);
                     remove_dir(&temp.dir);
-                    self.notice(Severity::Info, "Edit cancelled");
+                    self.info("Edit cancelled");
                     return;
                 }
                 let Some(session) = self.edit.sessions.get_mut(&edit_id) else {
@@ -318,12 +318,12 @@ impl Engine {
             Prepared::Cancelled => {
                 self.tasks.forget(Scope::Edit(edit_id));
                 self.edit.sessions.remove(&edit_id);
-                self.notice(Severity::Info, "Edit cancelled");
+                self.info("Edit cancelled");
             }
             Prepared::Failed(message) => {
                 self.tasks.forget(Scope::Edit(edit_id));
                 self.edit.sessions.remove(&edit_id);
-                self.notice(Severity::Error, message);
+                self.report(Severity::Error, message);
             }
         }
     }
@@ -340,11 +340,11 @@ impl Engine {
         match (location, exit) {
             (_, EditorExit::LaunchFailed(message)) => {
                 self.drop_edit(edit_id);
-                self.notice(Severity::Error, editor_failure(&message));
+                self.report(Severity::Error, editor_failure(&message));
             }
             (Location::Local, EditorExit::Status(code)) => {
                 self.drop_edit(edit_id);
-                self.notice(Severity::Warning, format!("Editor exited with status {code}"));
+                self.report(Severity::Warning, format!("Editor exited with status {code}"));
                 self.emit(Event::LocationChanged { location: Location::Local });
             }
             (Location::Local, EditorExit::Success) => {
@@ -363,7 +363,7 @@ impl Engine {
         session.saving = true;
         let (Some(temp), Some(baseline)) = (session.temp.clone(), session.baseline) else {
             self.drop_edit(edit_id);
-            self.notice(Severity::Error, "Edit failed: the temporary copy is missing");
+            self.report(Severity::Error, "Edit failed: the temporary copy is missing");
             return;
         };
         let internal = self.internal.clone();
@@ -389,11 +389,11 @@ impl Engine {
             }
             (Ok(false), None) => {
                 self.drop_edit(edit_id);
-                self.notice(Severity::Info, format!("No changes to {name}"));
+                self.info(format!("No changes to {name}"));
             }
             (Ok(false), Some(code)) => {
                 self.drop_edit(edit_id);
-                self.notice(Severity::Warning, format!("Editor exited with status {code}; nothing was uploaded"));
+                self.report(Severity::Warning, format!("Editor exited with status {code}; nothing was uploaded"));
             }
             (Ok(true), Some(code)) => self.keep_edit(
                 edit_id,
@@ -420,11 +420,11 @@ impl Engine {
         };
         let reason = printable(&reason.replace('\n', " "));
         match session.temp {
-            Some(temp) => self.notice(
+            Some(temp) => self.report(
                 severity,
                 format!("{reason}; your changes are kept in {}", printable(&temp.file.display().to_string())),
             ),
-            None => self.notice(severity, reason),
+            None => self.report(severity, reason),
         }
     }
 
@@ -494,7 +494,7 @@ impl Engine {
             Ok(name) => {
                 self.drop_edit(edit_id);
                 self.emit(Event::LocationChanged { location });
-                self.notice(Severity::Info, format!("Uploaded {}", printable(&name)));
+                self.info(format!("Uploaded {}", printable(&name)));
             }
             Err(message) => self.keep_edit(edit_id, Severity::Error, &message),
         }
