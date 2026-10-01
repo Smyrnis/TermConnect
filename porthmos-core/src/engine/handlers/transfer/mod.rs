@@ -1,10 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::Arc,
 };
 
 use porthmos_vfs::{Entry, FileSystem, PART_SUFFIX, path_to_remote_string};
@@ -12,6 +9,7 @@ use porthmos_vfs::{Entry, FileSystem, PART_SUFFIX, path_to_remote_string};
 use super::super::{ConflictReview, Engine, Event, Internal, Location, PlanningScan, TransferEvent};
 use crate::{
     Severity,
+    tasks::Scope,
     transfer::{
         self, Direction, JobStatus, TransferJob, TransferOutcome,
         conflicts::{ConflictInfo, Resolution},
@@ -61,11 +59,10 @@ impl Engine {
             _ => format!("{} items", entries.len()),
         };
         let batch_id = self.transfers.start_batch(display_name.clone());
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.planning.push(PlanningScan { batch_id, session_id, direction, display_name, cancel: cancel.clone() });
+        self.planning.push(PlanningScan { batch_id, session_id, direction, display_name });
 
         let internal = self.internal.clone();
-        tokio::spawn(async move {
+        self.tasks.spawn("plan-copy", Scope::Planning(batch_id), move |cancel| async move {
             let result =
                 transfer::plan::plan_copy(source.as_ref(), destination.as_ref(), entries, &dest_dir, &cancel).await;
             let event = match result {
@@ -123,12 +120,10 @@ impl Engine {
             Direction::Download => (remote_path, local_path),
         };
         let resume = job.resume;
-
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.transfer_cancels.insert(id, cancel.clone());
+        drop(job);
 
         let internal = self.internal.clone();
-        tokio::spawn(async move {
+        self.tasks.spawn("transfer", Scope::Transfer(id), move |cancel| async move {
             let progress = internal.clone();
             let result = transfer::run(
                 source.as_ref(),
@@ -165,7 +160,7 @@ impl Engine {
                 }
             }
             TransferEvent::Finished { id, outcome } => {
-                self.transfer_cancels.remove(&id);
+                self.tasks.forget(Scope::Transfer(id));
                 if let Some(mut job) = self.transfers.get_mut(id) {
                     job.status = match outcome {
                         TransferOutcome::Completed => JobStatus::Completed,
@@ -176,7 +171,7 @@ impl Engine {
                 self.fill_transfer_slots();
             }
             TransferEvent::Failed { id, message } => {
-                let cancelled = self.transfer_cancels.remove(&id).is_some_and(|cancel| cancel.load(Ordering::Relaxed));
+                let cancelled = self.tasks.take_cancelled(Scope::Transfer(id));
                 if let Some(mut job) = self.transfers.get_mut(id) {
                     job.status = if cancelled { JobStatus::Cancelled } else { JobStatus::Failed(message.clone()) };
                 }
@@ -331,6 +326,7 @@ impl Engine {
 
     fn clear_planning(&mut self, batch_id: u64) {
         self.planning.retain(|scan| scan.batch_id != batch_id);
+        self.tasks.forget(Scope::Planning(batch_id));
     }
 
     fn refresh_transfer_destination(&mut self, id: u64) {
@@ -360,12 +356,7 @@ impl Engine {
 
     pub(crate) fn cancel_all_copies(&mut self) {
         self.drop_conflict_reviews(|_| true);
-        for scan in &self.planning {
-            scan.cancel.store(true, Ordering::Relaxed);
-        }
-        for cancel in self.transfer_cancels.values() {
-            cancel.store(true, Ordering::Relaxed);
-        }
+        self.cancel_all_work();
         let mut cancelled_destinations: Vec<(u64, Direction)> = Vec::new();
         for job in self.transfers.queued_jobs() {
             let destination = (job.session_id, job.direction);
@@ -375,6 +366,17 @@ impl Engine {
         }
         self.transfers.cancel_all_queued();
         self.refresh_destinations_without_pending(&cancelled_destinations);
+    }
+
+    pub(crate) fn cancel_all_work(&mut self) {
+        let scans: Vec<u64> = self.planning.iter().map(|scan| scan.batch_id).collect();
+        for batch_id in scans {
+            self.tasks.cancel(Scope::Planning(batch_id));
+        }
+        let running: Vec<u64> = self.transfers.active_jobs().map(|job| job.id).collect();
+        for id in running {
+            self.tasks.cancel(Scope::Transfer(id));
+        }
         self.cancel_edit_downloads();
     }
 
@@ -387,24 +389,22 @@ impl Engine {
     }
 
     pub(crate) fn cancel_session_transfers(&mut self, session_id: u64) -> usize {
-        let session_scans: Vec<&PlanningScan> =
-            self.planning.iter().filter(|scan| scan.session_id == session_id).collect();
-        for scan in &session_scans {
-            scan.cancel.store(true, Ordering::Relaxed);
+        let scans: Vec<u64> =
+            self.planning.iter().filter(|scan| scan.session_id == session_id).map(|scan| scan.batch_id).collect();
+        for batch_id in &scans {
+            self.tasks.cancel(Scope::Planning(*batch_id));
         }
         let active_ids = self.transfers.active_ids_for_session(session_id);
         for id in &active_ids {
-            if let Some(cancel) = self.transfer_cancels.get(id) {
-                cancel.store(true, Ordering::Relaxed);
-            }
+            self.tasks.cancel(Scope::Transfer(*id));
         }
-        session_scans.len() + active_ids.len()
+        scans.len() + active_ids.len()
     }
 
     pub(crate) fn cancel_row(&mut self, kind: RowKind) {
         if let RowKind::Scan(batch_id) = kind {
-            for scan in self.planning.iter().filter(|scan| scan.batch_id == batch_id) {
-                scan.cancel.store(true, Ordering::Relaxed);
+            if self.planning.iter().any(|scan| scan.batch_id == batch_id) {
+                self.tasks.cancel(Scope::Planning(batch_id));
             }
             self.drop_conflict_reviews(|review| review.batch_id == batch_id);
             return;
@@ -424,9 +424,7 @@ impl Engine {
                     }
                 }
                 JobStatus::InProgress => {
-                    if let Some(cancel) = self.transfer_cancels.get(id) {
-                        cancel.store(true, Ordering::Relaxed);
-                    }
+                    self.tasks.cancel(Scope::Transfer(*id));
                 }
                 _ => {}
             }
@@ -512,7 +510,7 @@ impl Engine {
             };
             let fs = session.fs.clone();
             let internal = self.internal.clone();
-            tokio::spawn(async move {
+            self.tasks.spawn("remove-partials", Scope::Background, move |_| async move {
                 for part in parts {
                     let _ = fs.remove_file(Path::new(&part)).await;
                 }

@@ -13,6 +13,7 @@ pub mod profiles;
 mod protocol_info;
 pub mod secrets;
 pub mod state;
+pub mod tasks;
 pub mod transfer;
 
 use std::{path::PathBuf, sync::Arc};
@@ -95,6 +96,7 @@ pub fn builtin_protocols(paths: &Paths) -> Vec<Arc<dyn Protocol>> {
 pub struct CoreHandle {
     commands: UnboundedSender<Command>,
     protocols: Arc<[ProtocolInfo]>,
+    finished: tokio::sync::watch::Receiver<bool>,
 }
 
 impl CoreHandle {
@@ -112,7 +114,14 @@ impl CoreHandle {
 
     pub fn detached_with(protocols: Vec<ProtocolInfo>) -> (CoreHandle, UnboundedReceiver<Command>) {
         let (commands, receiver) = unbounded_channel();
-        (CoreHandle { commands, protocols: protocols.into() }, receiver)
+        let (_sender, finished) = tokio::sync::watch::channel(false);
+        (CoreHandle { commands, protocols: protocols.into(), finished }, receiver)
+    }
+
+    pub async fn shutdown(&self) {
+        self.send(Command::Shutdown);
+        let mut finished = self.finished.clone();
+        let _ = finished.wait_for(|done| *done).await;
     }
 }
 
@@ -200,7 +209,9 @@ impl CoreBuilder {
         let (events, event_receiver) = unbounded_channel();
         let (commands, command_receiver) = unbounded_channel();
         let (internal, internal_receiver) = unbounded_channel();
-        let engine = Engine::new(parts, events.clone(), internal);
+        let (finished_sender, finished) = tokio::sync::watch::channel(false);
+        let mut engine = Engine::new(parts, events.clone(), internal);
+        engine.finished = Some(finished_sender);
         if let Some(warning) = history_warning {
             let _ = events.send(Event::Notice { severity: Severity::Warning, message: warning });
         }
@@ -211,7 +222,7 @@ impl CoreBuilder {
         engine.publish_save_choice();
         engine.start_keyring_probe();
         tokio::spawn(engine.run(command_receiver, internal_receiver));
-        Ok((CoreHandle { commands, protocols: infos }, event_receiver))
+        Ok((CoreHandle { commands, protocols: infos, finished }, event_receiver))
     }
 }
 

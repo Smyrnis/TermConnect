@@ -1,10 +1,4 @@
-use std::{
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-};
+use std::{path::PathBuf, sync::Arc};
 
 use porthmos_vfs::{
     Answer, Entry, Question, ShellInvocation,
@@ -19,6 +13,7 @@ use crate::{
     },
     profiles::store,
     secrets::TestBackend,
+    tasks::Scope,
     transfer::{Direction, JobStatus},
 };
 
@@ -334,13 +329,11 @@ fn disconnecting_a_session_counts_its_active_jobs_in_the_aggregated_notification
     let (session, _) = t.add_session("test");
     let active = enqueue(&mut t, session, "a.txt");
     t.engine.transfers.get_mut(active).unwrap().status = JobStatus::InProgress;
-    let cancel = Arc::new(AtomicBool::new(false));
-    t.engine.transfer_cancels.insert(active, cancel.clone());
     enqueue(&mut t, session, "b.txt");
 
     t.engine.disconnect(session);
 
-    assert!(cancel.load(Ordering::Relaxed));
+    assert!(t.engine.tasks.take_cancelled(Scope::Transfer(active)));
     let first = messages(&mut t).remove(0);
     assert!(first.contains("2 transfers cancelled"), "got {first}");
 }
@@ -349,19 +342,17 @@ fn disconnecting_a_session_counts_its_active_jobs_in_the_aggregated_notification
 fn disconnecting_a_session_counts_its_scans_in_the_aggregated_notification() {
     let mut t = test_engine();
     let (session, _) = t.add_session("test");
-    let scan_cancel = Arc::new(AtomicBool::new(false));
     t.engine.planning.push(PlanningScan {
         batch_id: 0,
         session_id: session,
         direction: Direction::Upload,
         display_name: "myfolder".to_string(),
-        cancel: scan_cancel.clone(),
     });
     enqueue(&mut t, session, "a.txt");
 
     t.engine.disconnect(session);
 
-    assert!(scan_cancel.load(Ordering::Relaxed));
+    assert!(t.engine.tasks.take_cancelled(Scope::Planning(0)));
     let first = messages(&mut t).remove(0);
     assert!(first.contains("2 transfers cancelled"), "got {first}");
 }

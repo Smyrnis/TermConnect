@@ -2,7 +2,7 @@ use std::{
     ffi::OsStr,
     os::unix::ffi::OsStrExt,
     path::PathBuf,
-    sync::{Arc, Mutex, atomic::AtomicBool},
+    sync::{Arc, Mutex},
     time::Duration,
 };
 
@@ -382,13 +382,7 @@ fn failure_reasons_never_reach_the_history_file() {
 }
 
 fn scan(batch_id: u64, session_id: u64, label: &str) -> PlanningScan {
-    PlanningScan {
-        batch_id,
-        session_id,
-        direction: Direction::Upload,
-        display_name: label.to_string(),
-        cancel: Arc::new(AtomicBool::new(false)),
-    }
+    PlanningScan { batch_id, session_id, direction: Direction::Upload, display_name: label.to_string() }
 }
 
 #[test]

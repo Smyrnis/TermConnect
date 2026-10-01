@@ -17,6 +17,10 @@ use porthmos_core::{Core, Environment, Paths, config};
 fn install_panic_hook() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
+        if porthmos_core::tasks::in_supervised_task() {
+            tracing::error!(target: "porthmos::tasks", "{panic_info}");
+            return;
+        }
         let _ = terminal::restore();
         default_hook(panic_info);
     }));

@@ -13,6 +13,7 @@ use crate::{
         Command,
         testing::{TestEngine, test_engine},
     },
+    tasks::Scope,
 };
 
 const REMOTE: &str = "/home/user/a.txt";
@@ -810,7 +811,7 @@ async fn an_existing_temporary_folder_is_never_reused() {
 async fn a_download_that_finished_just_before_cancelling_does_not_open_the_editor() {
     let mut t = test_engine();
     let (session, _fs) = remote_session(&mut t);
-    let (edit_id, cancel) = t.engine.new_edit_session(
+    let edit_id = t.engine.new_edit_session(
         Location::Session(session),
         PathBuf::from(REMOTE),
         EditorCommand { program: "vi".to_string(), args: Vec::new() },
@@ -819,7 +820,7 @@ async fn a_download_that_finished_just_before_cancelling_does_not_open_the_edito
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("a.txt");
     std::fs::write(&file, b"old content").unwrap();
-    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+    t.engine.tasks.cancel(Scope::Edit(edit_id));
 
     t.engine.handle_edit_event(EditEvent::Prepared {
         edit_id,
@@ -872,4 +873,42 @@ async fn an_edit_that_is_only_being_edited_is_not_busy() {
     let events = open_remote(&mut t, session, REMOTE).await;
 
     assert!(busy_events(&events).is_empty());
+}
+
+#[tokio::test]
+async fn finishing_an_edit_forgets_its_cancel_mark() {
+    let mut t = test_engine();
+    let (session, _fs) = remote_session(&mut t);
+    let (edit_id, _, _) = find_ready(&open_remote(&mut t, session, REMOTE).await).unwrap();
+    t.engine.tasks.cancel(Scope::Edit(edit_id));
+
+    t.engine.handle_command(Command::FinishEdit { edit_id, exit: EditorExit::Status(1) });
+    t.run_internal().await;
+
+    assert!(!t.engine.tasks.take_cancelled(Scope::Edit(edit_id)));
+}
+
+#[tokio::test]
+async fn an_upload_result_that_arrives_during_shutdown_is_applied() {
+    let mut t = test_engine();
+    let (session, _fs) = remote_session(&mut t);
+    let (edit_id, _, _) = find_ready(&open_remote(&mut t, session, REMOTE).await).unwrap();
+    t.drain();
+
+    t.engine.apply_late_result(Internal::Edit(EditEvent::Uploaded { edit_id, result: Ok("a.txt".to_string()) }));
+
+    assert!(notices_of(&t.drain()).contains(&(Severity::Info, "Uploaded a.txt".to_string())));
+    assert!(t.engine.edit.sessions.is_empty());
+}
+
+#[tokio::test]
+async fn a_question_that_arrives_during_shutdown_is_not_asked() {
+    let mut t = test_engine();
+    let (session, _fs) = remote_session(&mut t);
+    let (edit_id, _, _) = find_ready(&open_remote(&mut t, session, REMOTE).await).unwrap();
+    t.drain();
+
+    t.engine.apply_late_result(Internal::Edit(EditEvent::Conflict { edit_id }));
+
+    assert!(question_of(&t.drain()).is_none());
 }

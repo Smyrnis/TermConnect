@@ -8,6 +8,7 @@ use crate::{
     Severity,
     profiles::{PASSWORD_MARKER, SecretEdit, store},
     secrets::{SecretField, SecretKey},
+    tasks::Scope,
 };
 
 pub(crate) struct KeyringDone {
@@ -96,9 +97,10 @@ impl Engine {
         let id = self.next_keyring_job;
         self.latest_keyring_job.insert(owner.key(), id);
         let internal = self.internal.clone();
+        let tasks = self.tasks.clone();
         let queue = self.keyring_jobs.get_or_insert_with(|| {
             let (queue, mut jobs) = unbounded_channel::<KeyringJob>();
-            tokio::spawn(async move {
+            tasks.spawn("keyring-queue", Scope::Background, move |_| async move {
                 while let Some(job) = jobs.recv().await {
                     let _ = internal.send(job.await);
                 }

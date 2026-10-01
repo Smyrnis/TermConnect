@@ -2,10 +2,7 @@ use std::{
     collections::HashMap,
     os::unix::fs::{DirBuilderExt, PermissionsExt},
     path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, atomic::AtomicBool},
 };
 
 use chrono::{DateTime, Utc};
@@ -20,6 +17,7 @@ use crate::{
         EditChoice, EditQuestionKind, EditorCommand, EditorExit, MAX_EDIT_BYTES, conflict_copy_name, hash_file,
         printable, resolve_editor,
     },
+    tasks::Scope,
     transfer::{self, TransferOutcome},
     user_message,
 };
@@ -45,7 +43,6 @@ pub(crate) struct EditSession {
     temp: Option<TempCopy>,
     baseline: Option<Baseline>,
     pending: Option<EditQuestionKind>,
-    cancel: Arc<AtomicBool>,
     awaiting_editor: bool,
     saving: bool,
 }
@@ -220,10 +217,9 @@ impl Engine {
         }
     }
 
-    fn new_edit_session(&mut self, location: Location, path: PathBuf, editor: EditorCommand) -> (u64, Arc<AtomicBool>) {
+    fn new_edit_session(&mut self, location: Location, path: PathBuf, editor: EditorCommand) -> u64 {
         let edit_id = self.edit.next_id;
         self.edit.next_id += 1;
-        let cancel = Arc::new(AtomicBool::new(false));
         let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
         self.edit.sessions.insert(
             edit_id,
@@ -235,12 +231,11 @@ impl Engine {
                 temp: None,
                 baseline: None,
                 pending: None,
-                cancel: cancel.clone(),
                 awaiting_editor: false,
                 saving: false,
             },
         );
-        (edit_id, cancel)
+        edit_id
     }
 
     fn edit_local_file(&mut self, path: PathBuf, editor: EditorCommand) {
@@ -248,7 +243,7 @@ impl Engine {
             self.notice(Severity::Warning, "Can't edit a folder");
             return;
         }
-        let (edit_id, _) = self.new_edit_session(Location::Local, path.clone(), editor.clone());
+        let edit_id = self.new_edit_session(Location::Local, path.clone(), editor.clone());
         if let Some(session) = self.edit.sessions.get_mut(&edit_id) {
             session.awaiting_editor = true;
         }
@@ -260,25 +255,27 @@ impl Engine {
             self.notice(Severity::Error, "Edit failed: session disconnected");
             return;
         };
-        let (edit_id, cancel) = self.new_edit_session(Location::Session(session_id), path.clone(), editor);
+        let edit_id = self.new_edit_session(Location::Session(session_id), path.clone(), editor);
         let name = self.edit.sessions[&edit_id].name.clone();
         let dir = self.paths.edit_dir().join(format!("{}-{edit_id}", (self.edit.clock)().timestamp_millis()));
         let local = self.local_fs.clone();
         let internal = self.internal.clone();
         self.notice(Severity::Info, format!("Downloading {} to edit\u{2026}", printable(&name)));
-        tokio::spawn(async move {
+        self.tasks.spawn("edit-download", Scope::Edit(edit_id), move |cancel| async move {
             let result = prepare(fs, local, path, dir, name, cancel).await;
             let _ = internal.send(Internal::Edit(EditEvent::Prepared { edit_id, result }));
         });
     }
 
     pub(crate) fn cancel_edit_downloads(&mut self) {
-        for session in self.edit.sessions.values() {
-            session.cancel.store(true, Ordering::Relaxed);
+        let ids: Vec<u64> = self.edit.sessions.keys().copied().collect();
+        for id in ids {
+            self.tasks.cancel(Scope::Edit(id));
         }
     }
 
     fn drop_edit(&mut self, edit_id: u64) {
+        self.tasks.forget(Scope::Edit(edit_id));
         if let Some(session) = self.edit.sessions.remove(&edit_id)
             && let Some(temp) = session.temp
         {
@@ -298,16 +295,19 @@ impl Engine {
     fn finish_prepare(&mut self, edit_id: u64, result: Prepared) {
         match result {
             Prepared::Ready { temp, baseline } => {
-                let Some(session) = self.edit.sessions.get_mut(&edit_id) else {
+                if !self.edit.sessions.contains_key(&edit_id) {
                     remove_dir(&temp.dir);
                     return;
-                };
-                if session.cancel.load(Ordering::Relaxed) {
+                }
+                if self.tasks.take_cancelled(Scope::Edit(edit_id)) {
                     self.edit.sessions.remove(&edit_id);
                     remove_dir(&temp.dir);
                     self.notice(Severity::Info, "Edit cancelled");
                     return;
                 }
+                let Some(session) = self.edit.sessions.get_mut(&edit_id) else {
+                    return;
+                };
                 session.baseline = Some(baseline);
                 session.awaiting_editor = true;
                 let editor = session.editor.clone();
@@ -316,10 +316,12 @@ impl Engine {
                 self.emit(Event::EditReady { edit_id, file, editor });
             }
             Prepared::Cancelled => {
+                self.tasks.forget(Scope::Edit(edit_id));
                 self.edit.sessions.remove(&edit_id);
                 self.notice(Severity::Info, "Edit cancelled");
             }
             Prepared::Failed(message) => {
+                self.tasks.forget(Scope::Edit(edit_id));
                 self.edit.sessions.remove(&edit_id);
                 self.notice(Severity::Error, message);
             }
@@ -365,7 +367,7 @@ impl Engine {
             return;
         };
         let internal = self.internal.clone();
-        tokio::spawn(async move {
+        self.tasks.spawn("edit-inspect", Scope::Edit(edit_id), move |_| async move {
             let file = temp.file.clone();
             let result = match tokio::task::spawn_blocking(move || hash_file(&file)).await {
                 Ok(Ok(hash)) => Ok(hash != baseline.hash),
@@ -403,7 +405,16 @@ impl Engine {
         }
     }
 
+    pub(crate) fn edit_in_progress(&self, edit_id: u64) -> bool {
+        self.edit.sessions.contains_key(&edit_id)
+    }
+
+    pub(crate) fn fail_edit(&mut self, edit_id: u64, reason: &str) {
+        self.keep_edit(edit_id, Severity::Error, reason);
+    }
+
     fn keep_edit(&mut self, edit_id: u64, severity: Severity, reason: &str) {
+        self.tasks.forget(Scope::Edit(edit_id));
         let Some(session) = self.edit.sessions.remove(&edit_id) else {
             return;
         };
@@ -469,7 +480,7 @@ impl Engine {
         let local = self.local_fs.clone();
         let internal = self.internal.clone();
         let job = UploadJob { edit_id, remote, file: temp.file, baseline, name, mode, at: (self.edit.clock)() };
-        tokio::spawn(async move {
+        self.tasks.spawn("edit-upload", Scope::Edit(edit_id), move |_| async move {
             let event = upload(job, fs, local).await;
             let _ = internal.send(Internal::Edit(event));
         });

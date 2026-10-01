@@ -10,7 +10,7 @@ use super::{
     super::{Engine, Event, Location, SessionId},
     failure_message,
 };
-use crate::{Severity, user_message};
+use crate::{Severity, tasks::Scope, user_message};
 
 fn send_failure(events: &UnboundedSender<Event>, message: String) {
     let _ = events.send(Event::Notice { severity: Severity::Error, message });
@@ -79,6 +79,13 @@ async fn list_start_into(
     }
 }
 
+fn scope_for(location: Location) -> Scope {
+    match location {
+        Location::Session(id) => Scope::Session(id),
+        Location::Local => Scope::Background,
+    }
+}
+
 impl Engine {
     pub(crate) fn open_start_directory(&mut self, session: SessionId) {
         let Some(live) = self.sessions.get(&session) else {
@@ -86,13 +93,14 @@ impl Engine {
         };
         match live.entry.start_path() {
             Some(requested) => {
-                tokio::spawn(list_start_into(
+                let work = list_start_into(
                     live.fs.clone(),
                     session,
                     live.name.clone(),
                     requested.to_string(),
                     self.events.clone(),
-                ));
+                );
+                self.tasks.spawn("list-start", Scope::Session(session), move |_| work);
             }
             None => self.list(Location::Session(session), None),
         }
@@ -110,7 +118,8 @@ impl Engine {
         let Some(fs) = self.filesystem_or_drop(location) else {
             return;
         };
-        tokio::spawn(list_into(fs, location, path, self.events.clone()));
+        let work = list_into(fs, location, path, self.events.clone());
+        self.tasks.spawn("list", scope_for(location), move |_| work);
     }
 
     pub(crate) fn create_dir(&mut self, location: Location, path: PathBuf) {
@@ -118,7 +127,7 @@ impl Engine {
             return;
         };
         let events = self.events.clone();
-        tokio::spawn(async move {
+        self.tasks.spawn("create-dir", scope_for(location), move |_| async move {
             match fs.create_dir(&path).await {
                 Ok(()) => {
                     let _ = events.send(Event::LocationChanged { location });
@@ -136,7 +145,7 @@ impl Engine {
             return;
         };
         let events = self.events.clone();
-        tokio::spawn(async move {
+        self.tasks.spawn("rename", scope_for(location), move |_| async move {
             match fs.rename(&from, &to).await {
                 Ok(()) => {
                     let _ = events.send(Event::LocationChanged { location });
@@ -154,7 +163,7 @@ impl Engine {
             return;
         };
         let events = self.events.clone();
-        tokio::spawn(async move {
+        self.tasks.spawn("delete", scope_for(location), move |_| async move {
             for path in paths {
                 if let Err(err) = fs.delete(&path).await {
                     tracing::debug!("{err:?}");

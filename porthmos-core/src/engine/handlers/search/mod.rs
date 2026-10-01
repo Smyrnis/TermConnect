@@ -1,15 +1,9 @@
-use std::{
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
-};
+use std::{path::PathBuf, sync::atomic::Ordering, time::Duration};
 
 use porthmos_vfs::{SearchEvent, SearchQuery};
 
 use super::super::{Engine, Event, Location};
+use crate::tasks::Scope;
 
 pub(crate) const SEARCH_DEBOUNCE: Duration = Duration::from_millis(250);
 
@@ -23,9 +17,7 @@ fn event_for(search_event: SearchEvent) -> Event {
 
 impl Engine {
     pub(crate) fn search(&mut self, location: Location, root: PathBuf, pattern: String) {
-        self.search.cancel.store(true, Ordering::Relaxed);
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.search.cancel = cancel.clone();
+        self.tasks.cancel(Scope::Search);
         let generation = self.search.generation.fetch_add(1, Ordering::Relaxed) + 1;
         let current_generation = self.search.generation.clone();
 
@@ -33,7 +25,7 @@ impl Engine {
             return;
         };
         let events = self.events.clone();
-        tokio::spawn(async move {
+        self.tasks.spawn("search", Scope::Search, move |cancel| async move {
             tokio::time::sleep(SEARCH_DEBOUNCE).await;
             if cancel.load(Ordering::Relaxed) || current_generation.load(Ordering::Relaxed) != generation {
                 return;
@@ -49,7 +41,7 @@ impl Engine {
     }
 
     pub(crate) fn cancel_search(&mut self) {
-        self.search.cancel.store(true, Ordering::Relaxed);
+        self.tasks.cancel(Scope::Search);
     }
 }
 

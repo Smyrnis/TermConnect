@@ -75,3 +75,26 @@ async fn cancelling_before_the_debounce_sends_nothing() {
 
     assert!(t.drain().is_empty());
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_new_search_stops_the_previous_one_so_only_the_latest_streams_results() {
+    let mut t = test_engine();
+    let (session, remote) = t.add_session("srv");
+    remote.file("/home/user/alpha.log", b"", None).file("/home/user/beta.log", b"", None);
+    t.engine.search(Location::Session(session), PathBuf::from("/home/user"), "*alpha*".to_string());
+    t.engine.search(Location::Session(session), PathBuf::from("/home/user"), "*beta*".to_string());
+
+    let mut events = Vec::new();
+    loop {
+        let event = t.next_event().await;
+        let done = matches!(event, Event::SearchDone { .. });
+        events.push(event);
+        if done {
+            break;
+        }
+    }
+    tokio::time::sleep(SEARCH_DEBOUNCE * 4).await;
+    events.extend(t.drain());
+
+    assert_eq!(found_names(&events), vec!["beta.log".to_string()]);
+}

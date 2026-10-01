@@ -12,6 +12,8 @@ use std::fmt::Display;
 
 pub(crate) use edit::{EditEvent, EditState};
 pub(crate) use history::HistoryLog;
+#[cfg(test)]
+pub(crate) use profiles::SecretOwner;
 pub(crate) use profiles::{KeyringDone, KeyringJob};
 
 use super::Location;

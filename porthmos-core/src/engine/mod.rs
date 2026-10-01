@@ -5,10 +5,7 @@ mod prompter;
 
 use std::{
     collections::{BTreeMap, HashMap, VecDeque},
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU64},
-    },
+    sync::{Arc, atomic::AtomicU64},
     time::{Duration, Instant},
 };
 
@@ -27,8 +24,9 @@ use crate::{
     history::History,
     profiles::ConnectionEntry,
     secrets::Secrets,
+    tasks::{Scope, Tasks},
     transfer::{
-        Direction, TransferOutcome, TransferQueue, TransferSnapshot,
+        Direction, JobStatus, TransferOutcome, TransferQueue, TransferSnapshot,
         conflicts::ConflictPolicy,
         plan::DirectoryPlan,
         rows::{RowState, ScanInfo},
@@ -36,6 +34,8 @@ use crate::{
 };
 
 pub(crate) const PROGRESS_SNAPSHOT_INTERVAL: Duration = Duration::from_millis(100);
+pub(crate) const SHUTDOWN_GRACE: Duration = Duration::from_millis(500);
+pub(crate) const EDIT_UPLOAD_GRACE: Duration = Duration::from_secs(30);
 
 pub(crate) enum TransferEvent {
     Progress { id: u64, transferred: u64 },
@@ -64,6 +64,11 @@ pub(crate) enum Internal {
         available: bool,
     },
     KeyringDone(handlers::KeyringDone),
+    TaskPanicked {
+        name: &'static str,
+        scope: Scope,
+        message: String,
+    },
 }
 
 pub(crate) struct PlanningScan {
@@ -71,7 +76,6 @@ pub(crate) struct PlanningScan {
     session_id: u64,
     direction: Direction,
     display_name: String,
-    cancel: Arc<AtomicBool>,
 }
 
 pub(crate) struct ConflictReview {
@@ -89,7 +93,6 @@ pub(crate) struct LiveSession {
 }
 
 struct SearchState {
-    cancel: Arc<AtomicBool>,
     generation: Arc<AtomicU64>,
 }
 
@@ -100,13 +103,16 @@ pub(crate) struct Engine {
     local_fs: Arc<dyn FileSystem>,
     events: UnboundedSender<Event>,
     internal: UnboundedSender<Internal>,
+    tasks: Tasks,
+    pub(crate) finished: Option<tokio::sync::watch::Sender<bool>>,
+    pub(crate) shutdown_grace: Duration,
+    pub(crate) upload_grace: Duration,
     sessions: BTreeMap<SessionId, LiveSession>,
     next_session_id: SessionId,
     questions: PendingQuestions,
     transfers: TransferQueue,
     max_parallel: usize,
     on_conflict: ConflictPolicy,
-    transfer_cancels: HashMap<u64, Arc<AtomicBool>>,
     planning: Vec<PlanningScan>,
     reviews: VecDeque<ConflictReview>,
     search: SearchState,
@@ -143,6 +149,10 @@ impl Engine {
         parts.secrets.on_waiting(move |waiting_now| {
             let _ = waiting.send(Event::KeyringWaiting { waiting: waiting_now });
         });
+        let panics = internal.clone();
+        let tasks = Tasks::new(move |name, scope, message| {
+            let _ = panics.send(Internal::TaskPanicked { name, scope, message });
+        });
         Self {
             paths: parts.paths,
             env: parts.env,
@@ -150,16 +160,19 @@ impl Engine {
             local_fs: parts.local_fs,
             events,
             internal,
+            tasks,
+            finished: None,
+            shutdown_grace: SHUTDOWN_GRACE,
+            upload_grace: EDIT_UPLOAD_GRACE,
             sessions: BTreeMap::new(),
             next_session_id: 0,
             questions: PendingQuestions::default(),
             transfers: TransferQueue::new(),
             max_parallel: parts.transfers.max_parallel,
             on_conflict: parts.transfers.on_conflict,
-            transfer_cancels: HashMap::new(),
             planning: Vec::new(),
             reviews: VecDeque::new(),
-            search: SearchState { cancel: Arc::new(AtomicBool::new(false)), generation: Arc::new(AtomicU64::new(0)) },
+            search: SearchState { generation: Arc::new(AtomicU64::new(0)) },
             bookmarks: parts.bookmarks,
             published: TransferSnapshot::default(),
             last_progress_publish: None,
@@ -191,6 +204,45 @@ impl Engine {
         }
         if self.transfers_dirty {
             self.publish_transfers();
+        }
+        self.shutdown_work(&mut internal).await;
+    }
+
+    fn apply_late_result(&mut self, done: Internal) {
+        match done {
+            Internal::KeyringDone(done) => self.finish_keyring_job(done),
+            Internal::Edit(event @ handlers::EditEvent::Uploaded { .. }) => self.handle_edit_event(event),
+            _ => {}
+        }
+    }
+
+    async fn apply_results_until<F: std::future::Future>(
+        &mut self, internal: &mut UnboundedReceiver<Internal>, future: F,
+    ) {
+        tokio::pin!(future);
+        loop {
+            tokio::select! {
+                _ = &mut future => break,
+                Some(done) = internal.recv() => self.apply_late_result(done),
+            }
+        }
+    }
+
+    async fn shutdown_work(&mut self, internal: &mut UnboundedReceiver<Internal>) {
+        self.cancel_all_work();
+        self.tasks.cancel_all();
+        self.record_interrupted();
+        self.keyring_jobs = None;
+        let tasks = self.tasks.clone();
+        if tasks.live_names().contains(&"edit-upload") {
+            self.apply_results_until(internal, tasks.wait_for_name("edit-upload", self.upload_grace)).await;
+        }
+        self.apply_results_until(internal, tasks.shutdown(self.shutdown_grace)).await;
+        while let Ok(done) = internal.try_recv() {
+            self.apply_late_result(done);
+        }
+        if let Some(finished) = self.finished.take() {
+            let _ = finished.send(true);
         }
     }
 
@@ -234,6 +286,21 @@ impl Engine {
         self.request_publish();
     }
 
+    fn recover_from_panic(&mut self, name: &'static str, scope: Scope, message: &str) {
+        tracing::error!(target: "porthmos::tasks", task = name, "{message}");
+        let failed = format!("A background task failed: {name}");
+        match scope {
+            Scope::Transfer(id) if self.transfers.get(id).is_some_and(|job| job.status == JobStatus::InProgress) => {
+                self.handle_transfer_event(TransferEvent::Failed { id, message: failed });
+            }
+            Scope::Planning(batch_id) if self.planning.iter().any(|scan| scan.batch_id == batch_id) => {
+                self.handle_transfer_event(TransferEvent::PlanFailed { batch_id, message: failed });
+            }
+            Scope::Edit(edit_id) if self.edit_in_progress(edit_id) => self.fail_edit(edit_id, &failed),
+            _ => self.notice(Severity::Error, failed),
+        }
+    }
+
     pub(crate) fn handle_internal(&mut self, done: Internal) {
         match done {
             Internal::Connected { entry, protocol, fs, typed } => self.finish_connect(entry, protocol, fs, typed),
@@ -244,6 +311,7 @@ impl Engine {
             Internal::Edit(event) => self.handle_edit_event(event),
             Internal::KeyringProbed { available } => self.emit(Event::KeyringStatus { available }),
             Internal::KeyringDone(done) => self.finish_keyring_job(done),
+            Internal::TaskPanicked { name, scope, message } => self.recover_from_panic(name, scope, &message),
             Internal::Transfer(TransferEvent::Progress { id, transferred }) => {
                 if let Some(mut job) = self.transfers.get_mut(id) {
                     job.transferred_bytes = transferred;

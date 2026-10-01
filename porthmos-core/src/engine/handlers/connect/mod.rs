@@ -13,6 +13,7 @@ use crate::{
     Severity, connect_failure_message,
     profiles::{ConnectionEntry, ConnectionSource, PASSWORD_MARKER},
     secrets::Secrets,
+    tasks::Scope,
 };
 
 pub(crate) fn secret_account(entry: &ConnectionEntry) -> String {
@@ -107,7 +108,7 @@ impl Engine {
         let mut prompter =
             EnginePrompter { questions: self.questions.clone(), events: self.events.clone(), typed: None };
         let secrets = self.secrets.clone();
-        tokio::spawn(async move {
+        self.tasks.spawn("connect", Scope::Background, move |_| async move {
             let target = secured_target(&entry, &secret_keys, &secrets).await;
             let done = match protocol.connect(&target, &mut prompter).await {
                 Ok(fs) => Internal::Connected { entry, protocol, fs, typed: prompter.typed.take() },

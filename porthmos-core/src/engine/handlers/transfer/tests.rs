@@ -1,15 +1,9 @@
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-};
+use std::{collections::HashMap, path::PathBuf};
 
 use super::*;
 use crate::{
     engine::testing::{TestEngine, test_engine},
+    tasks::Scope,
     transfer::{
         conflicts::ConflictPolicy,
         plan::{ExistingFile, PlannedFile},
@@ -18,13 +12,7 @@ use crate::{
 };
 
 fn planning_scan(batch_id: u64, session_id: u64, name: &str) -> PlanningScan {
-    PlanningScan {
-        batch_id,
-        session_id,
-        direction: Direction::Upload,
-        display_name: name.to_string(),
-        cancel: Arc::new(AtomicBool::new(false)),
-    }
+    PlanningScan { batch_id, session_id, direction: Direction::Upload, display_name: name.to_string() }
 }
 
 fn planned(source: &str, destination: &str, size: u64) -> PlannedFile {
@@ -78,11 +66,8 @@ fn download_job(t: &mut TestEngine, session_id: u64, name: &str) -> u64 {
     )
 }
 
-fn mark_active(t: &mut TestEngine, id: u64) -> Arc<AtomicBool> {
+fn mark_active(t: &mut TestEngine, id: u64) {
     t.engine.transfers.get_mut(id).unwrap().status = JobStatus::InProgress;
-    let cancel = Arc::new(AtomicBool::new(false));
-    t.engine.transfer_cancels.insert(id, cancel.clone());
-    cancel
 }
 
 fn local_changed(events: &[Event]) -> bool {
@@ -284,7 +269,8 @@ fn cancel_all_copies_sets_every_scans_flag_and_leaves_them_tracked() {
 
     t.engine.cancel_all_copies();
 
-    assert!(t.engine.planning.iter().all(|scan| scan.cancel.load(Ordering::Relaxed)));
+    let batches: Vec<u64> = t.engine.planning.iter().map(|scan| scan.batch_id).collect();
+    assert!(batches.into_iter().all(|batch| t.engine.tasks.take_cancelled(Scope::Planning(batch))));
     assert_eq!(t.engine.planning.len(), 2);
 }
 
@@ -295,12 +281,12 @@ fn cancel_all_copies_stops_scans_and_the_active_batch_together() {
     let batch_id = t.engine.transfers.start_batch("batch".to_string());
     let active = enqueue_job(&mut t, 1, "a.txt", Some(batch_id));
     let queued = enqueue_job(&mut t, 1, "b.txt", Some(batch_id));
-    let transfer_cancel = mark_active(&mut t, active);
+    mark_active(&mut t, active);
 
     t.engine.cancel_all_copies();
 
-    assert!(t.engine.planning[0].cancel.load(Ordering::Relaxed));
-    assert!(transfer_cancel.load(Ordering::Relaxed));
+    assert!(t.engine.tasks.take_cancelled(Scope::Planning(100)));
+    assert!(t.engine.tasks.take_cancelled(Scope::Transfer(active)));
     assert_eq!(t.engine.transfers.get(queued).unwrap().status, JobStatus::Cancelled);
 }
 
@@ -322,7 +308,7 @@ fn fill_transfer_slots_fails_every_job_whose_session_is_gone_without_starting_an
     t.engine.fill_transfer_slots();
 
     assert!(jobs.iter().all(|id| matches!(t.engine.transfers.get(*id).unwrap().status, JobStatus::Failed(_))));
-    assert!(t.engine.transfer_cancels.is_empty());
+    assert!(!t.engine.tasks.take_cancelled(Scope::Transfer(jobs[0])));
     assert_eq!(t.engine.transfers.active_count(), 0);
 }
 
@@ -334,13 +320,13 @@ fn cancel_all_copies_flags_every_active_job_and_cancels_every_queued_job() {
     let second_active = enqueue_job(&mut t, 1, "b.txt", None);
     let queued_in_batch = enqueue_job(&mut t, 1, "c.txt", Some(batch_id));
     let queued_loose = enqueue_job(&mut t, 2, "d.txt", None);
-    let first_cancel = mark_active(&mut t, first_active);
-    let second_cancel = mark_active(&mut t, second_active);
+    mark_active(&mut t, first_active);
+    mark_active(&mut t, second_active);
 
     t.engine.cancel_all_copies();
 
-    assert!(first_cancel.load(Ordering::Relaxed));
-    assert!(second_cancel.load(Ordering::Relaxed));
+    assert!(t.engine.tasks.take_cancelled(Scope::Transfer(first_active)));
+    assert!(t.engine.tasks.take_cancelled(Scope::Transfer(second_active)));
     assert_eq!(t.engine.transfers.get(queued_in_batch).unwrap().status, JobStatus::Cancelled);
     assert_eq!(t.engine.transfers.get(queued_loose).unwrap().status, JobStatus::Cancelled);
     assert_eq!(t.engine.transfers.get(first_active).unwrap().status, JobStatus::InProgress);
@@ -364,46 +350,48 @@ fn nothing_is_startable_after_cancel_all_copies() {
 fn cancel_session_transfers_flags_only_that_sessions_jobs_and_scans() {
     let mut t = test_engine();
     let mine = enqueue_job(&mut t, 1, "a.txt", None);
-    let my_cancel = mark_active(&mut t, mine);
+    mark_active(&mut t, mine);
     t.engine.planning.push(planning_scan(7, 1, "mine"));
 
     let flagged = t.engine.cancel_session_transfers(1);
 
     assert_eq!(flagged, 2);
-    assert!(my_cancel.load(Ordering::Relaxed));
-    assert!(t.engine.planning[0].cancel.load(Ordering::Relaxed));
+    assert!(t.engine.tasks.take_cancelled(Scope::Transfer(mine)));
+    assert!(t.engine.tasks.take_cancelled(Scope::Planning(7)));
 }
 
 #[test]
 fn cancel_session_transfers_leaves_other_sessions_alone() {
     let mut t = test_engine();
     let theirs = enqueue_job(&mut t, 2, "a.txt", None);
-    let their_cancel = mark_active(&mut t, theirs);
+    mark_active(&mut t, theirs);
     t.engine.planning.push(planning_scan(7, 2, "theirs"));
 
     let flagged = t.engine.cancel_session_transfers(1);
 
     assert_eq!(flagged, 0);
-    assert!(!their_cancel.load(Ordering::Relaxed));
-    assert!(!t.engine.planning[0].cancel.load(Ordering::Relaxed));
+    assert!(!t.engine.tasks.take_cancelled(Scope::Transfer(theirs)));
+    assert!(!t.engine.tasks.take_cancelled(Scope::Planning(7)));
 }
 
 #[test]
-fn a_finished_event_removes_only_its_own_cancel_flag() {
+fn a_finished_event_forgets_only_its_own_cancel_mark() {
     let mut t = test_engine();
     let first = enqueue_job(&mut t, 1, "a.txt", None);
     let second = enqueue_job(&mut t, 1, "b.txt", None);
     mark_active(&mut t, first);
     mark_active(&mut t, second);
+    t.engine.tasks.cancel(Scope::Transfer(first));
+    t.engine.tasks.cancel(Scope::Transfer(second));
 
     t.engine.handle_transfer_event(TransferEvent::Finished { id: first, outcome: TransferOutcome::Completed });
 
-    assert!(!t.engine.transfer_cancels.contains_key(&first));
-    assert!(t.engine.transfer_cancels.contains_key(&second));
+    assert!(!t.engine.tasks.take_cancelled(Scope::Transfer(first)));
+    assert!(t.engine.tasks.take_cancelled(Scope::Transfer(second)));
 }
 
 #[test]
-fn a_failed_event_removes_its_cancel_flag_and_requeues_within_the_retry_limit() {
+fn a_failed_event_consumes_its_cancel_mark_and_requeues_within_the_retry_limit() {
     let mut t = test_engine();
     let job = enqueue_job(&mut t, 999, "a.txt", None);
     mark_active(&mut t, job);
@@ -411,7 +399,7 @@ fn a_failed_event_removes_its_cancel_flag_and_requeues_within_the_retry_limit() 
 
     t.engine.handle_transfer_event(TransferEvent::Failed { id: job, message: "Transfer failed: a.txt".to_string() });
 
-    assert!(!t.engine.transfer_cancels.contains_key(&job));
+    assert!(!t.engine.tasks.take_cancelled(Scope::Transfer(job)));
     assert!(
         matches!(t.engine.transfers.get(job).unwrap().status, JobStatus::Failed(ref reason) if reason == "session disconnected")
     );
@@ -421,8 +409,8 @@ fn a_failed_event_removes_its_cancel_flag_and_requeues_within_the_retry_limit() 
 fn a_cancelled_job_that_ends_in_an_error_is_not_retried() {
     let mut t = test_engine();
     let job = enqueue_job(&mut t, 999, "a.txt", None);
-    let cancel = mark_active(&mut t, job);
-    cancel.store(true, Ordering::Relaxed);
+    mark_active(&mut t, job);
+    t.engine.tasks.cancel(Scope::Transfer(job));
 
     t.engine.handle_transfer_event(TransferEvent::Failed { id: job, message: "Transfer failed: a.txt".to_string() });
 
@@ -713,19 +701,12 @@ fn add_job(t: &mut TestEngine, name: &str, batch_id: Option<u64>, status: JobSta
     id
 }
 
-fn flag(t: &mut TestEngine, id: u64) -> Arc<AtomicBool> {
-    let cancel = Arc::new(AtomicBool::new(false));
-    t.engine.transfer_cancels.insert(id, cancel.clone());
-    cancel
-}
-
 #[test]
 fn cancel_on_a_batch_row_cancels_only_that_batch() {
     let mut t = test_engine();
     let batch = t.engine.transfers.start_batch("photos".to_string());
     let queued = add_job(&mut t, "a", Some(batch), JobStatus::Queued);
     let running = add_job(&mut t, "b", Some(batch), JobStatus::InProgress);
-    let running_flag = flag(&mut t, running);
     let completed = add_job(&mut t, "c", Some(batch), JobStatus::Completed);
     let other_batch = t.engine.transfers.start_batch("docs".to_string());
     let other = add_job(&mut t, "d", Some(other_batch), JobStatus::Queued);
@@ -733,7 +714,7 @@ fn cancel_on_a_batch_row_cancels_only_that_batch() {
     t.engine.cancel_row(RowKind::Batch(batch));
 
     assert_eq!(t.engine.transfers.get(queued).unwrap().status, JobStatus::Cancelled);
-    assert!(running_flag.load(Ordering::Relaxed));
+    assert!(t.engine.tasks.take_cancelled(Scope::Transfer(running)));
     assert_eq!(t.engine.transfers.get(running).unwrap().status, JobStatus::InProgress);
     assert_eq!(t.engine.transfers.get(completed).unwrap().status, JobStatus::Completed);
     assert_eq!(t.engine.transfers.get(other).unwrap().status, JobStatus::Queued);
@@ -747,8 +728,8 @@ fn cancel_on_a_scan_row_flags_only_that_scan() {
 
     t.engine.cancel_row(RowKind::Scan(2));
 
-    assert!(!t.engine.planning[0].cancel.load(Ordering::Relaxed));
-    assert!(t.engine.planning[1].cancel.load(Ordering::Relaxed));
+    assert!(!t.engine.tasks.take_cancelled(Scope::Planning(1)));
+    assert!(t.engine.tasks.take_cancelled(Scope::Planning(2)));
 }
 
 #[test]
@@ -916,4 +897,25 @@ async fn clearing_removes_a_cancelled_uploads_remote_partial_and_refreshes_that_
             .iter()
             .any(|event| matches!(event, Event::LocationChanged { location: Location::Session(id) } if *id == session))
     );
+}
+
+#[test]
+fn clearing_a_scan_forgets_its_cancel_mark() {
+    let mut t = test_engine();
+    t.engine.planning.push(planning_scan(3, 1, "scan"));
+    t.engine.tasks.cancel(Scope::Planning(3));
+
+    t.engine.clear_planning(3);
+
+    assert!(!t.engine.tasks.take_cancelled(Scope::Planning(3)));
+}
+
+#[test]
+fn cancelling_a_copy_that_is_only_waiting_for_conflict_answers_leaves_no_cancel_mark() {
+    let mut t = test_engine();
+    let batch_id = review(&mut t, vec![conflict_file("a.txt", true)]);
+
+    t.engine.cancel_row(RowKind::Scan(batch_id));
+
+    assert!(!t.engine.tasks.take_cancelled(Scope::Planning(batch_id)));
 }

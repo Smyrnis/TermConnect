@@ -1,7 +1,7 @@
 use std::{
     collections::{HashSet, VecDeque},
     path::PathBuf,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use anyhow::Result;
@@ -58,6 +58,8 @@ mod render;
 mod search;
 mod transfer_queue;
 mod transfers;
+
+const SHUTDOWN_WAIT: Duration = Duration::from_secs(35);
 
 enum PendingAction {
     Mkdir,
@@ -217,7 +219,7 @@ impl App {
             }
         }
 
-        self.core.send(Command::Shutdown);
+        let _ = tokio::time::timeout(SHUTDOWN_WAIT, self.core.shutdown()).await;
         Ok(())
     }
 

@@ -1,10 +1,10 @@
 use super::super::{Engine, Event, Internal};
-use crate::{Severity, state};
+use crate::{Severity, state, tasks::Scope};
 
 impl Engine {
     pub(crate) fn start_keyring_probe(&self) {
         let (secrets, internal) = (self.secrets.clone(), self.internal.clone());
-        tokio::spawn(async move {
+        self.tasks.spawn("keyring-probe", Scope::Background, move |_| async move {
             let available = secrets.probe().await;
             let _ = internal.send(Internal::KeyringProbed { available });
         });

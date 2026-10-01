@@ -244,6 +244,7 @@ impl Engine {
 impl Drop for Engine {
     fn drop(&mut self) {
         self.record_interrupted();
+        self.tasks.abort_all();
     }
 }
 

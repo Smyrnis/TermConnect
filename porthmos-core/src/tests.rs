@@ -86,3 +86,19 @@ async fn the_history_warning_comes_before_the_bookmark_warnings() {
     };
     assert!(first.contains("history"), "{first}");
 }
+
+#[tokio::test]
+async fn shutting_down_a_running_core_waits_for_it_and_can_be_repeated() {
+    let dir = tempfile::tempdir().unwrap();
+    let (core, _events) = Core::builder().without_keyring().paths(Paths::in_dir(dir.path())).start().unwrap();
+
+    tokio::time::timeout(std::time::Duration::from_secs(3), core.shutdown()).await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_millis(500), core.shutdown()).await.unwrap();
+}
+
+#[tokio::test]
+async fn shutting_down_a_detached_handle_returns_at_once() {
+    let (core, _commands) = CoreHandle::detached();
+
+    tokio::time::timeout(std::time::Duration::from_millis(500), core.shutdown()).await.unwrap();
+}
