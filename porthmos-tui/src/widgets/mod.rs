@@ -9,4 +9,5 @@ pub mod layout;
 pub mod notifications;
 pub mod panel_view;
 pub mod search_view;
+pub mod sync_view;
 pub mod transfer_list;

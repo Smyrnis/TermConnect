@@ -14,6 +14,7 @@ impl App {
             Screen::Search => self.render_search(frame, main_area),
             Screen::Transfers => self.render_transfers(frame, main_area),
             Screen::History => self.render_history(frame, main_area),
+            Screen::Sync => self.render_sync(frame, main_area),
         }
 
         self.render_status(frame, status_area);
@@ -127,6 +128,16 @@ impl App {
 
     fn render_history(&self, frame: &mut Frame, area: Rect) {
         history_view::render_history(frame, area, &self.history);
+    }
+
+    fn render_sync(&self, frame: &mut Frame, area: Rect) {
+        let name = self
+            .sync_view
+            .plan()
+            .and_then(|plan| self.sessions.by_id(plan.session))
+            .map_or("remote", |session| session.name.as_str());
+        let title = format!("Sync with {name}");
+        sync_view::render_sync(frame, area, &self.sync_view, &title);
     }
 
     fn render_search(&self, frame: &mut Frame, area: Rect) {

@@ -21,6 +21,7 @@ impl App {
             Screen::Files => self.active_panel_view().map(|panel| panel as &dyn FilterLine),
             Screen::Connections => Some(&self.connections),
             Screen::History => Some(&self.history),
+            Screen::Sync => Some(&self.sync_view),
             _ => None,
         }
     }
@@ -30,6 +31,7 @@ impl App {
             Screen::Files => self.active_panel_view_mut().map(|panel| panel as &mut dyn FilterLine),
             Screen::Connections => Some(&mut self.connections),
             Screen::History => Some(&mut self.history),
+            Screen::Sync => Some(&mut self.sync_view),
             _ => None,
         }
     }

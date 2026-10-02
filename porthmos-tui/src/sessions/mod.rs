@@ -7,6 +7,8 @@ pub struct Session {
     pub name: String,
     pub shell_available: bool,
     pub panel: PanelView,
+    pub preserves_times: bool,
+    pub listed: bool,
 }
 
 #[derive(Default)]
@@ -45,9 +47,15 @@ impl Sessions {
     }
 
     pub fn insert(&mut self, id: SessionId, name: String, shell_available: bool, panel: PanelView) -> SessionId {
-        self.items.push(Session { id, name, shell_available, panel });
+        self.items.push(Session { id, name, shell_available, panel, preserves_times: false, listed: false });
         self.active = Some(self.items.len() - 1);
         id
+    }
+
+    pub fn set_preserves_times(&mut self, id: SessionId, preserves_times: bool) {
+        if let Some(session) = self.by_id_mut(id) {
+            session.preserves_times = preserves_times;
+        }
     }
 
     pub fn remove(&mut self, id: SessionId) -> Option<Session> {

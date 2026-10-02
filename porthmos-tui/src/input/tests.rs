@@ -288,3 +288,11 @@ fn f3_maps_to_edit() {
     assert_eq!(Action::from_name("edit"), Some(Action::Edit));
     assert!(ALL_ACTIONS.contains(&Action::Edit));
 }
+
+#[test]
+fn open_sync_is_bound_to_ctrl_u_and_round_trips_by_name() {
+    assert_eq!(map_key_via_defaults_with_modifiers(KeyCode::Char('u'), KeyModifiers::CONTROL), Action::OpenSync);
+    assert_eq!(Action::OpenSync.name(), "open_sync");
+    assert_eq!(Action::from_name("open_sync"), Some(Action::OpenSync));
+    assert!(ALL_ACTIONS.contains(&Action::OpenSync));
+}

@@ -297,3 +297,21 @@ fn a_label_with_a_newline_stays_on_one_row() {
 fn printable_replaces_control_characters_only() {
     assert_eq!(printable("a\nb\u{1b}[0m\tc \u{fc}"), "a?b?[0m?c \u{fc}");
 }
+
+#[test]
+fn printable_also_replaces_bidirectional_and_format_controls() {
+    let hidden = "a\u{202a}\u{202e}b\u{2066}\u{2069}c\u{200e}\u{200f}d\u{61c}e";
+
+    assert_eq!(printable(hidden), "a??b??c??d?e");
+}
+
+#[test]
+fn a_label_with_a_right_to_left_override_is_never_drawn_raw() {
+    let view = view_of(vec![entry("fake\u{202e}txt.exe", "prod", HistoryResult::Done)]);
+    let terminal = render(&view, 80, 6);
+
+    let screen: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
+
+    assert!(!screen.contains('\u{202e}'));
+    assert!(screen.contains("fake?txt.exe"), "{screen}");
+}

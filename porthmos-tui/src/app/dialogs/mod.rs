@@ -155,6 +155,7 @@ impl App {
                     | Some(PendingAction::EditUpload { .. })
                     | Some(PendingAction::EditConflict { .. })
                     | Some(PendingAction::QuitWhileSaving)
+                    | Some(PendingAction::StartSync { .. })
                     | None => {}
                 }
             }
@@ -194,6 +195,10 @@ impl App {
                 Some(PendingAction::SubmitPassword { request_id }) => {
                     let request_id = *request_id;
                     self.submit_password(request_id, values);
+                }
+                Some(PendingAction::StartSync { session }) => {
+                    let session = *session;
+                    self.submit_sync_options(session, values);
                 }
                 _ => self.dialog = None,
             },

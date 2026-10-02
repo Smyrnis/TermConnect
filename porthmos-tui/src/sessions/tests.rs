@@ -104,3 +104,19 @@ fn activate_switches_to_the_session_with_the_given_id() {
     assert_eq!(sessions.active().unwrap().id, a);
     assert!(!sessions.activate(999));
 }
+
+#[test]
+fn a_new_session_does_not_claim_to_keep_times_until_told() {
+    let mut sessions = Sessions::new();
+    sessions.insert(7, "prod".to_string(), false, panel());
+
+    assert!(!sessions.by_id(7).unwrap().preserves_times);
+    assert!(!sessions.by_id(7).unwrap().listed);
+
+    sessions.set_preserves_times(7, true);
+    assert!(sessions.by_id(7).unwrap().preserves_times);
+
+    sessions.set_preserves_times(99, true);
+    assert!(sessions.by_id(7).unwrap().preserves_times);
+    assert_eq!(sessions.len(), 1);
+}

@@ -8,7 +8,7 @@ use anyhow::Result;
 use crossterm::event::{Event as TerminalEvent, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use futures_util::StreamExt;
 use porthmos_core::{
-    Command, CoreHandle, Event, Location, Question, RequestId, Severity, ShellInvocation,
+    Command, CoreHandle, Event, Location, Question, RequestId, SessionId, Severity, ShellInvocation,
     config::{bookmarks::Bookmark, settings::PanelSettings},
     edit::{EditChoice, EditQuestionKind},
     profiles::{ConnectionEntry, ConnectionSource},
@@ -42,6 +42,7 @@ use crate::{
         notifications::Notifications,
         panel_view::{self, ActivePanel, PanelView},
         search_view::{self, SearchOutcome, SearchView},
+        sync_view::{self, SyncView},
         transfer_list,
     },
 };
@@ -56,6 +57,7 @@ mod filter;
 mod history;
 mod render;
 mod search;
+mod sync;
 mod transfer_queue;
 mod transfers;
 
@@ -80,6 +82,7 @@ enum PendingAction {
     EditUpload { edit_id: u64 },
     EditConflict { edit_id: u64 },
     QuitWhileSaving,
+    StartSync { session: SessionId },
 }
 
 enum Reveal {
@@ -94,6 +97,7 @@ enum Screen {
     Search,
     Transfers,
     History,
+    Sync,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,6 +140,7 @@ pub struct App {
     search: Option<SearchSession>,
     transfers: TransferSnapshot,
     history: HistoryView,
+    sync_view: SyncView,
     edit_questions: VecDeque<edit::EditPrompt>,
     open_edit_question: Option<edit::EditPrompt>,
     edits_busy: bool,
@@ -169,6 +174,7 @@ impl App {
             search: None,
             transfers: TransferSnapshot::default(),
             history: HistoryView::new(),
+            sync_view: SyncView::new(),
             edit_questions: VecDeque::new(),
             open_edit_question: None,
             edits_busy: false,
@@ -249,6 +255,8 @@ impl App {
                     KeyCode::Left => self.connections.collapse_or_parent(),
                     _ => {}
                 }
+            } else if action == Action::Noop && self.screen == Screen::Sync && key.modifiers.is_empty() {
+                self.apply_sync_key(key.code);
             } else {
                 self.apply_action(action);
             }
@@ -314,8 +322,11 @@ impl App {
             Event::EditReady { .. } => {}
             Event::EditsBusy(busy) => self.edits_busy = busy,
             Event::EditQuestion { edit_id, name, kind } => self.ask_edit_question(edit_id, &name, kind),
-            Event::SessionCapabilities { .. } => {}
-            Event::SyncPlanReady(_) | Event::SyncWithdrawn { .. } => {}
+            Event::SessionCapabilities { session, preserves_times } => {
+                self.sessions.set_preserves_times(session, preserves_times)
+            }
+            Event::SyncPlanReady(plan) => self.apply_sync_plan(plan),
+            Event::SyncWithdrawn { sync_ids } => self.withdraw_sync(&sync_ids),
         }
     }
 
@@ -356,6 +367,7 @@ impl App {
             Location::Session(id) => {
                 if let Some(session) = self.sessions.by_id_mut(id) {
                     session.panel.replace_listing(path, entries);
+                    session.listed = true;
                 } else {
                     tracing::debug!("dropping a listing for session {id}, which is gone");
                 }

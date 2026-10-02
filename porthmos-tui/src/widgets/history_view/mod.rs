@@ -141,8 +141,16 @@ fn result_style(result: &HistoryResult) -> Style {
     }
 }
 
+fn is_unprintable(character: char) -> bool {
+    character.is_control()
+        || matches!(
+            character,
+            '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{200e}' | '\u{200f}' | '\u{61c}'
+        )
+}
+
 pub fn printable(text: &str) -> String {
-    text.chars().map(|character| if character.is_control() { '?' } else { character }).collect()
+    text.chars().map(|character| if is_unprintable(character) { '?' } else { character }).collect()
 }
 
 fn row_text(entry: &HistoryEntry) -> String {

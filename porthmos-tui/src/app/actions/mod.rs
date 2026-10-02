@@ -29,6 +29,7 @@ impl App {
             Action::Filter => self.start_filter(),
             Action::OpenTransfers => self.open_transfers_screen(),
             Action::OpenHistory => self.open_history_screen(),
+            Action::OpenSync => self.open_sync(),
             Action::CycleSession => {
                 if self.screen == Screen::Files {
                     self.sessions.cycle();
@@ -57,6 +58,8 @@ impl App {
         let showing_error = matches!(self.notifications.current().map(|n| n.severity), Some(Severity::Error));
         if showing_error {
             self.notifications.dismiss_current();
+        } else if self.screen == Screen::Sync {
+            self.leave_sync_screen();
         } else {
             self.screen = Screen::Files;
         }
@@ -69,6 +72,7 @@ impl App {
             Screen::Search => {}
             Screen::Transfers => self.apply_transfers_action(action),
             Screen::History => self.apply_history_action(action),
+            Screen::Sync => self.apply_sync_action(action),
         }
     }
 

@@ -53,3 +53,16 @@ fn lists_edit() {
     assert!(content.contains("F3"));
     assert!(content.contains("edit"));
 }
+
+#[test]
+fn lists_open_sync() {
+    let bindings = KeyBindings::defaults();
+    let backend = TestBackend::new(50, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| render_help(frame, frame.area(), &bindings)).unwrap();
+
+    let content: String = terminal.backend().buffer().content().iter().map(|cell| cell.symbol()).collect();
+
+    assert!(content.contains("open_sync"));
+    assert!(content.contains("Ctrl+U"));
+}
