@@ -9,6 +9,7 @@ use porthmos_core::{
     Command, Event,
     edit::{EditChoice, EditQuestionKind, EditorExit},
     history::{History, HistoryResult},
+    sync::{SyncAction, SyncBy, SyncDirection, SyncOptions, SyncReason},
     transfer::{
         Direction,
         conflicts::{ConflictPolicy, Resolution},
@@ -144,14 +145,11 @@ async fn a_folder_in_the_way_is_never_overwritten() {
     std::fs::create_dir(rig.remote("a.txt")).unwrap();
     std::fs::write(rig.remote("a.txt/keep"), b"k").unwrap();
     rig.upload(&[("a.txt", false)]);
-    rig.settle(no_conflicts).await;
+    rig.wait_for_notice("a folder with the same name exists").await;
+    rig.drain().await;
 
     assert_eq!(std::fs::read(rig.remote("a.txt/keep")).unwrap(), b"k");
-    assert!(
-        rig.notices.iter().any(|notice| notice.contains("a folder with the same name exists")),
-        "{:?}",
-        rig.notices
-    );
+    assert!(rig.remote("a.txt").is_dir());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -324,4 +322,160 @@ async fn a_remote_file_changed_behind_our_back_asks_and_cancel_keeps_both() {
 
     assert_eq!(std::fs::read(rig.remote("n.txt")).unwrap(), b"changed by somebody else");
     assert_eq!(std::fs::read(&file).unwrap(), b"my edit");
+}
+
+fn stamp(path: &std::path::Path, seconds: u64) {
+    std::fs::File::open(path).unwrap().set_modified(std::time::UNIX_EPOCH + Duration::from_secs(seconds)).unwrap();
+}
+
+fn modified_seconds(path: &std::path::Path) -> u64 {
+    std::fs::metadata(path).unwrap().modified().unwrap().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+}
+
+fn sync_options(direction: SyncDirection) -> SyncOptions {
+    SyncOptions { direction, by: SyncBy::Time, subfolders: true }
+}
+
+fn make_tree(rig: &Rig) {
+    std::fs::create_dir_all(rig.local("tree/deep/er")).unwrap();
+    std::fs::create_dir_all(rig.remote("tree")).unwrap();
+    for (name, seconds) in
+        [("tree/a.txt", 1_500_000_000), ("tree/deep/b.txt", 1_600_000_000), ("tree/deep/er/c.txt", 1_700_000_000)]
+    {
+        std::fs::write(rig.local(name), data(2_000, 1)).unwrap();
+        stamp(&rig.local(name), seconds);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn syncing_up_twice_leaves_nothing_to_do() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    make_tree(&rig);
+    let plan = rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.expect("a plan");
+    assert_eq!(plan.items.len(), 3);
+
+    let states = rig.run_sync(&plan).await;
+
+    assert!(states.iter().all(|state| *state == RowState::Done), "{states:?}");
+    for name in ["tree/a.txt", "tree/deep/b.txt", "tree/deep/er/c.txt"] {
+        assert_eq!(modified_seconds(&rig.remote(name)), modified_seconds(&rig.local(name)), "{name}");
+        assert_eq!(std::fs::read(rig.remote(name)).unwrap(), data(2_000, 1));
+    }
+    assert!(rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn both_copies_each_way_and_then_settles() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    make_tree(&rig);
+    std::fs::write(rig.remote("tree/remote_only.txt"), b"from the server").unwrap();
+    stamp(&rig.remote("tree/remote_only.txt"), 1_650_000_000);
+    let plan = rig.scan_sync(sync_options(SyncDirection::Both)).await.expect("a plan");
+
+    rig.run_sync(&plan).await;
+
+    assert_eq!(std::fs::read(rig.local("tree/remote_only.txt")).unwrap(), b"from the server");
+    assert_eq!(modified_seconds(&rig.local("tree/remote_only.txt")), 1_650_000_000);
+    assert!(rig.remote("tree/deep/er/c.txt").exists());
+    assert!(rig.scan_sync(sync_options(SyncDirection::Both)).await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn downloading_settles_too() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::create_dir_all(rig.local("tree")).unwrap();
+    std::fs::create_dir_all(rig.remote("tree/sub")).unwrap();
+    std::fs::write(rig.remote("tree/sub/x.txt"), data(500, 9)).unwrap();
+    stamp(&rig.remote("tree/sub/x.txt"), 1_450_000_000);
+    let plan = rig.scan_sync(sync_options(SyncDirection::RemoteToLocal)).await.expect("a plan");
+
+    rig.run_sync(&plan).await;
+
+    assert_eq!(modified_seconds(&rig.local("tree/sub/x.txt")), 1_450_000_000);
+    assert!(rig.scan_sync(sync_options(SyncDirection::RemoteToLocal)).await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_touched_after_a_sync_is_found_again() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    make_tree(&rig);
+    let first = rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.unwrap();
+    rig.run_sync(&first).await;
+    stamp(&rig.local("tree/deep/b.txt"), 1_600_000_000 + 7_200);
+
+    let plan = rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.expect("a plan");
+
+    let found: Vec<(String, SyncReason, bool)> =
+        plan.items.iter().map(|item| (item.path.display().to_string(), item.reason, item.ticked)).collect();
+    assert_eq!(found, vec![("deep/b.txt".to_string(), SyncReason::LocalNewer, true)]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newer_remote_file_is_listed_unticked_and_left_alone_by_a_one_way_upload() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    make_tree(&rig);
+    std::fs::write(rig.remote("tree/a.txt"), b"edited on the server").unwrap();
+    stamp(&rig.remote("tree/a.txt"), 1_900_000_000);
+    let plan = rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.expect("a plan");
+
+    let a = plan.items.iter().find(|item| item.path.ends_with("a.txt")).unwrap();
+    assert_eq!((a.reason, a.ticked, a.action), (SyncReason::TargetNewer, false, SyncAction::Skip));
+    rig.run_sync(&plan).await;
+
+    assert_eq!(std::fs::read(rig.remote("tree/a.txt")).unwrap(), b"edited on the server");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sync_with_nothing_ticked_finishes_promptly_and_changes_nothing() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::create_dir_all(rig.local("tree")).unwrap();
+    std::fs::create_dir_all(rig.remote("tree")).unwrap();
+    std::fs::write(rig.local("tree/a.txt"), b"local").unwrap();
+    stamp(&rig.local("tree/a.txt"), 1_500_000_000);
+    std::fs::write(rig.remote("tree/a.txt"), b"edited on the server").unwrap();
+    stamp(&rig.remote("tree/a.txt"), 1_900_000_000);
+    let plan = rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.expect("a plan");
+    assert!(plan.items.iter().all(|item| !item.ticked));
+
+    let started = std::time::Instant::now();
+    let states = rig.run_sync(&plan).await;
+
+    assert!(states.is_empty(), "{states:?}");
+    assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
+    assert_eq!(std::fs::read(rig.remote("tree/a.txt")).unwrap(), b"edited on the server");
+    assert_eq!(modified_seconds(&rig.remote("tree/a.txt")), 1_900_000_000);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn awkward_file_names_survive_the_copy_and_the_time_change() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::create_dir_all(rig.local("tree")).unwrap();
+    std::fs::create_dir_all(rig.remote("tree")).unwrap();
+    for name in ["it's a $name.txt", "quote \"q\".txt", "caf\u{e9} \u{65e5}\u{672c}.txt", "semi;colon & more.txt"] {
+        std::fs::write(rig.local(&format!("tree/{name}")), b"x").unwrap();
+        stamp(&rig.local(&format!("tree/{name}")), 1_480_000_000);
+    }
+    let plan = rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.expect("a plan");
+
+    rig.run_sync(&plan).await;
+
+    assert_eq!(plan.items.len(), 4);
+    for name in ["it's a $name.txt", "quote \"q\".txt", "caf\u{e9} \u{65e5}\u{672c}.txt", "semi;colon & more.txt"] {
+        assert_eq!(modified_seconds(&rig.remote(&format!("tree/{name}"))), 1_480_000_000, "{name}");
+    }
+    assert!(rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sync_shows_up_in_the_history_like_any_other_transfer() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    make_tree(&rig);
+    let plan = rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.unwrap();
+    rig.run_sync(&plan).await;
+
+    let listed = rig.history().await;
+
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].files_total, 3);
+    assert_eq!(listed[0].result, HistoryResult::Done);
 }

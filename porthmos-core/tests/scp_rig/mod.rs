@@ -7,9 +7,10 @@ use std::{
 };
 
 use porthmos_core::{
-    Answer, Command, Core, CoreHandle, Entry, Event, Location, Paths, Question,
+    Answer, Command, Core, CoreHandle, Entry, Event, Location, Paths, Question, Severity,
     config::{Settings, settings::TransferSettings},
     history::HistoryEntry,
+    sync::{SyncOptions, SyncPlan},
     transfer::{
         conflicts::{ConflictInfo, ConflictPolicy, Resolution},
         rows::RowState,
@@ -183,6 +184,34 @@ impl Rig {
                 _ => {}
             }
         }
+    }
+
+    pub async fn scan_sync(&mut self, options: SyncOptions) -> Option<Arc<SyncPlan>> {
+        self.core.send(Command::StartSync {
+            session: self.session,
+            local_dir: self.local("tree"),
+            remote_dir: self.remote("tree"),
+            options,
+        });
+        loop {
+            match self.event().await {
+                Event::SyncPlanReady(plan) => return Some(plan),
+                Event::Notice { message, .. } if message == "Folders are in sync" => return None,
+                Event::Notice { severity: Severity::Error, message } => panic!("{message}"),
+                _ => {}
+            }
+        }
+    }
+
+    pub async fn run_sync(&mut self, plan: &SyncPlan) -> Vec<RowState> {
+        let choices: Vec<_> = plan.items.iter().filter(|item| item.ticked).map(|item| (item.id, item.action)).collect();
+        let nothing_ticked = choices.is_empty();
+        self.core.send(Command::RunSync { sync_id: plan.sync_id, choices });
+        if nothing_ticked {
+            self.wait_for_notice("Nothing to sync").await;
+            return Vec::new();
+        }
+        self.settle(|_| None).await
     }
 
     pub async fn drain(&mut self) {
