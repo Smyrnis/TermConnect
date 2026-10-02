@@ -3338,7 +3338,6 @@ dependencies = [
  "crossterm",
  "futures-util",
  "porthmos-core",
- "porthmos-vfs",
  "ratatui",
  "tempfile",
  "tokio",

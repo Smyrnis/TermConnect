@@ -1,8 +1,10 @@
 use std::sync::Arc;
 
 use chrono::{Local, TimeZone};
-use porthmos_core::sync::{SyncAction, SyncFacts, SyncItem, SyncPlan, SyncReason};
-use porthmos_vfs::glob_match;
+use porthmos_core::{
+    glob_match,
+    sync::{SyncAction, SyncFacts, SyncItem, SyncPlan, SyncReason},
+};
 use ratatui::{
     Frame,
     layout::Rect,

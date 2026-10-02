@@ -14,7 +14,6 @@ path = "src/main.rs"
 anyhow.workspace = true
 chrono.workspace = true
 porthmos-core.workspace = true
-porthmos-vfs.workspace = true
 crossterm.workspace = true
 futures-util.workspace = true
 ratatui.workspace = true

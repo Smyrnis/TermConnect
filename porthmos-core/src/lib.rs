@@ -27,7 +27,7 @@ pub use paths::{ConfigMigration, Paths};
 pub use porthmos_vfs::{
     Answer, Choice, CommonField, ConnectionForm, DirItem, Entry, Environment, ErrorKind, FileKind, FileSystem,
     Metadata, OptionField, OptionKind, PortField, Protocol, ProtocolError, Question, SearchEvent, SearchQuery,
-    ShellInvocation, Target, path_to_remote_string,
+    ShellInvocation, Target, glob_match, path_to_remote_string,
 };
 pub use protocol_info::ProtocolInfo;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};

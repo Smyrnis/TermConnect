@@ -21,7 +21,7 @@ jobs:
       - name: Dependency boundaries
         run: |
           forbid_dependency() {
-            if cargo tree "${@:3}" -p "$1" -e normal -i "$2" >/dev/null 2>&1; then
+            if cargo tree "${@:3}" -p "$1" -e normal -i "$2" 2>/dev/null | grep -q "^$2 "; then
               echo "$1 must not depend on $2"
               exit 1
             fi
@@ -41,7 +41,7 @@ jobs:
           forbid_workspace_crates porthmos-ssh 'porthmos-(core|lfs|tls|sftp|ftp|webdav|s3|scp|tui)'
           for manifest in protocols/*/Cargo.toml; do
             crate=$(sed -n 's/^name = "\(.*\)"$/\1/p' "$manifest" | head -n 1)
-            if [ "$(cargo tree -p "$crate" -e normal | grep -oE 'porthmos-[a-z]+' | sort -u | grep -vxE "$crate|porthmos-vfs|porthmos-tls|porthmos-ssh")" != "" ]; then
+            if [ "$(cargo tree -p "$crate" -e normal | grep -oE 'porthmos-[a-z0-9]+' | sort -u | grep -vxE "$crate|porthmos-vfs|porthmos-tls|porthmos-ssh")" != "" ]; then
               echo "$crate must depend on porthmos-vfs, porthmos-tls and porthmos-ssh only"
               exit 1
             fi
