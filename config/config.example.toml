@@ -1,0 +1,62 @@
+# Porthmos settings.
+# Copy this file to ~/.config/porthmos/config.toml
+# (or $XDG_CONFIG_HOME/porthmos/config.toml). Every value below is the default.
+
+[panel]
+# Show dotfiles when a folder is opened.
+show_hidden = false
+# "name" or "size"
+sort_key = "name"
+# "ascending" or "descending"
+sort_order = "ascending"
+
+[transfers]
+# How many files are copied at the same time, from 1 to 16.
+max_parallel = 4
+# What to do when a file already exists at the destination:
+# "ask", "overwrite", "skip" or "rename".
+on_conflict = "ask"
+
+[edit]
+# Upload an edited remote file as soon as the editor exits. When false,
+# Porthmos asks first. A remote file that changed while you edited is always
+# asked about.
+auto_upload = true
+# Editor command; empty means $VISUAL, then $EDITOR, then "vi". The editor
+# must wait until you close the file ("code --wait", not "code").
+editor = ""
+
+# Key bindings. A key is written as a name ("f5", "tab", "enter", "esc",
+# "space", "up", "down", "left", "right", "home", "end", "backspace",
+# "delete" or a single character), optionally prefixed with "ctrl+", "alt+"
+# or "shift+". Leave an action out to keep its default.
+[keys]
+quit = "f10"
+switch_panel = "tab"
+up = "up"
+down = "down"
+open = "enter"
+toggle_select = "space"
+rename = "f2"
+open_terminal = "f4"
+copy = "f5"
+add_connection = "f6"
+mkdir = "f7"
+delete = "f8"
+open_connections = "f9"
+delete_connection = "delete"
+back = "esc"
+refresh = "ctrl+r"
+cancel_transfer = "ctrl+c"
+toggle_hidden = "ctrl+h"
+cycle_sort = "ctrl+s"
+bookmark_here = "ctrl+d"
+open_bookmarks = "ctrl+b"
+open_search = "ctrl+f"
+filter = "/"
+open_transfers = "ctrl+t"
+open_history = "ctrl+y"
+open_sync = "ctrl+u"
+edit = "f3"
+cycle_session = "ctrl+n"
+help = "f1"

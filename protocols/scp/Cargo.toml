@@ -1,0 +1,18 @@
+[package]
+name = "porthmos-scp"
+description = "SCP protocol support for Porthmos, for SSH servers without SFTP"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+porthmos-ssh.workspace = true
+porthmos-vfs.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+porthmos-ssh = { workspace = true, features = ["testing"] }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

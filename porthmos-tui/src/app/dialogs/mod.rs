@@ -1,0 +1,218 @@
+use porthmos_core::Answer;
+
+use super::*;
+
+impl App {
+    pub(super) fn open_mkdir_dialog(&mut self) {
+        if self.screen != Screen::Files {
+            return;
+        }
+        if self.active_panel == ActivePanel::Remote && self.sessions.active().is_none() {
+            return;
+        }
+
+        self.dialog = Some(Dialog::TextInput(TextInputDialog::new("New directory name", "")));
+        self.pending_action = Some(PendingAction::Mkdir);
+    }
+
+    pub(super) fn open_rename_dialog(&mut self) {
+        if self.screen != Screen::Files {
+            return;
+        }
+
+        let current_name = self.active_location().and_then(|location| self.panel(location)?.current_entry_name());
+        let Some(current_name) = current_name else {
+            return;
+        };
+
+        self.dialog = Some(Dialog::TextInput(TextInputDialog::new("Rename to", current_name)));
+        self.pending_action = Some(PendingAction::Rename);
+    }
+
+    pub(super) fn open_delete_dialog(&mut self) {
+        if self.screen != Screen::Files {
+            return;
+        }
+
+        let Some(targets) = self.active_location().and_then(|location| Some(self.panel(location)?.targets())) else {
+            return;
+        };
+        if targets.is_empty() {
+            return;
+        }
+
+        let message = if targets.len() == 1 {
+            let name = targets[0].file_name().and_then(|name| name.to_str()).unwrap_or("?");
+            format!("Delete \"{name}\"?")
+        } else {
+            format!("Delete {} selected items?", targets.len())
+        };
+
+        self.dialog = Some(Dialog::Confirm(ConfirmDialog::new(message)));
+        self.pending_action = Some(PendingAction::Delete);
+    }
+
+    fn create_directory(&mut self, name: &str) {
+        let Some(location) = self.active_location() else {
+            return;
+        };
+        let Some(panel) = self.panel(location) else {
+            return;
+        };
+        let path = panel.path().join(name);
+        self.core.send(Command::CreateDir { location, path });
+    }
+
+    fn rename_current(&mut self, new_name: &str) {
+        let Some(location) = self.active_location() else {
+            return;
+        };
+        let Some(panel) = self.panel(location) else {
+            return;
+        };
+        let Some(current_name) = panel.current_entry_name() else {
+            return;
+        };
+        let from = panel.path().join(current_name);
+        let to = panel.path().join(new_name);
+        self.core.send(Command::Rename { location, from, to });
+    }
+
+    fn delete_targets(&mut self) {
+        let Some(location) = self.active_location() else {
+            return;
+        };
+        let Some(panel) = self.panel(location) else {
+            return;
+        };
+        let paths = panel.targets();
+        self.core.send(Command::Delete { location, paths });
+    }
+
+    pub(super) fn apply_dialog_key(&mut self, key: KeyEvent) {
+        let Some(dialog) = self.dialog.as_mut() else {
+            return;
+        };
+
+        match dialog.handle_key(key) {
+            DialogOutcome::Pending => {}
+            DialogOutcome::Cancelled => {
+                self.dialog = None;
+                self.reveal = None;
+                match self.pending_action.take() {
+                    Some(
+                        PendingAction::SubmitPassword { request_id }
+                        | PendingAction::TrustHostKey { request_id }
+                        | PendingAction::TrustCertificate { request_id },
+                    ) => {
+                        self.core.send(Command::Answer { request_id, answer: None, save: false });
+                        self.connection_status = ConnectionStatus::Disconnected;
+                    }
+                    Some(PendingAction::EditUpload { edit_id } | PendingAction::EditConflict { edit_id }) => {
+                        self.core.send(Command::ResolveEdit { edit_id, choice: EditChoice::Cancel });
+                    }
+                    _ => {}
+                }
+            }
+            DialogOutcome::Confirmed => {
+                self.dialog = None;
+                match self.pending_action.take() {
+                    Some(PendingAction::Delete) => self.delete_targets(),
+                    Some(PendingAction::DeleteConnection { name }) => {
+                        self.core.send(Command::DeleteProfile { name });
+                    }
+                    Some(PendingAction::ClearHistory) => self.core.send(Command::ClearHistory),
+                    Some(PendingAction::QuitWhileSaving) => self.should_quit = true,
+                    Some(PendingAction::EditUpload { edit_id }) => {
+                        self.core.send(Command::ResolveEdit { edit_id, choice: EditChoice::Upload })
+                    }
+                    Some(
+                        PendingAction::TrustHostKey { request_id } | PendingAction::TrustCertificate { request_id },
+                    ) => {
+                        self.core.send(Command::Answer { request_id, answer: Some(Answer::Confirmed), save: false });
+                    }
+                    _ => {}
+                }
+            }
+            DialogOutcome::Submitted(value) => {
+                self.dialog = None;
+                match self.pending_action.take() {
+                    Some(PendingAction::Mkdir) => self.create_directory(&value),
+                    Some(PendingAction::Rename) => self.rename_current(&value),
+                    Some(PendingAction::AddBookmark) => self.add_bookmark(value),
+                    Some(PendingAction::SubmitPassword { .. })
+                    | Some(PendingAction::Delete)
+                    | Some(PendingAction::TrustHostKey { .. })
+                    | Some(PendingAction::TrustCertificate { .. })
+                    | Some(PendingAction::AddConnection)
+                    | Some(PendingAction::EditConnection { .. })
+                    | Some(PendingAction::DeleteConnection { .. })
+                    | Some(PendingAction::EditSshLabels { .. })
+                    | Some(PendingAction::FixMissingHost { .. })
+                    | Some(PendingAction::MoveLabels { .. })
+                    | Some(PendingAction::ResolveConflict)
+                    | Some(PendingAction::ClearHistory)
+                    | Some(PendingAction::EditUpload { .. })
+                    | Some(PendingAction::EditConflict { .. })
+                    | Some(PendingAction::QuitWhileSaving)
+                    | Some(PendingAction::StartSync { .. })
+                    | None => {}
+                }
+            }
+            DialogOutcome::Selected(index) => {
+                self.dialog = None;
+                match self.pending_action.take() {
+                    Some(PendingAction::FixMissingHost { name }) => self.apply_missing_host_choice(name, index),
+                    Some(PendingAction::EditConflict { edit_id }) => self.answer_edit_conflict(edit_id, index),
+                    Some(PendingAction::MoveLabels { from, candidates }) => {
+                        self.move_labels_to(from, candidates, index)
+                    }
+                    other => {
+                        self.pending_action = other;
+                        self.navigate_to_bookmark(index);
+                    }
+                }
+            }
+            DialogOutcome::Removed(index) => {
+                self.core.send(Command::RemoveBookmark { index });
+                if let Some(Dialog::List(list)) = self.dialog.as_mut() {
+                    list.items.remove(index);
+                    if list.cursor >= list.items.len() {
+                        list.cursor = list.items.len().saturating_sub(1);
+                    }
+                }
+            }
+            DialogOutcome::FormSubmitted(values) => match &self.pending_action {
+                Some(PendingAction::AddConnection) => self.submit_connection_form(values, None),
+                Some(PendingAction::EditConnection { original }) => {
+                    let original = original.name.clone();
+                    self.submit_connection_form(values, Some(original));
+                }
+                Some(PendingAction::EditSshLabels { name }) => {
+                    let name = name.clone();
+                    self.submit_ssh_labels(name, values);
+                }
+                Some(PendingAction::SubmitPassword { request_id }) => {
+                    let request_id = *request_id;
+                    self.submit_password(request_id, values);
+                }
+                Some(PendingAction::StartSync { session }) => {
+                    let session = *session;
+                    self.submit_sync_options(session, values);
+                }
+                _ => self.dialog = None,
+            },
+            DialogOutcome::FormChoiceChanged { key } => self.form_choice_changed(key),
+            DialogOutcome::Resolved { resolution, apply_to_rest } => {
+                self.dialog = None;
+                self.pending_action = None;
+                self.answer_conflict(resolution, apply_to_rest);
+            }
+        }
+        self.open_next_conflict_prompt();
+        self.announce_missing_hosts();
+    }
+}
+
+#[cfg(test)]
+mod tests;

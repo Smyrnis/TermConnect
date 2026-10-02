@@ -1,0 +1,96 @@
+use anyhow::Result;
+use tracing_subscriber::prelude::*;
+
+#[cfg(not(unix))]
+compile_error!("porthmos only supports Unix-like platforms (Linux/macOS)");
+
+mod app;
+mod input;
+mod logging;
+mod sessions;
+mod terminal;
+mod widgets;
+
+use app::App;
+use porthmos_core::{Core, Environment, Paths, config};
+
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        if porthmos_core::tasks::in_supervised_task() {
+            tracing::error!(target: "porthmos::tasks", "{panic_info}");
+            return;
+        }
+        let _ = terminal::restore();
+        default_hook(panic_info);
+    }));
+}
+
+fn init_tracing(log_file: Option<&std::path::Path>) {
+    let filter = logging::log_filter(std::env::var("RUST_LOG").ok().as_deref());
+    let writer = match log_file {
+        Some(path) => logging::open_writer_at(path),
+        None => Err(anyhow::anyhow!("HOME environment variable is not set")),
+    };
+    match writer {
+        Ok(file) => {
+            tracing_subscriber::registry()
+                .with(tracing_subscriber::fmt::layer().with_writer(std::sync::Mutex::new(file)).with_filter(filter))
+                .init();
+        }
+        Err(err) => {
+            eprintln!("porthmos: failed to open log file, logging disabled: {err}");
+            tracing_subscriber::registry()
+                .with(tracing_subscriber::fmt::layer().with_writer(std::io::sink).with_filter(filter))
+                .init();
+        }
+    }
+}
+
+fn start_app(
+    env: Environment, paths: Paths,
+) -> Result<(App, tokio::sync::mpsc::UnboundedReceiver<porthmos_core::Event>)> {
+    paths.migrate_legacy_config();
+    let (settings, config_warnings) = config::load(&paths)?;
+    let (key_bindings, key_warnings) = input::KeyBindings::from_frontend(&settings.frontend);
+    let panel = settings.panel.clone();
+    let (core, events) = Core::builder().paths(paths).environment(env).settings(settings).start()?;
+
+    let mut app = App::new(core, std::env::current_dir()?, &panel, key_bindings);
+    for warning in config_warnings {
+        app.warn(warning.0);
+    }
+    for warning in key_warnings {
+        app.warn(warning);
+    }
+    Ok((app, events))
+}
+
+const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+
+fn main() -> Result<()> {
+    porthmos_core::disable_core_dumps();
+    let runtime = tokio::runtime::Runtime::new()?;
+    let result = runtime.block_on(run());
+    runtime.shutdown_timeout(SHUTDOWN_GRACE);
+    result
+}
+
+async fn run() -> Result<()> {
+    let env = Environment::from_process();
+    let paths = Paths::from_env(&env);
+    init_tracing(paths.as_ref().ok().map(Paths::log_file).as_deref());
+
+    install_panic_hook();
+
+    let mut terminal = terminal::init()?;
+
+    let result = match paths.and_then(|paths| start_app(env, paths)) {
+        Ok((mut app, events)) => app.run(&mut terminal, events).await,
+        Err(err) => Err(err),
+    };
+
+    terminal::restore()?;
+
+    result
+}

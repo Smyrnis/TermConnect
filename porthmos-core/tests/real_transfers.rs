@@ -1,0 +1,481 @@
+mod scp_rig;
+
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
+
+use porthmos_core::{
+    Command, Event,
+    edit::{EditChoice, EditQuestionKind, EditorExit},
+    history::{History, HistoryResult},
+    sync::{SyncAction, SyncBy, SyncDirection, SyncOptions, SyncReason},
+    transfer::{
+        Direction,
+        conflicts::{ConflictPolicy, Resolution},
+        rows::RowState,
+    },
+};
+use scp_rig::{Rig, data, rig};
+
+fn no_conflicts(_: &[porthmos_core::transfer::conflicts::ConflictInfo]) -> Option<Vec<Resolution>> {
+    panic!("no conflict was expected")
+}
+
+async fn upload_ten_files(max_parallel: usize) -> usize {
+    let mut rig = rig(max_parallel, ConflictPolicy::Ask).await;
+    std::fs::create_dir(rig.local("up")).unwrap();
+    for index in 0..10u8 {
+        std::fs::write(rig.local(&format!("up/f{index}")), data(2_000_000, index)).unwrap();
+    }
+    rig.upload(&[("up", true)]);
+
+    assert_eq!(rig.settle(no_conflicts).await, vec![RowState::Done]);
+    for index in 0..10u8 {
+        assert_eq!(std::fs::read(rig.remote(&format!("up/f{index}"))).unwrap(), data(2_000_000, index));
+    }
+    rig.max_active
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn uploads_run_at_most_max_parallel_at_once() {
+    assert_eq!(upload_ten_files(3).await, 3);
+    assert_eq!(upload_ten_files(1).await, 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn downloads_run_at_most_max_parallel_at_once() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::create_dir(rig.remote("down")).unwrap();
+    for index in 0..10u8 {
+        std::fs::write(rig.remote(&format!("down/f{index}")), data(2_000_000, index)).unwrap();
+    }
+    rig.download(&[("down", true)]);
+
+    assert_eq!(rig.settle(no_conflicts).await, vec![RowState::Done]);
+    for index in 0..10u8 {
+        assert_eq!(std::fs::read(rig.local(&format!("down/f{index}"))).unwrap(), data(2_000_000, index));
+    }
+    assert_eq!(rig.max_active, 4);
+}
+
+async fn upload_conflict(answer: Option<Resolution>) -> Rig {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::write(rig.local("a.txt"), b"new").unwrap();
+    std::fs::write(rig.local("b.txt"), b"bee").unwrap();
+    std::fs::write(rig.remote("a.txt"), b"old").unwrap();
+    rig.upload(&[("a.txt", false), ("b.txt", false)]);
+    rig.settle(move |files| {
+        assert_eq!(files.iter().map(|file| file.display_name.as_str()).collect::<Vec<_>>(), vec!["a.txt"]);
+        assert_eq!(files[0].existing.map(|existing| existing.size), Some(3));
+        answer.map(|answer| vec![answer])
+    })
+    .await;
+    rig
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_upload_conflict_is_asked_and_each_answer_is_honoured() {
+    let skipped = upload_conflict(Some(Resolution::Skip)).await;
+    assert_eq!(std::fs::read(skipped.remote("a.txt")).unwrap(), b"old");
+    assert_eq!(std::fs::read(skipped.remote("b.txt")).unwrap(), b"bee");
+
+    let overwritten = upload_conflict(Some(Resolution::Overwrite)).await;
+    assert_eq!(std::fs::read(overwritten.remote("a.txt")).unwrap(), b"new");
+
+    let renamed = upload_conflict(Some(Resolution::Rename)).await;
+    assert_eq!(std::fs::read(renamed.remote("a.txt")).unwrap(), b"old");
+    assert_eq!(std::fs::read(renamed.remote("a (1).txt")).unwrap(), b"new");
+
+    let mut cancelled = upload_conflict(None).await;
+    cancelled.drain().await;
+    assert!(!cancelled.remote("b.txt").exists());
+    assert!(cancelled.notices.iter().any(|notice| notice == "Copy cancelled"), "{:?}", cancelled.notices);
+}
+
+async fn download_conflict(answer: Resolution) -> Rig {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::write(rig.remote("a.txt"), b"new").unwrap();
+    std::fs::write(rig.local("a.txt"), b"old").unwrap();
+    rig.download(&[("a.txt", false)]);
+    rig.settle(move |files| {
+        assert_eq!(files.len(), 1);
+        Some(vec![answer])
+    })
+    .await;
+    rig
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_download_conflict_is_asked_and_each_answer_is_honoured() {
+    assert_eq!(std::fs::read(download_conflict(Resolution::Skip).await.local("a.txt")).unwrap(), b"old");
+    assert_eq!(std::fs::read(download_conflict(Resolution::Overwrite).await.local("a.txt")).unwrap(), b"new");
+    let renamed = download_conflict(Resolution::Rename).await;
+    assert_eq!(std::fs::read(renamed.local("a (1).txt")).unwrap(), b"new");
+    assert_eq!(std::fs::read(renamed.local("a.txt")).unwrap(), b"old");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn conflict_policies_answer_without_asking() {
+    let cases = [
+        (ConflictPolicy::Overwrite, &b"new"[..], false),
+        (ConflictPolicy::Skip, &b"old"[..], false),
+        (ConflictPolicy::Rename, &b"old"[..], true),
+    ];
+    for (policy, expected, renamed) in cases {
+        let mut rig = rig(4, policy).await;
+        std::fs::write(rig.local("a.txt"), b"new").unwrap();
+        std::fs::write(rig.remote("a.txt"), b"old").unwrap();
+        rig.upload(&[("a.txt", false)]);
+        if policy == ConflictPolicy::Skip {
+            rig.wait_for_notice("Skipped 1 existing file").await;
+        } else {
+            rig.settle(no_conflicts).await;
+        }
+
+        assert_eq!(std::fs::read(rig.remote("a.txt")).unwrap(), expected, "{policy:?}");
+        assert_eq!(rig.remote("a (1).txt").exists(), renamed, "{policy:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_in_the_way_is_never_overwritten() {
+    let mut rig = rig(4, ConflictPolicy::Overwrite).await;
+    std::fs::write(rig.local("a.txt"), b"new").unwrap();
+    std::fs::create_dir(rig.remote("a.txt")).unwrap();
+    std::fs::write(rig.remote("a.txt/keep"), b"k").unwrap();
+    rig.upload(&[("a.txt", false)]);
+    rig.wait_for_notice("a folder with the same name exists").await;
+    rig.drain().await;
+
+    assert_eq!(std::fs::read(rig.remote("a.txt/keep")).unwrap(), b"k");
+    assert!(rig.remote("a.txt").is_dir());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_folder_conflict_is_asked_as_a_folder() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::write(rig.local("a.txt"), b"new").unwrap();
+    std::fs::create_dir(rig.remote("a.txt")).unwrap();
+    rig.upload(&[("a.txt", false)]);
+    rig.settle(|files| {
+        assert!(files[0].existing.is_some_and(|existing| existing.is_dir));
+        Some(vec![Resolution::Rename])
+    })
+    .await;
+
+    assert!(rig.remote("a.txt").is_dir());
+    assert_eq!(std::fs::read(rig.remote("a (1).txt")).unwrap(), b"new");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_interrupted_upload_is_offered_as_resume_and_completes() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    let full = data(3_000_000, 7);
+    std::fs::write(rig.local("big.bin"), &full).unwrap();
+    std::fs::write(rig.remote("big.bin.part"), &full[..1_000_000]).unwrap();
+    rig.upload(&[("big.bin", false)]);
+    let asked = Arc::new(Mutex::new(false));
+    let seen = asked.clone();
+    rig.settle(move |files| {
+        *seen.lock().unwrap() = true;
+        assert_eq!(files[0].partial.map(|partial| partial.size), Some(1_000_000));
+        Some(vec![Resolution::Resume])
+    })
+    .await;
+
+    assert!(*asked.lock().unwrap());
+    assert_eq!(std::fs::read(rig.remote("big.bin")).unwrap(), full);
+    assert!(!rig.remote("big.bin.part").exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cancelling_everything_stops_the_copy_and_clearing_removes_partials() {
+    let mut rig = rig(2, ConflictPolicy::Ask).await;
+    std::fs::create_dir(rig.local("up")).unwrap();
+    for index in 0..6u8 {
+        std::fs::write(rig.local(&format!("up/f{index}")), data(30_000_000, index)).unwrap();
+    }
+    rig.upload(&[("up", true)]);
+    loop {
+        if let Event::TransfersChanged(snapshot) = rig.event().await
+            && snapshot.active.iter().any(|job| job.transferred_bytes > 0)
+        {
+            break;
+        }
+    }
+
+    rig.core.send(Command::CancelAllTransfers);
+    let states = rig.settle(|_| None).await;
+
+    assert!(states.iter().all(|state| *state == RowState::Cancelled), "{states:?}");
+    assert_eq!((0..6u8).filter(|index| rig.remote(&format!("up/f{index}")).exists()).count(), 0);
+    rig.core.send(Command::ClearFinished);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let left: Vec<_> = std::fs::read_dir(rig.remote("up")).unwrap().map(|entry| entry.unwrap().file_name()).collect();
+    assert!(left.is_empty(), "{left:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_scp_session_runs_no_more_transfers_than_it_can_carry() {
+    assert_eq!(upload_ten_files(16).await, 6);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_finished_upload_is_kept_in_the_history_file() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::write(rig.local("a.txt"), data(1000, 1)).unwrap();
+    rig.upload(&[("a.txt", false)]);
+    assert_eq!(rig.settle(no_conflicts).await, vec![RowState::Done]);
+
+    let listed = rig.history().await;
+
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].label, "a.txt");
+    assert_eq!(listed[0].connection, "box");
+    assert_eq!(listed[0].direction, Direction::Upload);
+    assert_eq!(listed[0].result, HistoryResult::Done);
+    assert_eq!((listed[0].files_done, listed[0].files_total, listed[0].bytes), (1, 1, 1000));
+    assert_eq!(listed[0].local_path, rig.local("a.txt").to_string_lossy());
+    assert!(listed[0].remote_path.ends_with("/a.txt"), "{}", listed[0].remote_path);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let stored = loop {
+        let stored = History::load(&rig.state_paths()).0;
+        if stored.entries() == listed.as_slice() || std::time::Instant::now() > deadline {
+            break stored;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(stored.entries(), listed.as_slice());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_that_cannot_be_read_is_kept_as_partly_failed() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::write(rig.local("ok.txt"), data(1000, 2)).unwrap();
+    std::fs::write(rig.local("secret.txt"), data(1000, 3)).unwrap();
+    std::fs::set_permissions(rig.local("secret.txt"), std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::File::open(rig.local("secret.txt")).is_ok() {
+        return;
+    }
+    rig.upload(&[("ok.txt", false), ("secret.txt", false)]);
+
+    assert_eq!(rig.settle(no_conflicts).await, vec![RowState::PartlyFailed(1)]);
+    let listed = rig.history().await;
+
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].result, HistoryResult::PartlyFailed { failed: 1 });
+    assert_eq!(listed[0].failed_files, ["secret.txt"]);
+    assert_eq!((listed[0].files_done, listed[0].files_total), (1, 2));
+    let file = rig.state_paths().history_file();
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !std::fs::read_to_string(&file).is_ok_and(|text| text.contains("secret.txt"))
+        && std::time::Instant::now() < deadline
+    {
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(!text.to_lowercase().contains("permission denied"), "{text}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_edited_remote_file_is_uploaded_in_place() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::write(rig.remote("script.sh"), b"echo old\n").unwrap();
+    std::fs::set_permissions(rig.remote("script.sh"), std::fs::Permissions::from_mode(0o755)).unwrap();
+    let before = std::fs::metadata(rig.remote("script.sh")).unwrap();
+    let (edit_id, file) = rig.open_for_edit("script.sh").await;
+    assert_eq!(std::fs::read(&file).unwrap(), b"echo old\n");
+    std::fs::write(&file, b"echo new and longer\n").unwrap();
+
+    rig.core.send(Command::FinishEdit { edit_id, exit: EditorExit::Success });
+    rig.wait_for_notice("Uploaded script.sh").await;
+
+    assert_eq!(std::fs::read(rig.remote("script.sh")).unwrap(), b"echo new and longer\n");
+    let after = std::fs::metadata(rig.remote("script.sh")).unwrap();
+    assert_eq!(after.ino(), before.ino());
+    assert_eq!(after.permissions().mode() & 0o777, 0o755);
+    assert!(!file.exists());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_remote_file_changed_behind_our_back_asks_and_cancel_keeps_both() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::write(rig.remote("n.txt"), b"original").unwrap();
+    let (edit_id, file) = rig.open_for_edit("n.txt").await;
+    std::fs::write(&file, b"my edit").unwrap();
+    std::fs::write(rig.remote("n.txt"), b"changed by somebody else").unwrap();
+
+    rig.core.send(Command::FinishEdit { edit_id, exit: EditorExit::Success });
+    loop {
+        if let Event::EditQuestion { kind, .. } = rig.event().await {
+            assert_eq!(kind, EditQuestionKind::Conflict);
+            break;
+        }
+    }
+    rig.core.send(Command::ResolveEdit { edit_id, choice: EditChoice::Cancel });
+    rig.wait_for_notice("your changes are kept in").await;
+
+    assert_eq!(std::fs::read(rig.remote("n.txt")).unwrap(), b"changed by somebody else");
+    assert_eq!(std::fs::read(&file).unwrap(), b"my edit");
+}
+
+fn stamp(path: &std::path::Path, seconds: u64) {
+    std::fs::File::open(path).unwrap().set_modified(std::time::UNIX_EPOCH + Duration::from_secs(seconds)).unwrap();
+}
+
+fn modified_seconds(path: &std::path::Path) -> u64 {
+    std::fs::metadata(path).unwrap().modified().unwrap().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()
+}
+
+fn sync_options(direction: SyncDirection) -> SyncOptions {
+    SyncOptions { direction, by: SyncBy::Time, subfolders: true }
+}
+
+fn make_tree(rig: &Rig) {
+    std::fs::create_dir_all(rig.local("tree/deep/er")).unwrap();
+    std::fs::create_dir_all(rig.remote("tree")).unwrap();
+    for (name, seconds) in
+        [("tree/a.txt", 1_500_000_000), ("tree/deep/b.txt", 1_600_000_000), ("tree/deep/er/c.txt", 1_700_000_000)]
+    {
+        std::fs::write(rig.local(name), data(2_000, 1)).unwrap();
+        stamp(&rig.local(name), seconds);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn syncing_up_twice_leaves_nothing_to_do() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    make_tree(&rig);
+    let plan = rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.expect("a plan");
+    assert_eq!(plan.items.len(), 3);
+
+    let states = rig.run_sync(&plan).await;
+
+    assert!(states.iter().all(|state| *state == RowState::Done), "{states:?}");
+    for name in ["tree/a.txt", "tree/deep/b.txt", "tree/deep/er/c.txt"] {
+        assert_eq!(modified_seconds(&rig.remote(name)), modified_seconds(&rig.local(name)), "{name}");
+        assert_eq!(std::fs::read(rig.remote(name)).unwrap(), data(2_000, 1));
+    }
+    assert!(rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn both_copies_each_way_and_then_settles() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    make_tree(&rig);
+    std::fs::write(rig.remote("tree/remote_only.txt"), b"from the server").unwrap();
+    stamp(&rig.remote("tree/remote_only.txt"), 1_650_000_000);
+    let plan = rig.scan_sync(sync_options(SyncDirection::Both)).await.expect("a plan");
+
+    rig.run_sync(&plan).await;
+
+    assert_eq!(std::fs::read(rig.local("tree/remote_only.txt")).unwrap(), b"from the server");
+    assert_eq!(modified_seconds(&rig.local("tree/remote_only.txt")), 1_650_000_000);
+    assert!(rig.remote("tree/deep/er/c.txt").exists());
+    assert!(rig.scan_sync(sync_options(SyncDirection::Both)).await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn downloading_settles_too() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::create_dir_all(rig.local("tree")).unwrap();
+    std::fs::create_dir_all(rig.remote("tree/sub")).unwrap();
+    std::fs::write(rig.remote("tree/sub/x.txt"), data(500, 9)).unwrap();
+    stamp(&rig.remote("tree/sub/x.txt"), 1_450_000_000);
+    let plan = rig.scan_sync(sync_options(SyncDirection::RemoteToLocal)).await.expect("a plan");
+
+    rig.run_sync(&plan).await;
+
+    assert_eq!(modified_seconds(&rig.local("tree/sub/x.txt")), 1_450_000_000);
+    assert!(rig.scan_sync(sync_options(SyncDirection::RemoteToLocal)).await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_file_touched_after_a_sync_is_found_again() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    make_tree(&rig);
+    let first = rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.unwrap();
+    rig.run_sync(&first).await;
+    stamp(&rig.local("tree/deep/b.txt"), 1_600_000_000 + 7_200);
+
+    let plan = rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.expect("a plan");
+
+    let found: Vec<(String, SyncReason, bool)> =
+        plan.items.iter().map(|item| (item.path.display().to_string(), item.reason, item.ticked)).collect();
+    assert_eq!(found, vec![("deep/b.txt".to_string(), SyncReason::LocalNewer, true)]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newer_remote_file_is_listed_unticked_and_left_alone_by_a_one_way_upload() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    make_tree(&rig);
+    std::fs::write(rig.remote("tree/a.txt"), b"edited on the server").unwrap();
+    stamp(&rig.remote("tree/a.txt"), 1_900_000_000);
+    let plan = rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.expect("a plan");
+
+    let a = plan.items.iter().find(|item| item.path.ends_with("a.txt")).unwrap();
+    assert_eq!((a.reason, a.ticked, a.action), (SyncReason::TargetNewer, false, SyncAction::Skip));
+    rig.run_sync(&plan).await;
+
+    assert_eq!(std::fs::read(rig.remote("tree/a.txt")).unwrap(), b"edited on the server");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sync_with_nothing_ticked_finishes_promptly_and_changes_nothing() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::create_dir_all(rig.local("tree")).unwrap();
+    std::fs::create_dir_all(rig.remote("tree")).unwrap();
+    std::fs::write(rig.local("tree/a.txt"), b"local").unwrap();
+    stamp(&rig.local("tree/a.txt"), 1_500_000_000);
+    std::fs::write(rig.remote("tree/a.txt"), b"edited on the server").unwrap();
+    stamp(&rig.remote("tree/a.txt"), 1_900_000_000);
+    let plan = rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.expect("a plan");
+    assert!(plan.items.iter().all(|item| !item.ticked));
+
+    let started = std::time::Instant::now();
+    let states = rig.run_sync(&plan).await;
+
+    assert!(states.is_empty(), "{states:?}");
+    assert!(started.elapsed() < Duration::from_secs(10), "{:?}", started.elapsed());
+    assert_eq!(std::fs::read(rig.remote("tree/a.txt")).unwrap(), b"edited on the server");
+    assert_eq!(modified_seconds(&rig.remote("tree/a.txt")), 1_900_000_000);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn awkward_file_names_survive_the_copy_and_the_time_change() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    std::fs::create_dir_all(rig.local("tree")).unwrap();
+    std::fs::create_dir_all(rig.remote("tree")).unwrap();
+    for name in ["it's a $name.txt", "quote \"q\".txt", "caf\u{e9} \u{65e5}\u{672c}.txt", "semi;colon & more.txt"] {
+        std::fs::write(rig.local(&format!("tree/{name}")), b"x").unwrap();
+        stamp(&rig.local(&format!("tree/{name}")), 1_480_000_000);
+    }
+    let plan = rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.expect("a plan");
+
+    rig.run_sync(&plan).await;
+
+    assert_eq!(plan.items.len(), 4);
+    for name in ["it's a $name.txt", "quote \"q\".txt", "caf\u{e9} \u{65e5}\u{672c}.txt", "semi;colon & more.txt"] {
+        assert_eq!(modified_seconds(&rig.remote(&format!("tree/{name}"))), 1_480_000_000, "{name}");
+    }
+    assert!(rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sync_shows_up_in_the_history_like_any_other_transfer() {
+    let mut rig = rig(4, ConflictPolicy::Ask).await;
+    make_tree(&rig);
+    let plan = rig.scan_sync(sync_options(SyncDirection::LocalToRemote)).await.unwrap();
+    rig.run_sync(&plan).await;
+
+    let listed = rig.history().await;
+
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].files_total, 3);
+    assert_eq!(listed[0].result, HistoryResult::Done);
+}

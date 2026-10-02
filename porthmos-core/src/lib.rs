@@ -1,0 +1,233 @@
+#[cfg(not(unix))]
+compile_error!("porthmos only supports Unix-like platforms (Linux/macOS)");
+
+pub mod config;
+pub mod connections_tree;
+pub mod edit;
+mod engine;
+pub mod error;
+pub mod history;
+pub mod listing;
+pub mod paths;
+pub mod persist;
+pub mod profiles;
+mod protocol_info;
+pub mod secrets;
+pub mod state;
+pub mod sync;
+pub mod tasks;
+pub mod transfer;
+
+use std::{path::PathBuf, sync::Arc};
+
+use anyhow::{Context, Result};
+pub use engine::{Command, Event, Location, RequestId, SessionId};
+pub use error::{CONNECTION_CANCELLED, Severity, connect_failure_message, user_message};
+pub use paths::{ConfigMigration, Paths};
+pub use porthmos_vfs::{
+    Answer, Choice, CommonField, ConnectionForm, DirItem, Entry, Environment, ErrorKind, FileKind, FileSystem,
+    Metadata, OptionField, OptionKind, PortField, Protocol, ProtocolError, Question, SearchEvent, SearchQuery,
+    ShellInvocation, Target, path_to_remote_string,
+};
+pub use protocol_info::ProtocolInfo;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+
+use crate::{
+    config::Settings,
+    engine::{Engine, EngineParts},
+};
+
+#[cfg(feature = "sftp")]
+fn sftp_protocol() -> Option<Arc<dyn Protocol>> {
+    Some(Arc::new(porthmos_sftp::Sftp))
+}
+
+#[cfg(not(feature = "sftp"))]
+fn sftp_protocol() -> Option<Arc<dyn Protocol>> {
+    None
+}
+
+#[cfg(feature = "ftp")]
+fn ftp_protocol(paths: &Paths) -> Option<Arc<dyn Protocol>> {
+    Some(Arc::new(porthmos_ftp::Ftp::new(paths.known_certificates_file())))
+}
+
+#[cfg(not(feature = "ftp"))]
+fn ftp_protocol(_paths: &Paths) -> Option<Arc<dyn Protocol>> {
+    None
+}
+
+#[cfg(feature = "webdav")]
+fn webdav_protocol(paths: &Paths) -> Option<Arc<dyn Protocol>> {
+    Some(Arc::new(porthmos_webdav::WebDav::new(paths.known_certificates_file())))
+}
+
+#[cfg(not(feature = "webdav"))]
+fn webdav_protocol(_paths: &Paths) -> Option<Arc<dyn Protocol>> {
+    None
+}
+
+#[cfg(feature = "s3")]
+fn s3_protocol(paths: &Paths) -> Option<Arc<dyn Protocol>> {
+    Some(Arc::new(porthmos_s3::S3::new(paths.known_certificates_file())))
+}
+
+#[cfg(not(feature = "s3"))]
+fn s3_protocol(_paths: &Paths) -> Option<Arc<dyn Protocol>> {
+    None
+}
+
+#[cfg(feature = "scp")]
+fn scp_protocol() -> Option<Arc<dyn Protocol>> {
+    Some(Arc::new(porthmos_scp::Scp::default()))
+}
+
+#[cfg(not(feature = "scp"))]
+fn scp_protocol() -> Option<Arc<dyn Protocol>> {
+    None
+}
+
+pub fn builtin_protocols(paths: &Paths) -> Vec<Arc<dyn Protocol>> {
+    [sftp_protocol(), ftp_protocol(paths), webdav_protocol(paths), s3_protocol(paths), scp_protocol()]
+        .into_iter()
+        .flatten()
+        .collect()
+}
+
+#[derive(Clone)]
+pub struct CoreHandle {
+    commands: UnboundedSender<Command>,
+    protocols: Arc<[ProtocolInfo]>,
+    finished: tokio::sync::watch::Receiver<bool>,
+}
+
+impl CoreHandle {
+    pub fn send(&self, command: Command) {
+        let _ = self.commands.send(command);
+    }
+
+    pub fn protocols(&self) -> &[ProtocolInfo] {
+        &self.protocols
+    }
+
+    pub fn detached() -> (CoreHandle, UnboundedReceiver<Command>) {
+        Self::detached_with(Vec::new())
+    }
+
+    pub fn detached_with(protocols: Vec<ProtocolInfo>) -> (CoreHandle, UnboundedReceiver<Command>) {
+        let (commands, receiver) = unbounded_channel();
+        let (_sender, finished) = tokio::sync::watch::channel(false);
+        (CoreHandle { commands, protocols: protocols.into(), finished }, receiver)
+    }
+
+    pub async fn shutdown(&self) {
+        self.send(Command::Shutdown);
+        let mut finished = self.finished.clone();
+        let _ = finished.wait_for(|done| *done).await;
+    }
+}
+
+pub fn disable_core_dumps() {
+    let limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    unsafe {
+        libc::setrlimit(libc::RLIMIT_CORE, &limit);
+    }
+}
+
+pub struct Core;
+
+impl Core {
+    pub fn builder() -> CoreBuilder {
+        CoreBuilder::default()
+    }
+}
+
+#[derive(Default)]
+pub struct CoreBuilder {
+    paths: Option<Paths>,
+    env: Environment,
+    settings: Settings,
+    protocols: Option<Vec<Arc<dyn Protocol>>>,
+    local_home: Option<PathBuf>,
+    secrets: Option<secrets::Secrets>,
+}
+
+impl CoreBuilder {
+    pub fn paths(mut self, paths: Paths) -> Self {
+        self.paths = Some(paths);
+        self
+    }
+
+    pub fn environment(mut self, env: Environment) -> Self {
+        self.env = env;
+        self
+    }
+
+    pub fn settings(mut self, settings: Settings) -> Self {
+        self.settings = settings;
+        self
+    }
+
+    pub fn protocol(mut self, protocol: Arc<dyn Protocol>) -> Self {
+        self.protocols.get_or_insert_with(Vec::new).push(protocol);
+        self
+    }
+
+    pub fn local_home(mut self, home: PathBuf) -> Self {
+        self.local_home = Some(home);
+        self
+    }
+
+    pub fn secrets(mut self, secrets: secrets::Secrets) -> Self {
+        self.secrets = Some(secrets);
+        self
+    }
+
+    pub fn without_keyring(self) -> Self {
+        self.secrets(secrets::Secrets::new(None))
+    }
+
+    pub fn start(self) -> Result<(CoreHandle, UnboundedReceiver<Event>)> {
+        let paths = self.paths.context("the core needs its configuration paths")?;
+        let (history, history_warning) = history::History::load(&paths);
+        let (bookmarks, bookmark_warnings) = config::bookmarks::load(&paths)?;
+        let local_home = self.local_home.or_else(|| self.env.home.clone()).unwrap_or_else(|| PathBuf::from("/"));
+        let protocols = self.protocols.unwrap_or_else(|| builtin_protocols(&paths));
+        let infos: Arc<[ProtocolInfo]> =
+            protocols.iter().map(|protocol| ProtocolInfo::from_protocol(protocol.as_ref())).collect();
+        let parts = EngineParts {
+            paths,
+            protocols,
+            local_fs: Arc::new(porthmos_lfs::LocalFs::new(local_home)),
+            env: self.env,
+            transfers: self.settings.transfers,
+            bookmarks,
+            secrets: self.secrets.unwrap_or_else(secrets::Secrets::native),
+            history,
+            edit: self.settings.edit,
+            publish_interval: engine::PROGRESS_SNAPSHOT_INTERVAL,
+            persist_interval: engine::PERSIST_INTERVAL,
+        };
+
+        let (events, event_receiver) = unbounded_channel();
+        let (commands, command_receiver) = unbounded_channel();
+        let (internal, internal_receiver) = unbounded_channel();
+        let (finished_sender, finished) = tokio::sync::watch::channel(false);
+        let mut engine = Engine::new(parts, events.clone(), internal);
+        engine.finished = Some(finished_sender);
+        if let Some(warning) = history_warning {
+            engine.report(Severity::Warning, warning);
+        }
+        for warning in bookmark_warnings {
+            engine.report(Severity::Warning, warning.0);
+        }
+        engine.publish_bookmarks();
+        engine.publish_save_choice();
+        engine.start_keyring_probe();
+        tokio::spawn(engine.run(command_receiver, internal_receiver));
+        Ok((CoreHandle { commands, protocols: infos, finished }, event_receiver))
+    }
+}
+
+#[cfg(test)]
+mod tests;

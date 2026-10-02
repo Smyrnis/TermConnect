@@ -1,8 +1,12 @@
-# TermConnect
+<p align="center">
+  <img src="assets/icon/porthmos.svg" alt="Porthmos icon" width="128" height="128">
+</p>
 
-A terminal file manager: local files in one panel, an SSH/SFTP connection in
-the other, with saved connection profiles, bookmarks, search, and background
-file transfers between the two.
+# Porthmos
+
+A dual-panel file manager: local files in one panel, an SSH/SFTP connection
+in the other, with saved connection profiles, bookmarks, search, and background
+file transfers between the two. It currently runs in the terminal.
 
 ## Features
 
@@ -27,7 +31,7 @@ Requires a Rust toolchain supporting the 2024 edition (stable is fine).
 cargo build --release
 ```
 
-The binary is written to `target/release/termconnect`.
+The binary is written to `target/release/porthmos`.
 
 Optional: install [`sshpass`](https://linux.die.net/man/1/sshpass) if you
 want the F4 terminal handoff to use a saved profile password automatically,
@@ -35,6 +39,24 @@ instead of prompting for it again.
 
 **Platform:** Linux and macOS only — the app relies on Unix file
 permissions and process APIs throughout.
+
+## Project layout
+
+The repository is a Cargo workspace:
+
+- `porthmos-vfs` — the virtual filesystem contract every protocol
+  implements (`FileSystem`, `Protocol`, `Prompter`) and the shared file types.
+- `porthmos-lfs` — the local file system as a `FileSystem`.
+- `protocols/` — one crate per remote protocol, each depending only on
+  `porthmos-vfs`:
+  - `protocols/sftp` (`porthmos-sftp`) — SSH/SFTP: connecting,
+    authentication, host keys, `~/.ssh/config` discovery and the `ssh`
+    terminal hand-off.
+- `porthmos-core` — the UI-free engine: connections, listings, transfers,
+  search, profiles, bookmarks and settings. A frontend drives it by sending
+  commands and receiving events.
+- `porthmos-tui` — the terminal interface, built as the `porthmos`
+  binary.
 
 ## Keybindings
 
@@ -69,15 +91,35 @@ actual configured bindings rather than this table.
 ## Configuration
 
 Settings, saved connections, and bookmarks live under
-`$XDG_CONFIG_HOME/termconnect` (or `~/.config/termconnect` if unset):
+`$XDG_CONFIG_HOME/porthmos` (or `~/.config/porthmos` if unset):
 
-- `config.toml` — panel and key-binding settings.
+- `config.toml` — panel, transfer and key-binding settings. See
+  [`config/config.example.toml`](config/config.example.toml) for every
+  option with its default.
 - `connections.toml` — saved connection profiles.
 - `bookmarks.toml` — saved bookmarks.
 
-Logs go to `$XDG_STATE_HOME/termconnect/termconnect.log` (or
-`~/.local/state/termconnect/termconnect.log`); set `RUST_LOG` to control
+If you used this app under its old name, TermConnect, your old
+`termconnect` config folder is moved to the new location on first start,
+unless a `porthmos` folder already exists.
+
+Logs go to `$XDG_STATE_HOME/porthmos/porthmos.log` (or
+`~/.local/state/porthmos/porthmos.log`); set `RUST_LOG` to control
 verbosity.
+
+## Icon and brand colors
+
+The icon, `assets/icon/porthmos.svg`, shows a glowing blue strait flowing
+between dark, layered land. *Porthmos* (πορθμός) is Greek for "strait".
+
+Run `scripts/icons/generateIcons.sh` to export it as PNGs (16–1024 px) into
+`assets/icon/png/`; the PNGs are not committed. The script needs `rsvg-convert` or `resvg`, because the
+glow uses a blur filter.
+
+| Color | Hex |
+| --- | --- |
+| Land (dark charcoal) | `#101012` → `#2b2a30` |
+| Water (cyan to blue) | `#4fe3ff` → `#2fd8f8` → `#1aa6f2` → `#1668e6` |
 
 ## License
 

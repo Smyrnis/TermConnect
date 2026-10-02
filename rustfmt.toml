@@ -1,6 +1,10 @@
-# Run `cargo fmt` to format the code
-# 
 edition = "2024"
 max_width = 120
-use_small_heuristics = "Max"
+group_imports = "StdExternalCrate"
+imports_granularity = "Crate"
+format_code_in_doc_comments = false
+wrap_comments = false
+use_field_init_shorthand = true
+reorder_impl_items = true
 fn_params_layout = "Compressed"
+use_small_heuristics = "Max"
